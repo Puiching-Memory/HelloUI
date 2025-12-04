@@ -1,0 +1,92 @@
+## Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+## Visual Studio cache/options directory
+.vs/
+.vscode/
+
+## User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+## MSTest test Results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+
+## .NET Core
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+## NuGet Packages
+*.nupkg
+*.snupkg
+**/packages/*
+!**/packages/build/
+*.nuget.props
+*.nuget.targets
+
+## Publish profiles
+*.pubxml.user
+*.publishproj
+
+## Compiled files
+*.exe
+*.dll
+*.pdb
+*.cache
+*.ilk
+*.meta
+*.obj
+*.iobj
+*.pch
+*.ipdb
+*.pgc
+*.pgd
+*.rsp
+*.sbr
+*.tlb
+*.tli
+*.tlh
+*.tmp
+*.tmp_proj
+*.log
+*.vspscc
+*.vssscc
+.builds
+*.pidb
+*.svclog
+*.scc
+
+## Windows image file caches
+Thumbs.db
+ehthumbs.db
+
+## Folder config file
+Desktop.ini
+
+## Recycle Bin used on file shares
+$RECYCLE.BIN/
+
+## JetBrains Rider
+.idea/
+*.sln.iml
+
+## Publish output
+publish/
