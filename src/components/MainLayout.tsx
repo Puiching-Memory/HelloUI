@@ -9,6 +9,7 @@ import {
   AppsRegular,
   SettingsRegular,
   DatabaseRegular,
+  CodeRegular,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -53,15 +54,16 @@ const useStyles = makeStyles({
   },
 });
 
-export type PageType = 'home' | 'components' | 'settings' | 'weights';
+export type PageType = 'home' | 'components' | 'settings' | 'weights' | 'sdcpp';
 
 interface MainLayoutProps {
   currentPage: PageType;
   onPageChange: (page: PageType) => void;
   children: ReactNode;
+  navigationDisabled?: boolean;
 }
 
-export const MainLayout = ({ currentPage, onPageChange, children }: MainLayoutProps) => {
+export const MainLayout = ({ currentPage, onPageChange, children, navigationDisabled = false }: MainLayoutProps) => {
   const styles = useStyles();
 
   const navItems = [
@@ -74,6 +76,11 @@ export const MainLayout = ({ currentPage, onPageChange, children }: MainLayoutPr
       id: 'weights' as PageType,
       label: '模型权重管理',
       icon: <DatabaseRegular />,
+    },
+    {
+      id: 'sdcpp' as PageType,
+      label: 'SD.cpp 推理引擎',
+      icon: <CodeRegular />,
     },
     {
       id: 'components' as PageType,
@@ -103,6 +110,8 @@ export const MainLayout = ({ currentPage, onPageChange, children }: MainLayoutPr
             icon={item.icon}
             className={styles.navButton}
             onClick={() => onPageChange(item.id)}
+            disabled={navigationDisabled && currentPage !== item.id}
+            title={navigationDisabled && currentPage !== item.id ? '正在上传文件，请稍候...' : undefined}
           >
             {item.label}
           </Button>

@@ -1,3 +1,4 @@
+/// <reference types="../vite-env" />
 import {
   Card,
   Title1,
@@ -22,6 +23,9 @@ import {
   Input,
   Field,
   ProgressBar,
+  RadioGroup,
+  Radio,
+  Label,
 } from '@fluentui/react-components';
 import {
   ArrowUploadRegular,
@@ -53,6 +57,14 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: tokens.borderRadiusMedium,
   },
+  deviceSelection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+    padding: tokens.spacingVerticalM,
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: tokens.borderRadiusMedium,
+  },
   actions: {
     display: 'flex',
     gap: tokens.spacingHorizontalM,
@@ -68,24 +80,27 @@ const useStyles = makeStyles({
   },
 });
 
-interface WeightFile {
+interface EngineFile {
   name: string;
   size: number;
   path: string;
   modified: number;
 }
 
-interface ModelWeightsPageProps {
+type DeviceType = 'cpu' | 'vulkan' | 'cuda';
+
+interface SDCppPageProps {
   onUploadStateChange?: (isUploading: boolean) => void;
 }
 
-export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps) => {
+export const SDCppPage = ({ onUploadStateChange }: SDCppPageProps) => {
   const styles = useStyles();
-  const [weightsFolder, setWeightsFolder] = useState<string>('');
-  const [files, setFiles] = useState<WeightFile[]>([]);
+  const [engineFolder, setEngineFolder] = useState<string>('');
+  const [deviceType, setDeviceType] = useState<DeviceType>('cpu');
+  const [files, setFiles] = useState<EngineFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [fileToDelete, setFileToDelete] = useState<WeightFile | null>(null);
+  const [fileToDelete, setFileToDelete] = useState<EngineFile | null>(null);
   const [uploadProgress, setUploadProgress] = useState<{
     progress: number;
     fileName: string;
@@ -94,43 +109,52 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
   } | null>(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  // 加载权重文件夹路径
+  // 加载引擎文件夹路径和设备类型
   useEffect(() => {
-    loadWeightsFolder().catch(console.error);
+    loadEngineFolder().catch(console.error);
+    loadDeviceType().catch(console.error);
   }, []);
 
-  // 当文件夹路径改变时，加载文件列表
+  // 当文件夹路径或设备类型改变时，加载文件列表
   useEffect(() => {
-    if (weightsFolder) {
+    if (engineFolder && deviceType) {
       loadFiles();
     }
-  }, [weightsFolder]);
+  }, [engineFolder, deviceType]);
 
-  const loadWeightsFolder = async () => {
+  const loadEngineFolder = async () => {
     try {
-      // 先尝试获取已保存的文件夹路径
-      let folder = await window.ipcRenderer.invoke('weights:get-folder');
+      let folder = await window.ipcRenderer.invoke('sdcpp:get-folder');
       
-      // 如果没有保存的路径，则使用默认文件夹
       if (!folder) {
-        folder = await window.ipcRenderer.invoke('weights:init-default-folder');
-        // 保存默认文件夹路径
-        await window.ipcRenderer.invoke('weights:set-folder', folder);
+        folder = await window.ipcRenderer.invoke('sdcpp:init-default-folder');
+        await window.ipcRenderer.invoke('sdcpp:set-folder', folder);
       }
       
       if (folder) {
-        setWeightsFolder(folder);
+        setEngineFolder(folder);
       }
     } catch (error) {
-      console.error('加载权重文件夹失败:', error);
+      console.error('加载引擎文件夹失败:', error);
+    }
+  };
+
+  const loadDeviceType = async () => {
+    try {
+      const device = await window.ipcRenderer.invoke('sdcpp:get-device');
+      if (device) {
+        setDeviceType(device as DeviceType);
+      }
+    } catch (error) {
+      console.error('加载设备类型失败:', error);
     }
   };
 
   const loadFiles = async () => {
-    if (!weightsFolder) return;
+    if (!engineFolder || !deviceType) return;
     setLoading(true);
     try {
-      const fileList = await window.ipcRenderer.invoke('weights:list-files', weightsFolder);
+      const fileList = await window.ipcRenderer.invoke('sdcpp:list-files', engineFolder, deviceType);
       setFiles(fileList || []);
     } catch (error) {
       console.error('加载文件列表失败:', error);
@@ -141,20 +165,19 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
   };
 
   const handleSetFolder = async () => {
-    if (!weightsFolder.trim()) {
+    if (!engineFolder.trim()) {
       alert('请输入有效的文件夹路径');
       return;
     }
     
     try {
-      // 验证文件夹是否存在
-      const exists = await window.ipcRenderer.invoke('weights:check-folder', weightsFolder.trim());
+      const exists = await window.ipcRenderer.invoke('sdcpp:check-folder', engineFolder.trim());
       if (!exists) {
         alert('文件夹不存在，请检查路径是否正确');
         return;
       }
       
-      await window.ipcRenderer.invoke('weights:set-folder', weightsFolder.trim());
+      await window.ipcRenderer.invoke('sdcpp:set-folder', engineFolder.trim());
       await loadFiles();
     } catch (error) {
       console.error('设置文件夹失败:', error);
@@ -163,19 +186,27 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     }
   };
 
+  const handleDeviceTypeChange = async (value: DeviceType) => {
+    setDeviceType(value);
+    try {
+      await window.ipcRenderer.invoke('sdcpp:set-device', value);
+      await loadFiles();
+    } catch (error) {
+      console.error('设置设备类型失败:', error);
+    }
+  };
+
   const handleFolderPathChange = (value: string) => {
-    setWeightsFolder(value);
+    setEngineFolder(value);
   };
 
   const handleCancelUpload = async () => {
     try {
-      await window.ipcRenderer.invoke('weights:cancel-upload');
+      await window.ipcRenderer.invoke('sdcpp:cancel-upload');
       
-      // 清理状态
       setUploadProgress(null);
       setLoading(false);
       setIsUploading(false);
-      // 通知父组件上传结束，恢复导航
       onUploadStateChange?.(false);
     } catch (error) {
       console.error('取消上传失败:', error);
@@ -183,65 +214,53 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
   };
 
   const handleUpload = async () => {
-    if (!weightsFolder) return;
+    if (!engineFolder || !deviceType) return;
     try {
-      const filePath = await window.ipcRenderer.invoke('weights:select-file');
+      const filePath = await window.ipcRenderer.invoke('sdcpp:select-file');
       if (filePath) {
         const fileName = filePath.split(/[/\\]/).pop() || '文件';
         setLoading(true);
         setIsUploading(true);
         setUploadProgress({ progress: 0, fileName, copied: 0, total: 0 });
         
-        // 通知父组件开始上传，禁用导航
         onUploadStateChange?.(true);
         
-        // 监听上传进度
         const progressListener = (_: any, data: { progress: number; fileName: string; copied: number; total: number }) => {
           setUploadProgress(data);
         };
         
-        window.ipcRenderer.on('weights:upload-progress', progressListener);
+        window.ipcRenderer.on('sdcpp:upload-progress', progressListener);
         
         try {
-          const result = await window.ipcRenderer.invoke('weights:upload-file', filePath, weightsFolder);
+          const result = await window.ipcRenderer.invoke('sdcpp:upload-file', filePath, engineFolder, deviceType);
           
-          // 检查是否已取消
           if (result && result.cancelled) {
-            // 清除进度显示和加载状态
             setUploadProgress(null);
             setLoading(false);
             setIsUploading(false);
-            window.ipcRenderer.off('weights:upload-progress', progressListener);
-            // 通知父组件上传结束，恢复导航
+            window.ipcRenderer.off('sdcpp:upload-progress', progressListener);
             onUploadStateChange?.(false);
             return;
           }
           
-          // 检查是否因为重复文件而跳过
           if (result && result.skipped && result.reason === 'duplicate') {
-            // 清除进度显示和加载状态
             setUploadProgress(null);
             setLoading(false);
             setIsUploading(false);
-            window.ipcRenderer.off('weights:upload-progress', progressListener);
-            // 通知父组件上传结束，恢复导航
+            window.ipcRenderer.off('sdcpp:upload-progress', progressListener);
             onUploadStateChange?.(false);
-            // 显示提示信息
             alert(`文件已存在，跳过上传。\n\n已存在的文件: ${result.existingFile}\n当前文件: ${fileName}\n\n这两个文件的内容完全相同（哈希值一致）。`);
             await loadFiles();
             return;
           }
           
-          // 确保显示 100%
           setUploadProgress((prev) => prev ? { ...prev, progress: 100 } : null);
           await loadFiles();
         } finally {
-          window.ipcRenderer.off('weights:upload-progress', progressListener);
+          window.ipcRenderer.off('sdcpp:upload-progress', progressListener);
           setLoading(false);
           setIsUploading(false);
-          // 通知父组件上传结束，恢复导航
           onUploadStateChange?.(false);
-          // 延迟清除进度，让用户看到 100%
           setTimeout(() => setUploadProgress(null), 1000);
         }
       }
@@ -250,10 +269,8 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
       setUploadProgress(null);
       setLoading(false);
       setIsUploading(false);
-      // 通知父组件上传结束，恢复导航
       onUploadStateChange?.(false);
       
-      // 检查是否是取消操作导致的错误
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorCode = (error as any)?.code
       const isCancellationError = errorMessage.includes('上传已取消') || 
@@ -261,17 +278,16 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
         errorMessage.includes('ERR_STREAM_PREMATURE_CLOSE') ||
         errorCode === 'ERR_STREAM_PREMATURE_CLOSE';
       
-      // 如果是取消操作，不显示错误提示
       if (!isCancellationError) {
         alert(`上传文件失败: ${errorMessage}`);
       }
     }
   };
 
-  const handleDownload = async (file: WeightFile) => {
+  const handleDownload = async (file: EngineFile) => {
     try {
       setLoading(true);
-      await window.ipcRenderer.invoke('weights:download-file', file.path);
+      await window.ipcRenderer.invoke('sdcpp:download-file', file.path);
     } catch (error) {
       console.error('下载文件失败:', error);
     } finally {
@@ -279,7 +295,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     }
   };
 
-  const handleDeleteClick = (file: WeightFile) => {
+  const handleDeleteClick = (file: EngineFile) => {
     setFileToDelete(file);
     setDeleteDialogOpen(true);
   };
@@ -288,7 +304,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     if (!fileToDelete) return;
     try {
       setLoading(true);
-      await window.ipcRenderer.invoke('weights:delete-file', fileToDelete.path);
+      await window.ipcRenderer.invoke('sdcpp:delete-file', fileToDelete.path);
       await loadFiles();
       setDeleteDialogOpen(false);
       setFileToDelete(null);
@@ -311,21 +327,53 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     return new Date(timestamp).toLocaleString('zh-CN');
   };
 
+  const getDeviceLabel = (device: DeviceType): string => {
+    switch (device) {
+      case 'cpu':
+        return 'CPU';
+      case 'vulkan':
+        return 'Vulkan';
+      case 'cuda':
+        return 'CUDA';
+      default:
+        return device;
+    }
+  };
+
   return (
     <div className={styles.container}>
-      <Title1>模型权重管理</Title1>
+      <Title1>SD.cpp 推理引擎</Title1>
+
+      {/* 设备类型选择 */}
+      <Card className={styles.section}>
+        <Title2>推理设备选择</Title2>
+        <div className={styles.deviceSelection}>
+          <Label>选择推理设备类型</Label>
+          <RadioGroup
+            value={deviceType}
+            onChange={(_, data) => handleDeviceTypeChange(data.value as DeviceType)}
+          >
+            <Radio value="cpu" label="CPU" />
+            <Radio value="vulkan" label="Vulkan" />
+            <Radio value="cuda" label="CUDA" />
+          </RadioGroup>
+        </div>
+        <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalXS }}>
+          当前选择: {getDeviceLabel(deviceType)}。引擎文件将根据选择的设备类型存放在对应的子文件夹中。
+        </Body1>
+      </Card>
 
       {/* 文件夹路径输入区域 */}
       <Card className={styles.section}>
-        <Title2>权重文件夹路径</Title2>
+        <Title2>引擎文件夹路径</Title2>
         <div className={styles.folderPath}>
-          <Field label="权重文件夹路径" style={{ flex: 1 }}>
+          <Field label="引擎文件夹路径" style={{ flex: 1 }}>
             <Input
-              value={weightsFolder}
+              value={engineFolder}
               onChange={(_, data) => handleFolderPathChange(data.value)}
-              placeholder="默认使用应用数据目录下的 models 文件夹"
+              placeholder="默认使用应用数据目录下的 sdcpp-engines 文件夹"
               style={{ flex: 1 }}
-              readOnly={!!weightsFolder}
+              readOnly={!!engineFolder}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.currentTarget.readOnly) {
                   handleSetFolder();
@@ -333,20 +381,20 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
               }}
             />
           </Field>
-          {!weightsFolder ? (
+          {!engineFolder ? (
             <Button
               onClick={handleSetFolder}
               appearance="primary"
-              disabled={!weightsFolder || loading}
+              disabled={!engineFolder || loading}
             >
               使用自定义路径
             </Button>
           ) : null}
         </div>
         <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalXS }}>
-          {weightsFolder 
-            ? `使用文件夹: ${weightsFolder}。权重文件将自动扫描并显示在下方，可以上传（复制）权重文件到此文件夹。支持格式：bin, safetensors, pt, pth, onnx, ckpt, gguf`
-            : '默认使用应用数据目录下的 models 文件夹，也可以输入自定义路径。支持格式：bin, safetensors, pt, pth, onnx, ckpt, gguf'}
+          {engineFolder 
+            ? `使用文件夹: ${engineFolder}。引擎文件将根据设备类型存放在 ${deviceType} 子文件夹中。支持格式：exe, dll, so, dylib, bin`
+            : '默认使用应用数据目录下的 sdcpp-engines 文件夹，也可以输入自定义路径。支持格式：exe, dll, so, dylib, bin'}
         </Body1>
       </Card>
 
@@ -356,14 +404,14 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
           <Button
             icon={<ArrowUploadRegular />}
             onClick={handleUpload}
-            disabled={!weightsFolder || loading}
+            disabled={!engineFolder || !deviceType || loading}
             appearance="primary"
           >
-            上传权重
+            上传引擎
           </Button>
           <Button
             onClick={loadFiles}
-            disabled={!weightsFolder || loading}
+            disabled={!engineFolder || !deviceType || loading}
           >
             刷新列表
           </Button>
@@ -396,7 +444,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
 
       {/* 文件列表 */}
       <Card className={styles.section}>
-        <Title2>权重文件列表</Title2>
+        <Title2>引擎文件列表 ({getDeviceLabel(deviceType)})</Title2>
         {loading && files.length === 0 ? (
           <div className={styles.emptyState}>
             <Spinner size="large" />
@@ -404,9 +452,9 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
           </div>
         ) : files.length === 0 ? (
           <div className={styles.emptyState}>
-            <Body1>暂无权重文件</Body1>
+            <Body1>暂无引擎文件</Body1>
             <Body1 style={{ fontSize: tokens.fontSizeBase200, marginTop: tokens.spacingVerticalS }}>
-              {weightsFolder ? '请上传权重文件' : '请先选择权重文件夹'}
+              {engineFolder && deviceType ? '请上传引擎文件' : '请先选择引擎文件夹和设备类型'}
             </Body1>
           </div>
         ) : (
