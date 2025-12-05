@@ -41,18 +41,6 @@ function domReady(condition: DocumentReadyState[] = ['complete', 'interactive'])
   })
 }
 
-const safeDOM = {
-  append(parent: HTMLElement, child: HTMLElement) {
-    if (!Array.from(parent.children).find(c => c === child)) {
-      return parent.appendChild(child)
-    }
-  },
-  remove(parent: HTMLElement, child: HTMLElement) {
-    if (Array.from(parent.children).find(c => c === child)) {
-      return parent.removeChild(child)
-    }
-  },
-}
 
 // --------- Loading ---------
 function useLoading() {
@@ -102,22 +90,27 @@ function useLoading() {
 
   return {
     appendLoading() {
-      safeDOM.append(document.head, oStyle)
-      safeDOM.append(document.body, oDiv)
+      document.head.appendChild(oStyle)
+      document.body.appendChild(oDiv)
     },
     removeLoading() {
-      safeDOM.remove(document.head, oStyle)
-      safeDOM.remove(document.body, oDiv)
+      document.head.removeChild(oStyle)
+      document.body.removeChild(oDiv)
     },
   }
 }
 
 const { appendLoading, removeLoading } = useLoading()
-domReady().then(appendLoading)
+
+// 等待 DOM 就绪后再添加加载动画
+domReady().then(() => {
+  // DOM 就绪后添加加载动画
+  appendLoading()
+  // 然后立即移除（因为 DOM 已经就绪，不需要显示加载动画）
+  setTimeout(removeLoading, 0)
+})
 
 window.onmessage = (ev) => {
   ev.data.payload === 'removeLoading' && removeLoading()
 }
-
-setTimeout(removeLoading, 4999)
 
