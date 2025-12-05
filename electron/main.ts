@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron'
-import { join, basename, extname, resolve } from 'path'
+import { join, basename, extname, resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { promises as fs } from 'fs'
 import { existsSync, createReadStream, createWriteStream } from 'fs'
@@ -41,10 +41,6 @@ function createWindow() {
     },
   })
 
-  // Test active push message to Renderer-process.
-  win.webContents.on('did-finish-load', () => {
-    win?.webContents.send('main-process-message', new Date().toLocaleString())
-  })
 
   if (url) {
     // electron-vite-vue#298
@@ -84,7 +80,6 @@ interface UploadState {
 }
 
 let currentUpload: UploadState | null = null
-let currentSDCppUpload: UploadState | null = null
 
 // 获取默认的 models 文件夹路径
 function getDefaultModelsFolder(): string {
@@ -97,23 +92,31 @@ async function initDefaultModelsFolder(): Promise<string> {
   const defaultFolder = getDefaultModelsFolder()
   if (!existsSync(defaultFolder)) {
     await fs.mkdir(defaultFolder, { recursive: true })
-    console.log(`[Main] 创建默认 models 文件夹: ${defaultFolder}`)
+    console.log(`[Main] Created default models folder: ${defaultFolder}`)
   }
   return defaultFolder
 }
 
-// 获取默认的 SD.cpp 引擎文件夹路径
+// 获取默认的 SD.cpp 引擎文件夹路径（运行位置目录下的engines/sdcpp文件夹）
 function getDefaultSDCppFolder(): string {
-  const userDataPath = app.getPath('userData')
-  return join(userDataPath, 'sdcpp-engines')
+  // 获取运行位置目录（可执行文件所在目录）
+  let runPath: string
+  if (app.isPackaged) {
+    // 已打包：使用可执行文件所在目录
+    runPath = dirname(process.execPath)
+  } else {
+    // 开发环境：使用项目根目录（__dirname指向dist-electron，需要回到项目根目录）
+    runPath = join(__dirname, '..')
+  }
+  return join(runPath, 'engines', 'sdcpp')
 }
 
-// 初始化默认 SD.cpp 引擎文件夹
+// 初始化默认 SD.cpp 引擎文件夹（运行位置目录下的engines/sdcpp文件夹）
 async function initDefaultSDCppFolder(): Promise<string> {
   const defaultFolder = getDefaultSDCppFolder()
   if (!existsSync(defaultFolder)) {
     await fs.mkdir(defaultFolder, { recursive: true })
-    console.log(`[Main] 创建默认 SD.cpp 引擎文件夹: ${defaultFolder}`)
+    console.log(`[Main] Created default SD.cpp engine folder: ${defaultFolder}`)
   }
   // 创建设备子文件夹
   const deviceFolders = ['cpu', 'vulkan', 'cuda']
@@ -121,16 +124,11 @@ async function initDefaultSDCppFolder(): Promise<string> {
     const deviceFolder = join(defaultFolder, device)
     if (!existsSync(deviceFolder)) {
       await fs.mkdir(deviceFolder, { recursive: true })
-      console.log(`[Main] 创建设备文件夹: ${deviceFolder}`)
+      console.log(`[Main] Created device folder: ${deviceFolder}`)
     }
   }
   return defaultFolder
 }
-
-// IPC 处理程序：获取默认 models 文件夹路径
-ipcMain.handle('weights:get-default-folder', async () => {
-  return getDefaultModelsFolder()
-})
 
 // IPC 处理程序：初始化默认 models 文件夹
 ipcMain.handle('weights:init-default-folder', async () => {
@@ -139,7 +137,7 @@ ipcMain.handle('weights:init-default-folder', async () => {
     weightsFolderPath = folder
     return folder
   } catch (error) {
-    console.error('初始化默认文件夹失败:', error)
+    console.error('Failed to initialize default folder:', error)
     throw error
   }
 })
@@ -149,7 +147,7 @@ ipcMain.handle('weights:check-folder', async (_, folderPath: string) => {
   try {
     return existsSync(folderPath)
   } catch (error) {
-    console.error('检查文件夹失败:', error)
+    console.error('Failed to check folder:', error)
     return false
   }
 })
@@ -192,7 +190,7 @@ ipcMain.handle('weights:list-files', async (_, folder: string) => {
     files.sort((a, b) => b.modified - a.modified)
     return files
   } catch (error) {
-    console.error('列出文件失败:', error)
+    console.error('Failed to list files:', error)
     return []
   }
 })
@@ -297,7 +295,7 @@ async function findDuplicateFile(targetFolder: string, sourcePath: string, sourc
             candidates.push({ path: filePath, size: stats.size })
           }
         } catch (error) {
-          console.warn(`获取文件信息失败: ${filePath}`, error)
+          console.warn(`Failed to get file info: ${filePath}`, error)
         }
       }
     }
@@ -317,13 +315,13 @@ async function findDuplicateFile(targetFolder: string, sourcePath: string, sourc
         }
       } catch (error) {
         // 如果计算某个文件的哈希失败，继续检查下一个文件
-        console.warn(`计算文件哈希失败: ${candidate.path}`, error)
+        console.warn(`Failed to calculate file hash: ${candidate.path}`, error)
       }
     }
     
     return null
   } catch (error) {
-    console.error('检查文件重复失败:', error)
+    console.error('Failed to check file duplicates:', error)
     return null
   }
 }
@@ -347,7 +345,7 @@ ipcMain.handle('weights:cancel-upload', async () => {
         await fs.unlink(currentUpload.targetPath)
       }
     } catch (error) {
-      console.warn('删除部分复制的文件失败:', error)
+      console.warn('Failed to delete partially copied file:', error)
     }
     
     currentUpload = null
@@ -448,7 +446,7 @@ ipcMain.handle('weights:upload-file', async (event, sourcePath: string, targetFo
         ))
       
       if (!isStreamDestroyedError) {
-        console.error('读取流错误:', error)
+        console.error('Read stream error:', error)
       }
     })
     
@@ -467,7 +465,7 @@ ipcMain.handle('weights:upload-file', async (event, sourcePath: string, targetFo
         ))
       
       if (!isStreamDestroyedError) {
-        console.error('写入流错误:', error)
+        console.error('Write stream error:', error)
       }
     })
     
@@ -486,7 +484,7 @@ ipcMain.handle('weights:upload-file', async (event, sourcePath: string, targetFo
             await fs.unlink(uploadState.targetPath)
           }
         } catch (unlinkError) {
-          console.warn('删除部分复制的文件失败:', unlinkError)
+          console.warn('Failed to delete partially copied file:', unlinkError)
         }
         return {
           success: false,
@@ -531,7 +529,7 @@ ipcMain.handle('weights:upload-file', async (event, sourcePath: string, targetFo
               await fs.unlink(uploadState.targetPath)
             }
           } catch (unlinkError) {
-            console.warn('删除部分复制的文件失败:', unlinkError)
+            console.warn('Failed to delete partially copied file:', unlinkError)
           }
         }
         return {
@@ -547,7 +545,7 @@ ipcMain.handle('weights:upload-file', async (event, sourcePath: string, targetFo
           await fs.unlink(targetPath)
         }
       } catch (unlinkError) {
-        console.warn('删除部分复制的文件失败:', unlinkError)
+        console.warn('Failed to delete partially copied file:', unlinkError)
       }
       
       throw error
@@ -556,7 +554,7 @@ ipcMain.handle('weights:upload-file', async (event, sourcePath: string, targetFo
     // 清理状态
     currentUpload = null
     
-    console.error('上传文件失败:', error)
+    console.error('Failed to upload file:', error)
     throw error
   }
 })
@@ -584,7 +582,7 @@ ipcMain.handle('weights:download-file', async (_, filePath: string) => {
     }
     return false
   } catch (error) {
-    console.error('下载文件失败:', error)
+    console.error('Failed to download file:', error)
     throw error
   }
 })
@@ -595,56 +593,45 @@ ipcMain.handle('weights:delete-file', async (_, filePath: string) => {
     await fs.unlink(filePath)
     return true
   } catch (error) {
-    console.error('删除文件失败:', error)
+    console.error('Failed to delete file:', error)
     throw error
   }
 })
 
 // ========== SD.cpp 引擎相关 IPC 处理程序 ==========
 
-// IPC 处理程序：获取默认 SD.cpp 引擎文件夹路径
-ipcMain.handle('sdcpp:get-default-folder', async () => {
-  return getDefaultSDCppFolder()
-})
-
-// IPC 处理程序：初始化默认 SD.cpp 引擎文件夹
+// IPC 处理程序：初始化默认 SD.cpp 引擎文件夹（运行位置目录下的engines/sdcpp文件夹）
 ipcMain.handle('sdcpp:init-default-folder', async () => {
   try {
     const folder = await initDefaultSDCppFolder()
     sdcppFolderPath = folder
+    console.log(`[Main] SD.cpp engine search path (运行位置目录/engines/sdcpp): ${folder}`)
+    // 确保设备子文件夹存在
+    const deviceFolders = ['cpu', 'vulkan', 'cuda']
+    for (const device of deviceFolders) {
+      const deviceFolder = join(folder, device)
+      if (!existsSync(deviceFolder)) {
+        await fs.mkdir(deviceFolder, { recursive: true })
+      }
+      console.log(`[Main] SD.cpp engine device folder (${device}): ${deviceFolder}`)
+    }
     return folder
   } catch (error) {
-    console.error('初始化默认 SD.cpp 引擎文件夹失败:', error)
+    console.error('Failed to initialize default SD.cpp engine folder:', error)
     throw error
   }
 })
 
-// IPC 处理程序：检查文件夹是否存在
-ipcMain.handle('sdcpp:check-folder', async (_, folderPath: string) => {
-  try {
-    return existsSync(folderPath)
-  } catch (error) {
-    console.error('检查文件夹失败:', error)
-    return false
-  }
-})
 
-// IPC 处理程序：设置 SD.cpp 引擎文件夹
-ipcMain.handle('sdcpp:set-folder', async (_, folder: string) => {
-  sdcppFolderPath = folder
-  // 确保设备子文件夹存在
-  const deviceFolders = ['cpu', 'vulkan', 'cuda']
-  for (const device of deviceFolders) {
-    const deviceFolder = join(folder, device)
-    if (!existsSync(deviceFolder)) {
-      await fs.mkdir(deviceFolder, { recursive: true })
-    }
-  }
-  return true
-})
-
-// IPC 处理程序：获取 SD.cpp 引擎文件夹
+// IPC 处理程序：获取 SD.cpp 引擎文件夹（运行位置目录下的engines/sdcpp文件夹）
 ipcMain.handle('sdcpp:get-folder', async () => {
+  // 如果还没有设置路径，使用默认路径
+  if (!sdcppFolderPath) {
+    sdcppFolderPath = getDefaultSDCppFolder()
+  }
+  if (sdcppFolderPath) {
+    console.log(`[Main] SD.cpp engine search path (运行位置目录/engines/sdcpp): ${sdcppFolderPath}`)
+  }
   return sdcppFolderPath
 })
 
@@ -663,7 +650,9 @@ ipcMain.handle('sdcpp:get-device', async () => {
 ipcMain.handle('sdcpp:list-files', async (_, folder: string, deviceType: 'cpu' | 'vulkan' | 'cuda') => {
   try {
     const deviceFolder = join(folder, deviceType)
+    console.log(`[Main] SD.cpp engine search path (${deviceType}): ${deviceFolder}`)
     if (!existsSync(deviceFolder)) {
+      console.log(`[Main] SD.cpp engine device folder does not exist: ${deviceFolder}`)
       return []
     }
     
@@ -674,9 +663,9 @@ ipcMain.handle('sdcpp:list-files', async (_, folder: string, deviceType: 'cpu' |
       if (entry.isFile()) {
         const filePath = join(deviceFolder, entry.name)
         const stats = await fs.stat(filePath)
-        // 只列出引擎相关文件
+        // 只列出引擎相关文件（参考 engines/sdcpp 结构：.exe, .dll, .txt 等）
         const ext = extname(entry.name).toLowerCase()
-        const engineExtensions = ['.exe', '.dll', '.so', '.dylib', '.bin']
+        const engineExtensions = ['.exe', '.dll', '.so', '.dylib', '.bin', '.txt']
         if (engineExtensions.includes(ext)) {
           files.push({
             name: entry.name,
@@ -692,262 +681,11 @@ ipcMain.handle('sdcpp:list-files', async (_, folder: string, deviceType: 'cpu' |
     files.sort((a, b) => b.modified - a.modified)
     return files
   } catch (error) {
-    console.error('列出文件失败:', error)
+    console.error('Failed to list files:', error)
     return []
   }
 })
 
-// IPC 处理程序：选择要上传的文件
-ipcMain.handle('sdcpp:select-file', async () => {
-  const window = win || BrowserWindow.getFocusedWindow()
-  if (!window) {
-    throw new Error('没有可用的窗口')
-  }
-  
-  const result = await dialog.showOpenDialog(window, {
-    properties: ['openFile'],
-    title: '选择要上传的引擎文件',
-    filters: [
-      { name: '引擎文件', extensions: ['exe', 'dll', 'so', 'dylib', 'bin'] },
-      { name: '所有文件', extensions: ['*'] },
-    ],
-  })
-  
-  if (result.canceled || result.filePaths.length === 0) {
-    return null
-  }
-  
-  return result.filePaths[0]
-})
-
-// IPC 处理程序：取消上传
-ipcMain.handle('sdcpp:cancel-upload', async () => {
-  if (currentSDCppUpload) {
-    currentSDCppUpload.cancelled = true
-    
-    // 停止流
-    if (currentSDCppUpload.readStream) {
-      currentSDCppUpload.readStream.destroy()
-    }
-    if (currentSDCppUpload.writeStream) {
-      currentSDCppUpload.writeStream.destroy()
-    }
-    
-    // 删除部分复制的文件
-    try {
-      if (existsSync(currentSDCppUpload.targetPath)) {
-        await fs.unlink(currentSDCppUpload.targetPath)
-      }
-    } catch (error) {
-      console.warn('删除部分复制的文件失败:', error)
-    }
-    
-    currentSDCppUpload = null
-    return { success: true }
-  }
-  return { success: false, message: '没有正在进行的上传' }
-})
-
-// IPC 处理程序：上传文件（复制到引擎文件夹，带进度）
-ipcMain.handle('sdcpp:upload-file', async (event, sourcePath: string, targetFolder: string, deviceType: 'cpu' | 'vulkan' | 'cuda') => {
-  try {
-    const deviceFolder = join(targetFolder, deviceType)
-    if (!existsSync(deviceFolder)) {
-      await fs.mkdir(deviceFolder, { recursive: true })
-    }
-    
-    const fileName = basename(sourcePath)
-    
-    // 获取源文件大小
-    const sourceStats = await fs.stat(sourcePath)
-    const sourceSize = sourceStats.size
-    
-    // 检查重复文件
-    const existingFile = await findDuplicateFile(deviceFolder, sourcePath, sourceSize)
-    if (existingFile) {
-      const existingFileName = basename(existingFile)
-      return {
-        success: false,
-        skipped: true,
-        reason: 'duplicate',
-        existingFile: existingFileName,
-        message: `文件已存在: ${existingFileName}`,
-      }
-    }
-    
-    let targetPath = join(deviceFolder, fileName)
-    
-    // 如果目标文件已存在（同名但不同哈希），添加时间戳
-    if (existsSync(targetPath)) {
-      const ext = extname(fileName)
-      const name = basename(fileName, ext)
-      const timestamp = Date.now()
-      const newFileName = `${name}_${timestamp}${ext}`
-      targetPath = join(deviceFolder, newFileName)
-    }
-    
-    // 获取源文件大小
-    const stats = await fs.stat(sourcePath)
-    const totalSize = stats.size
-    let copiedSize = 0
-    
-    // 使用流式复制以支持进度跟踪
-    const readStream = createReadStream(sourcePath)
-    const writeStream = createWriteStream(targetPath)
-    
-    // 存储当前上传状态
-    currentSDCppUpload = {
-      readStream,
-      writeStream,
-      targetPath,
-      cancelled: false,
-    }
-    
-    // 监听数据块，更新进度
-    readStream.on('data', (chunk: Buffer | string) => {
-      // 检查是否已取消
-      if (currentSDCppUpload?.cancelled) {
-        readStream.destroy()
-        writeStream.destroy()
-        return
-      }
-      
-      const chunkSize = Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk)
-      copiedSize += chunkSize
-      const progress = Math.round((copiedSize / totalSize) * 100)
-      // 发送进度更新到渲染进程
-      event.sender.send('sdcpp:upload-progress', {
-        progress,
-        copied: copiedSize,
-        total: totalSize,
-        fileName: fileName,
-      })
-    })
-    
-    // 监听错误
-    readStream.on('error', (error) => {
-      if (currentSDCppUpload?.cancelled) {
-        return
-      }
-      const errorCode = (error as any)?.code
-      const isStreamDestroyedError = errorCode === 'ERR_STREAM_DESTROYED' ||
-        errorCode === 'ERR_STREAM_PREMATURE_CLOSE' ||
-        (error instanceof Error && (
-          error.message.includes('destroyed') ||
-          error.message.includes('Premature close')
-        ))
-      
-      if (!isStreamDestroyedError) {
-        console.error('读取流错误:', error)
-      }
-    })
-    
-    writeStream.on('error', (error) => {
-      if (currentSDCppUpload?.cancelled) {
-        return
-      }
-      const errorCode = (error as any)?.code
-      const isStreamDestroyedError = errorCode === 'ERR_STREAM_DESTROYED' ||
-        errorCode === 'ERR_STREAM_PREMATURE_CLOSE' ||
-        (error instanceof Error && (
-          error.message.includes('destroyed') ||
-          error.message.includes('Premature close')
-        ))
-      
-      if (!isStreamDestroyedError) {
-        console.error('写入流错误:', error)
-      }
-    })
-    
-    try {
-      // 使用 pipeline 确保流正确关闭
-      await pipeline(readStream, writeStream)
-      
-      // 检查是否已取消
-      if (currentSDCppUpload?.cancelled) {
-        // 清理状态
-        const uploadState = currentSDCppUpload
-        currentSDCppUpload = null
-        // 删除部分复制的文件
-        try {
-          if (existsSync(uploadState.targetPath)) {
-            await fs.unlink(uploadState.targetPath)
-          }
-        } catch (unlinkError) {
-          console.warn('删除部分复制的文件失败:', unlinkError)
-        }
-        return {
-          success: false,
-          cancelled: true,
-          message: '上传已取消',
-        }
-      }
-      
-      // 发送最终进度（100%）
-      event.sender.send('sdcpp:upload-progress', {
-        progress: 100,
-        copied: totalSize,
-        total: totalSize,
-        fileName: fileName,
-      })
-      
-      // 清理状态
-      currentSDCppUpload = null
-      
-      return { success: true, targetPath, skipped: false }
-    } catch (error) {
-      const wasCancelled = currentSDCppUpload?.cancelled || false
-      // 清理状态
-      const uploadState = currentSDCppUpload
-      currentSDCppUpload = null
-      
-      // 检查是否是取消操作导致的错误
-      const errorCode = (error as any)?.code
-      const isCancellationError = wasCancelled || 
-        (error instanceof Error && (
-          error.message.includes('destroyed') ||
-          error.message.includes('Premature close') ||
-          error.message.includes('ERR_STREAM_PREMATURE_CLOSE') ||
-          errorCode === 'ERR_STREAM_PREMATURE_CLOSE'
-        ))
-      
-      if (isCancellationError) {
-        // 删除部分复制的文件
-        if (uploadState) {
-          try {
-            if (existsSync(uploadState.targetPath)) {
-              await fs.unlink(uploadState.targetPath)
-            }
-          } catch (unlinkError) {
-            console.warn('删除部分复制的文件失败:', unlinkError)
-          }
-        }
-        return {
-          success: false,
-          cancelled: true,
-          message: '上传已取消',
-        }
-      }
-      
-      // 删除部分复制的文件
-      try {
-        if (existsSync(targetPath)) {
-          await fs.unlink(targetPath)
-        }
-      } catch (unlinkError) {
-        console.warn('删除部分复制的文件失败:', unlinkError)
-      }
-      
-      throw error
-    }
-  } catch (error) {
-    // 清理状态
-    currentSDCppUpload = null
-    
-    console.error('上传文件失败:', error)
-    throw error
-  }
-})
 
 // IPC 处理程序：下载文件（复制到用户选择的位置）
 ipcMain.handle('sdcpp:download-file', async (_, filePath: string) => {
@@ -972,7 +710,7 @@ ipcMain.handle('sdcpp:download-file', async (_, filePath: string) => {
     }
     return false
   } catch (error) {
-    console.error('下载文件失败:', error)
+    console.error('Failed to download file:', error)
     throw error
   }
 })
@@ -983,7 +721,7 @@ ipcMain.handle('sdcpp:delete-file', async (_, filePath: string) => {
     await fs.unlink(filePath)
     return true
   } catch (error) {
-    console.error('删除文件失败:', error)
+    console.error('Failed to delete file:', error)
     throw error
   }
 })
