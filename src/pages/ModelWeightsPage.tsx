@@ -22,6 +22,7 @@ import {
   Input,
   Field,
   ProgressBar,
+  Tooltip,
 } from '@fluentui/react-components';
 import {
   ArrowUploadRegular,
@@ -65,6 +66,28 @@ const useStyles = makeStyles({
     textAlign: 'center',
     padding: tokens.spacingVerticalXXL,
     color: tokens.colorNeutralForeground3,
+  },
+  truncatedText: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    display: 'block',
+    width: '100%',
+  },
+  tableCellFileName: {
+    maxWidth: '400px',
+    minWidth: '200px',
+    overflow: 'hidden',
+  },
+  tableCellSize: {
+    maxWidth: '150px',
+    minWidth: '100px',
+    overflow: 'hidden',
+  },
+  tableCellDate: {
+    maxWidth: '200px',
+    minWidth: '150px',
+    overflow: 'hidden',
   },
 });
 
@@ -122,7 +145,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
         setWeightsFolder(folder);
       }
     } catch (error) {
-      console.error('加载权重文件夹失败:', error);
+      console.error('Failed to load weights folder:', error);
     }
   };
 
@@ -133,7 +156,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
       const fileList = await window.ipcRenderer.invoke('weights:list-files', weightsFolder);
       setFiles(fileList || []);
     } catch (error) {
-      console.error('加载文件列表失败:', error);
+      console.error('Failed to load file list:', error);
       setFiles([]);
     } finally {
       setLoading(false);
@@ -157,7 +180,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
       await window.ipcRenderer.invoke('weights:set-folder', weightsFolder.trim());
       await loadFiles();
     } catch (error) {
-      console.error('设置文件夹失败:', error);
+      console.error('Failed to set folder:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       alert(`设置文件夹失败: ${errorMessage}`);
     }
@@ -178,7 +201,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
       // 通知父组件上传结束，恢复导航
       onUploadStateChange?.(false);
     } catch (error) {
-      console.error('取消上传失败:', error);
+      console.error('Failed to cancel upload:', error);
     }
   };
 
@@ -246,7 +269,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
         }
       }
     } catch (error) {
-      console.error('上传文件失败:', error);
+      console.error('Failed to upload file:', error);
       setUploadProgress(null);
       setLoading(false);
       setIsUploading(false);
@@ -273,7 +296,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
       setLoading(true);
       await window.ipcRenderer.invoke('weights:download-file', file.path);
     } catch (error) {
-      console.error('下载文件失败:', error);
+      console.error('Failed to download file:', error);
     } finally {
       setLoading(false);
     }
@@ -293,7 +316,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
       setDeleteDialogOpen(false);
       setFileToDelete(null);
     } catch (error) {
-      console.error('删除文件失败:', error);
+      console.error('Failed to delete file:', error);
     } finally {
       setLoading(false);
     }
@@ -423,14 +446,26 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
               <TableBody>
                 {files.map((file) => (
                   <TableRow key={file.path}>
-                    <TableCell>
-                      <Body1>{file.name}</Body1>
+                    <TableCell className={styles.tableCellFileName}>
+                      <Tooltip content={file.name} relationship="label">
+                        <div className={styles.truncatedText} title={file.name}>
+                          <Body1>{file.name}</Body1>
+                        </div>
+                      </Tooltip>
                     </TableCell>
-                    <TableCell>
-                      <Body1>{formatFileSize(file.size)}</Body1>
+                    <TableCell className={styles.tableCellSize}>
+                      <Tooltip content={formatFileSize(file.size)} relationship="label">
+                        <div className={styles.truncatedText} title={formatFileSize(file.size)}>
+                          <Body1>{formatFileSize(file.size)}</Body1>
+                        </div>
+                      </Tooltip>
                     </TableCell>
-                    <TableCell>
-                      <Body1>{formatDate(file.modified)}</Body1>
+                    <TableCell className={styles.tableCellDate}>
+                      <Tooltip content={formatDate(file.modified)} relationship="label">
+                        <div className={styles.truncatedText} title={formatDate(file.modified)}>
+                          <Body1>{formatDate(file.modified)}</Body1>
+                        </div>
+                      </Tooltip>
                     </TableCell>
                     <TableCell>
                       <div style={{ display: 'flex', gap: tokens.spacingHorizontalS }}>

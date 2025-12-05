@@ -6,7 +6,6 @@ import { ComponentsPage } from './pages/ComponentsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ModelWeightsPage } from './pages/ModelWeightsPage';
 import { SDCppPage } from './pages/SDCppPage';
-import './App.css';
 
 function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -54,7 +53,7 @@ function App() {
         {currentPage === 'weights' ? (
           <ModelWeightsPage onUploadStateChange={setIsUploading} />
         ) : currentPage === 'sdcpp' ? (
-          <SDCppPage onUploadStateChange={setIsUploading} />
+          <SDCppPage />
         ) : (
           renderPage()
         )}
