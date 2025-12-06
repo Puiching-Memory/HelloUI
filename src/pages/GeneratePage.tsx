@@ -21,6 +21,7 @@ import {
 } from '@fluentui/react-icons';
 import { PhotoView } from 'react-photo-view';
 import { useState, useEffect, useRef } from 'react';
+import { useIpcListener } from '../hooks/useIpcListener';
 
 const useStyles = makeStyles({
   container: {
@@ -202,8 +203,6 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
   const [cliOutput, setCliOutput] = useState<Array<{ type: 'stdout' | 'stderr'; text: string; timestamp: number }>>([]);
   const [cliOutputExpanded, setCliOutputExpanded] = useState(false);
   const cliOutputRef = useRef<HTMLDivElement>(null);
-  const cliOutputListenerRef = useRef<((_event: unknown, data: { type: 'stdout' | 'stderr'; text: string }) => void) | null>(null);
-  const previewListenerRef = useRef<((_event: unknown, data: { previewImage?: string }) => void) | null>(null);
   
   // 新增参数状态
   const [samplingMethod, setSamplingMethod] = useState<string>('euler_a');
@@ -257,79 +256,27 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
   }, []);
 
   // 监听 CLI 输出
-  useEffect(() => {
-    // 检查 ipcRenderer 是否可用
-    if (!window.ipcRenderer) {
-      console.error('window.ipcRenderer is not available');
-      return;
-    }
-
-    // 如果监听器已存在，先移除它（防止重复注册）
-    if (cliOutputListenerRef.current) {
-      window.ipcRenderer.off('generate:cli-output', cliOutputListenerRef.current);
-      cliOutputListenerRef.current = null;
-    }
-
-    // 先移除所有该事件的监听器，确保没有重复注册（针对 React Strict Mode）
-    window.ipcRenderer.removeAllListeners('generate:cli-output');
-
-    const cliOutputListener = (_event: unknown, data: { type: 'stdout' | 'stderr'; text: string }) => {
+  useIpcListener<{ type: 'stdout' | 'stderr'; text: string }>(
+    'generate:cli-output',
+    (data) => {
       // 清理 ANSI 转义序列
       const cleanedText = stripAnsiCodes(data.text);
       // 如果清理后的文本不为空，才添加到输出中
       if (cleanedText.trim()) {
         setCliOutput(prev => [...prev, { ...data, text: cleanedText, timestamp: Date.now() }]);
       }
-    };
-
-    // 保存监听器引用
-    cliOutputListenerRef.current = cliOutputListener;
-
-    window.ipcRenderer.on('generate:cli-output', cliOutputListener);
-
-    return () => {
-      if (window.ipcRenderer && cliOutputListenerRef.current) {
-        window.ipcRenderer.off('generate:cli-output', cliOutputListenerRef.current);
-        cliOutputListenerRef.current = null;
-      }
-    };
-  }, []);
+    }
+  );
 
   // 监听预览图片更新
-  useEffect(() => {
-    // 检查 ipcRenderer 是否可用
-    if (!window.ipcRenderer) {
-      console.error('window.ipcRenderer is not available');
-      return;
-    }
-
-    // 如果监听器已存在，先移除它（防止重复注册）
-    if (previewListenerRef.current) {
-      window.ipcRenderer.off('generate:preview-update', previewListenerRef.current);
-      previewListenerRef.current = null;
-    }
-
-    // 先移除所有该事件的监听器，确保没有重复注册（针对 React Strict Mode）
-    window.ipcRenderer.removeAllListeners('generate:preview-update');
-
-    const previewListener = (_event: unknown, data: { previewImage?: string }) => {
+  useIpcListener<{ previewImage?: string }>(
+    'generate:preview-update',
+    (data) => {
       if (data?.previewImage) {
         setPreviewImage(data.previewImage);
       }
-    };
-
-    // 保存监听器引用
-    previewListenerRef.current = previewListener;
-
-    window.ipcRenderer.on('generate:preview-update', previewListener);
-
-    return () => {
-      if (window.ipcRenderer && previewListenerRef.current) {
-        window.ipcRenderer.off('generate:preview-update', previewListenerRef.current);
-        previewListenerRef.current = null;
-      }
-    };
-  }, []);
+    }
+  );
 
   // 自动滚动到底部
   useEffect(() => {

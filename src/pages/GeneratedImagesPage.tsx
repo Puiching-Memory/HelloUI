@@ -29,6 +29,7 @@ import {
 } from '@fluentui/react-icons';
 import { PhotoView } from 'react-photo-view';
 import { useState, useEffect } from 'react';
+import { GeneratedImage } from '../types/generatedImage';
 
 const useStyles = makeStyles({
   container: {
@@ -235,38 +236,6 @@ const useStyles = makeStyles({
     maxHeight: 'min(75vh, 800px)',
   },
 });
-
-interface GeneratedImage {
-  name: string;
-  path: string;
-  size: number;
-  modified: number;
-  width?: number;
-  height?: number;
-  prompt?: string;
-  negativePrompt?: string;
-  steps?: number;
-  cfgScale?: number;
-  deviceType?: string;
-  groupId?: string | null;
-  groupName?: string | null;
-  modelPath?: string;
-  vaeModelPath?: string | null;
-  llmModelPath?: string | null;
-  samplingMethod?: string | null;
-  scheduler?: string | null;
-  seed?: number | null;
-  batchCount?: number;
-  threads?: number | null;
-  preview?: string | null; // 预览方法
-  previewInterval?: number | null;
-  verbose?: boolean;
-  color?: boolean;
-  offloadToCpu?: boolean;
-  commandLine?: string;
-  generatedAt?: string;
-  previewImage?: string; // base64 预览图（后端返回的字段名是 preview，但这里用 previewImage 避免与预览方法冲突）
-}
 
 export const GeneratedImagesPage = () => {
   const styles = useStyles();
@@ -560,7 +529,7 @@ export const GeneratedImagesPage = () => {
             <ImageRegular className={styles.emptyStateIcon} />
             <Title2 className={styles.emptyStateTitle}>暂无已生成的图片</Title2>
             <Body1 className={styles.emptyStateDescription}>
-              生成的图片将保存在模型文件夹下的 outputs 目录中
+              生成的图片将保存在运行路径下的 outputs 目录中
               <br />
               请在"图片生成"页面生成图片后，它们将显示在这里
             </Body1>

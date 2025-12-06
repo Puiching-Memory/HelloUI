@@ -7,6 +7,8 @@ import { pipeline } from 'stream/promises'
 import { createHash } from 'crypto'
 import { spawn } from 'child_process'
 import archiver from 'archiver'
+import { AsyncOperationGuard } from './utils/AsyncOperationGuard.js'
+import { ResourceManager } from './utils/ResourceManager.js'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
@@ -83,8 +85,16 @@ let currentUpload: UploadState | null = null
 
 // 获取默认的 models 文件夹路径
 function getDefaultModelsFolder(): string {
-  const userDataPath = app.getPath('userData')
-  return join(userDataPath, 'models')
+  // 获取运行位置目录（可执行文件所在目录）
+  let runPath: string
+  if (app.isPackaged) {
+    // 已打包：使用可执行文件所在目录
+    runPath = dirname(process.execPath)
+  } else {
+    // 开发环境：使用项目根目录（__dirname指向dist-electron，需要回到项目根目录）
+    runPath = join(__dirname, '..')
+  }
+  return join(runPath, 'models')
 }
 
 // 初始化默认 models 文件夹
@@ -126,6 +136,30 @@ async function initDefaultSDCppFolder(): Promise<string> {
       await fs.mkdir(deviceFolder, { recursive: true })
       console.log(`[Main] Created device folder: ${deviceFolder}`)
     }
+  }
+  return defaultFolder
+}
+
+// 获取默认的 outputs 文件夹路径（运行位置目录下的outputs文件夹）
+function getDefaultOutputsFolder(): string {
+  // 获取运行位置目录（可执行文件所在目录）
+  let runPath: string
+  if (app.isPackaged) {
+    // 已打包：使用可执行文件所在目录
+    runPath = dirname(process.execPath)
+  } else {
+    // 开发环境：使用项目根目录（__dirname指向dist-electron，需要回到项目根目录）
+    runPath = join(__dirname, '..')
+  }
+  return join(runPath, 'outputs')
+}
+
+// 初始化默认 outputs 文件夹（运行位置目录下的outputs文件夹）
+async function initDefaultOutputsFolder(): Promise<string> {
+  const defaultFolder = getDefaultOutputsFolder()
+  if (!existsSync(defaultFolder)) {
+    await fs.mkdir(defaultFolder, { recursive: true })
+    console.log(`[Main] Created default outputs folder: ${defaultFolder}`)
   }
   return defaultFolder
 }
@@ -922,9 +956,8 @@ ipcMain.handle('generate:start', async (event, params: {
       throw new Error(`SD.cpp 引擎文件不存在: ${sdExePath}\n请确保已正确安装 ${deviceType.toUpperCase()} 版本的 SD.cpp 引擎`)
     }
 
-    // 生成输出图片路径（保存在模型文件夹下的 outputs 目录）
-    const modelDir = dirname(sdModelPath)
-    const outputsDir = join(modelDir, 'outputs')
+    // 生成输出图片路径（保存在运行路径下的 outputs 目录）
+    const outputsDir = getDefaultOutputsFolder()
     if (!existsSync(outputsDir)) {
       await fs.mkdir(outputsDir, { recursive: true })
     }
@@ -1057,22 +1090,31 @@ ipcMain.handle('generate:start', async (event, params: {
       let stdout = ''
       let stderr = ''
       let isResolved = false
-      let previewWatchedPath: string | null = null // 跟踪正在监控的文件路径
       let lastPreviewUpdate = 0
-      let pollInterval: NodeJS.Timeout | null = null
-      // 使用一个对象引用来存储 pollInterval，确保在异步回调中也能正确清理
-      const pollIntervalRef = { current: null as NodeJS.Timeout | null }
-      let previewSetupTimeout: NodeJS.Timeout | null = null
+      
+      // 使用资源管理器和异步操作保护器
+      const resourceManager = new ResourceManager()
+      const operationGuard = new AsyncOperationGuard()
+
+      // 存储强制终止超时，不通过 resourceManager 管理，避免被过早清理
+      let killTimeout: NodeJS.Timeout | null = null
 
       // 辅助函数：安全地终止进程
       const killProcess = () => {
         if (childProcess && !childProcess.killed && childProcess.pid) {
           try {
+            // 如果已经有未完成的 kill timeout，先清理它
+            if (killTimeout) {
+              clearTimeout(killTimeout)
+              killTimeout = null
+            }
+
             // 在 Windows 上使用 taskkill，在其他平台上使用 kill
             if (process.platform === 'win32') {
               childProcess.kill('SIGTERM')
               // 如果进程在 3 秒后仍未退出，强制终止
-              setTimeout(() => {
+              // 注意：不注册到 resourceManager，避免被 cleanup() 过早清除
+              killTimeout = setTimeout(() => {
                 if (childProcess && !childProcess.killed && childProcess.pid) {
                   try {
                     childProcess.kill('SIGKILL')
@@ -1080,10 +1122,13 @@ ipcMain.handle('generate:start', async (event, params: {
                     console.error('[Generate] Failed to force kill process:', e)
                   }
                 }
+                killTimeout = null
               }, 3000)
             } else {
               childProcess.kill('SIGTERM')
-              setTimeout(() => {
+              // 如果进程在 3 秒后仍未退出，强制终止
+              // 注意：不注册到 resourceManager，避免被 cleanup() 过早清除
+              killTimeout = setTimeout(() => {
                 if (childProcess && !childProcess.killed && childProcess.pid) {
                   try {
                     childProcess.kill('SIGKILL')
@@ -1091,6 +1136,7 @@ ipcMain.handle('generate:start', async (event, params: {
                     console.error('[Generate] Failed to force kill process:', e)
                   }
                 }
+                killTimeout = null
               }, 3000)
             }
           } catch (error) {
@@ -1101,36 +1147,28 @@ ipcMain.handle('generate:start', async (event, params: {
 
       // 统一的清理函数
       const cleanup = () => {
-        // 清理预览设置延迟定时器
-        if (previewSetupTimeout) {
-          clearTimeout(previewSetupTimeout)
-          previewSetupTimeout = null
+        operationGuard.invalidate()
+        // 清理强制终止超时（如果存在）
+        if (killTimeout) {
+          clearTimeout(killTimeout)
+          killTimeout = null
         }
-        // 停止预览文件监听
-        if (previewWatchedPath) {
-          try {
-            unwatchFile(previewWatchedPath)
-          } catch (error) {
-            console.error('[Generate] Error unwatching preview file:', error)
-          }
-          previewWatchedPath = null
-        }
-        // 清理轮询间隔（使用统一的清理逻辑，避免重复清理）
-        // 先保存引用，然后清空，最后清理，确保幂等性
-        const intervalToClear = pollIntervalRef.current || pollInterval
-        if (intervalToClear) {
-          clearInterval(intervalToClear)
-          pollInterval = null
-          pollIntervalRef.current = null
-        }
+        resourceManager.cleanupAll()
+      }
+
+      // 清理除 kill timeout 之外的所有资源（用于 safeReject）
+      const cleanupExceptKillTimeout = () => {
+        operationGuard.invalidate()
+        // 不清理 killTimeout，让它继续运行直到进程退出或超时
+        resourceManager.cleanupAll()
       }
 
       // 安全地拒绝 Promise 并终止进程
       const safeReject = (error: Error) => {
         if (!isResolved) {
           isResolved = true
-          cleanup()
-          killProcess()
+          killProcess() // 先调用 killProcess，设置 timeout（不注册到 resourceManager）
+          cleanupExceptKillTimeout() // 清理其他资源，但保留 kill timeout 直到进程退出或超时
           reject(error)
         }
       }
@@ -1149,23 +1187,31 @@ ipcMain.handle('generate:start', async (event, params: {
         stdout += text
         console.log(`[SD.cpp stdout] ${text}`)
         
-        // 发送完整的 CLI 输出到渲染进程
-        event.sender.send('generate:cli-output', { 
-          type: 'stdout', 
-          text: text 
+        // 使用异步操作保护器保护发送操作
+        operationGuard.executeSync(() => {
+          if (!event.sender || event.sender.isDestroyed()) {
+            return null
+          }
+          
+          // 发送完整的 CLI 输出到渲染进程
+          event.sender.send('generate:cli-output', { 
+            type: 'stdout', 
+            text: text 
+          })
+          
+          // 解析输出，提取进度信息
+          // SD.cpp 通常会输出进度信息，我们可以尝试提取
+          const progressMatch = text.match(/progress[:\s]+(\d+)%/i)
+          if (progressMatch) {
+            const progress = parseInt(progressMatch[1])
+            event.sender.send('generate:progress', { progress: `生成中... ${progress}%` })
+          } else if (text.includes('Generating') || text.includes('generating')) {
+            event.sender.send('generate:progress', { progress: '正在生成图片...' })
+          } else if (text.includes('Loading') || text.includes('loading')) {
+            event.sender.send('generate:progress', { progress: '正在加载模型...' })
+          }
+          return null
         })
-        
-        // 解析输出，提取进度信息
-        // SD.cpp 通常会输出进度信息，我们可以尝试提取
-        const progressMatch = text.match(/progress[:\s]+(\d+)%/i)
-        if (progressMatch) {
-          const progress = parseInt(progressMatch[1])
-          event.sender.send('generate:progress', { progress: `生成中... ${progress}%` })
-        } else if (text.includes('Generating') || text.includes('generating')) {
-          event.sender.send('generate:progress', { progress: '正在生成图片...' })
-        } else if (text.includes('Loading') || text.includes('loading')) {
-          event.sender.send('generate:progress', { progress: '正在加载模型...' })
-        }
       })
 
       childProcess.stderr?.on('data', (data: Buffer) => {
@@ -1173,10 +1219,18 @@ ipcMain.handle('generate:start', async (event, params: {
         stderr += text
         console.error(`[SD.cpp stderr] ${text}`)
         
-        // 发送完整的 CLI 输出到渲染进程
-        event.sender.send('generate:cli-output', { 
-          type: 'stderr', 
-          text: text 
+        // 使用异步操作保护器保护发送操作
+        operationGuard.executeSync(() => {
+          if (!event.sender || event.sender.isDestroyed()) {
+            return null
+          }
+          
+          // 发送完整的 CLI 输出到渲染进程
+          event.sender.send('generate:cli-output', { 
+            type: 'stderr', 
+            text: text 
+          })
+          return null
         })
       })
 
@@ -1185,46 +1239,37 @@ ipcMain.handle('generate:start', async (event, params: {
         // 使用绝对路径进行监听
         const absolutePreviewPath: string = resolve(previewImagePath)
         
-        // 延迟启动监听，等待文件创建
-        previewSetupTimeout = setTimeout(async () => {
-          // 检查是否已解决或事件发送者是否仍然有效
-          if (isResolved) {
-            return
-          }
-          
-          // 检查 event.sender 是否仍然有效（防止在清理后访问无效的发送者）
-          if (!event.sender || event.sender.isDestroyed()) {
-            return
-          }
-          
-          // 读取预览图片的函数
-          const readPreviewImage = async () => {
-            try {
-              // 再次检查状态，防止在异步操作期间状态改变
-              if (isResolved || !event.sender || event.sender.isDestroyed()) {
-                return
-              }
-              if (existsSync(absolutePreviewPath)) {
-                const imageBuffer = await fs.readFile(absolutePreviewPath)
-                const base64Image = `data:image/png;base64,${imageBuffer.toString('base64')}`
-                // 在发送前再次检查
-                if (!isResolved && event.sender && !event.sender.isDestroyed()) {
-                  event.sender.send('generate:preview-update', { previewImage: base64Image })
-                }
-              }
-            } catch (error) {
-              // 忽略读取错误，可能文件正在写入
-              console.error('[Generate] Failed to read preview image:', error)
+        // 读取预览图片的函数
+        const readPreviewImage = async () => {
+          return await operationGuard.execute(async () => {
+            if (!event.sender || event.sender.isDestroyed()) {
+              return null
             }
+            
+            if (existsSync(absolutePreviewPath)) {
+              const imageBuffer = await fs.readFile(absolutePreviewPath)
+              const base64Image = `data:image/png;base64,${imageBuffer.toString('base64')}`
+              
+              if (event.sender && !event.sender.isDestroyed()) {
+                event.sender.send('generate:preview-update', { previewImage: base64Image })
+              }
+            }
+            return null
+          })
+        }
+
+        // 延迟启动监听，等待文件创建
+        const previewSetupTimeout = setTimeout(async () => {
+          if (!operationGuard.check() || !event.sender || event.sender.isDestroyed()) {
+            return
           }
 
           // 如果文件已存在，立即读取一次
-          if (existsSync(absolutePreviewPath) && !isResolved && event.sender && !event.sender.isDestroyed()) {
+          if (existsSync(absolutePreviewPath)) {
             await readPreviewImage()
           }
 
-          // 在创建监听器之前再次检查 isResolved 和 event.sender，防止竞态条件
-          if (isResolved || !event.sender || event.sender.isDestroyed()) {
+          if (!operationGuard.check() || !event.sender || event.sender.isDestroyed()) {
             return
           }
 
@@ -1234,70 +1279,88 @@ ipcMain.handle('generate:start', async (event, params: {
             watchFile(absolutePreviewPath, { interval: 200 }, async (curr, prev) => {
               // 检查文件大小或修改时间是否改变
               if (curr.mtimeMs !== prev.mtimeMs || curr.size !== prev.size) {
-                if (!isResolved) {
-                  // 防抖：避免过于频繁的更新（至少间隔 200ms）
-                  const now = Date.now()
-                  if (now - lastPreviewUpdate < 200) {
-                    return
-                  }
-                  lastPreviewUpdate = now
-                  await readPreviewImage()
+                // 防抖：避免过于频繁的更新（至少间隔 200ms）
+                const now = Date.now()
+                if (now - lastPreviewUpdate < 200) {
+                  return
                 }
+                lastPreviewUpdate = now
+                
+                await operationGuard.execute(async () => {
+                  await readPreviewImage()
+                  return null
+                })
               }
             })
-            previewWatchedPath = absolutePreviewPath
+            
+            // 注册文件监控清理函数
+            resourceManager.register(
+              () => {
+                try {
+                  unwatchFile(absolutePreviewPath)
+                } catch (error) {
+                  console.error('[Generate] Error unwatching preview file:', error)
+                }
+              },
+              'watcher'
+            )
           } catch (error) {
             console.error('[Generate] Failed to watch preview file:', error)
             // 如果文件还不存在或监听失败，使用轮询方式检查
-            // 在创建轮询之前再次检查 isResolved 和 event.sender，防止竞态条件
-            if (isResolved || !event.sender || event.sender.isDestroyed()) {
+            if (!operationGuard.check() || !event.sender || event.sender.isDestroyed()) {
               return
             }
             
             let pollCount = 0
             const maxPollCount = 60 // 最多轮询 60 次（30秒）
             const intervalId = setInterval(async () => {
-              if (isResolved) {
-                // 直接清理intervalId，不依赖外部变量，避免竞态条件
+              if (!operationGuard.check()) {
                 clearInterval(intervalId)
-                pollInterval = null
-                pollIntervalRef.current = null
                 return
               }
+              
               pollCount++
               if (pollCount > maxPollCount) {
-                // 直接清理intervalId，不依赖外部变量，避免竞态条件
                 clearInterval(intervalId)
-                pollInterval = null
-                pollIntervalRef.current = null
                 console.log(`[Generate] Stopped polling for preview file after ${maxPollCount} attempts`)
                 return
               }
+              
               if (existsSync(absolutePreviewPath)) {
                 await readPreviewImage()
                 // 文件已创建，尝试启动监听
                 try {
-                  if (!previewWatchedPath && !isResolved) {
-                    // 使用 watchFile 而不是 watch，因为 watchFile 是专门为监控单个文件设计的
+                  if (operationGuard.check() && event.sender && !event.sender.isDestroyed()) {
                     watchFile(absolutePreviewPath, { interval: 200 }, async (curr, prev) => {
-                      // 检查文件大小或修改时间是否改变
                       if (curr.mtimeMs !== prev.mtimeMs || curr.size !== prev.size) {
-                        if (!isResolved) {
-                          const now = Date.now()
-                          if (now - lastPreviewUpdate < 200) {
-                            return
-                          }
-                          lastPreviewUpdate = now
-                          console.log(`[Generate] Preview file changed, reading...`)
-                          await readPreviewImage()
+                        const now = Date.now()
+                        if (now - lastPreviewUpdate < 200) {
+                          return
                         }
+                        lastPreviewUpdate = now
+                        console.log(`[Generate] Preview file changed, reading...`)
+                        
+                        await operationGuard.execute(async () => {
+                          await readPreviewImage()
+                          return null
+                        })
                       }
                     })
-                    previewWatchedPath = absolutePreviewPath
-                    // 启动监听后停止轮询，直接清理intervalId，不依赖外部变量
+                    
+                    // 注册文件监控清理函数
+                    resourceManager.register(
+                      () => {
+                        try {
+                          unwatchFile(absolutePreviewPath)
+                        } catch (error) {
+                          console.error('[Generate] Error unwatching preview file:', error)
+                        }
+                      },
+                      'watcher'
+                    )
+                    
+                    // 停止轮询
                     clearInterval(intervalId)
-                    pollInterval = null
-                    pollIntervalRef.current = null
                   }
                 } catch (error) {
                   console.error('[Generate] Failed to watch preview file after polling:', error)
@@ -1306,12 +1369,19 @@ ipcMain.handle('generate:start', async (event, params: {
               }
             }, 500) // 每 500ms 检查一次文件是否存在并读取
             
-            // 立即更新两个引用，确保在回调执行前清理函数能够访问到最新的值
-            // 这样可以避免竞态条件：如果清理函数在回调执行前被调用，也能正确清理
-            pollInterval = intervalId
-            pollIntervalRef.current = intervalId
+            // 注册轮询清理函数
+            resourceManager.register(
+              () => clearInterval(intervalId),
+              'interval'
+            )
           }
         }, 1000) // 延迟 1 秒启动监听
+        
+        // 注册延迟定时器清理函数
+        resourceManager.register(
+          () => clearTimeout(previewSetupTimeout),
+          'timeout'
+        )
       }
 
       childProcess.on('error', (error) => {
@@ -1505,92 +1575,75 @@ async function findAllGeneratedImages(): Promise<Array<{
     commandLine?: string
     generatedAt?: string
   }> = []
-  const modelsFolder = getDefaultModelsFolder()
+  const outputsFolder = getDefaultOutputsFolder()
   
-  if (!existsSync(modelsFolder)) {
+  if (!existsSync(outputsFolder)) {
     return images
   }
 
   // 支持的图片格式
   const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']
   
-  // 递归遍历 models 文件夹
-  async function scanDirectory(dir: string) {
-    try {
-      const entries = await fs.readdir(dir, { withFileTypes: true })
-      
-      for (const entry of entries) {
-        const fullPath = join(dir, entry.name)
-        
-        if (entry.isDirectory()) {
-          // 如果是 outputs 目录，扫描其中的图片
-          if (entry.name === 'outputs') {
-            const outputEntries = await fs.readdir(fullPath, { withFileTypes: true })
-            for (const outputEntry of outputEntries) {
-              if (outputEntry.isFile()) {
-                const ext = extname(outputEntry.name).toLowerCase()
-                if (imageExtensions.includes(ext)) {
-                  const filePath = join(fullPath, outputEntry.name)
-                  const stats = await fs.stat(filePath)
-                  
-                  // 尝试读取对应的元数据文件
-                  const metadataPath = filePath.replace(/\.(png|jpg|jpeg|gif|bmp|webp)$/i, '.json')
-                  let metadata: any = {}
-                  
-                  if (existsSync(metadataPath)) {
-                    try {
-                      const metadataContent = await fs.readFile(metadataPath, 'utf-8')
-                      metadata = JSON.parse(metadataContent)
-                    } catch (error) {
-                      console.error(`Failed to read metadata for ${filePath}:`, error)
-                    }
-                  }
-                  
-                  images.push({
-                    name: outputEntry.name,
-                    path: filePath,
-                    size: stats.size,
-                    modified: stats.mtimeMs,
-                    width: metadata.width,
-                    height: metadata.height,
-                    prompt: metadata.prompt,
-                    negativePrompt: metadata.negativePrompt,
-                    steps: metadata.steps,
-                    cfgScale: metadata.cfgScale,
-                    deviceType: metadata.deviceType,
-                    groupId: metadata.groupId,
-                    groupName: metadata.groupName,
-                    modelPath: metadata.modelPath,
-                    vaeModelPath: metadata.vaeModelPath,
-                    llmModelPath: metadata.llmModelPath,
-                    samplingMethod: metadata.samplingMethod,
-                    scheduler: metadata.scheduler,
-                    seed: metadata.seed,
-                    batchCount: metadata.batchCount,
-                    threads: metadata.threads,
-                    preview: metadata.preview,
-                    previewInterval: metadata.previewInterval,
-                    verbose: metadata.verbose,
-                    color: metadata.color,
-                    offloadToCpu: metadata.offloadToCpu,
-                    commandLine: metadata.commandLine,
-                    generatedAt: metadata.generatedAt,
-                  })
-                }
-              }
+  // 扫描 outputs 文件夹中的图片
+  try {
+    const entries = await fs.readdir(outputsFolder, { withFileTypes: true })
+    
+    for (const entry of entries) {
+      if (entry.isFile()) {
+        const ext = extname(entry.name).toLowerCase()
+        if (imageExtensions.includes(ext)) {
+          const filePath = join(outputsFolder, entry.name)
+          const stats = await fs.stat(filePath)
+          
+          // 尝试读取对应的元数据文件
+          const metadataPath = filePath.replace(/\.(png|jpg|jpeg|gif|bmp|webp)$/i, '.json')
+          let metadata: any = {}
+          
+          if (existsSync(metadataPath)) {
+            try {
+              const metadataContent = await fs.readFile(metadataPath, 'utf-8')
+              metadata = JSON.parse(metadataContent)
+            } catch (error) {
+              console.error(`Failed to read metadata for ${filePath}:`, error)
             }
-          } else {
-            // 递归扫描子目录
-            await scanDirectory(fullPath)
           }
+          
+          images.push({
+            name: entry.name,
+            path: filePath,
+            size: stats.size,
+            modified: stats.mtimeMs,
+            width: metadata.width,
+            height: metadata.height,
+            prompt: metadata.prompt,
+            negativePrompt: metadata.negativePrompt,
+            steps: metadata.steps,
+            cfgScale: metadata.cfgScale,
+            deviceType: metadata.deviceType,
+            groupId: metadata.groupId,
+            groupName: metadata.groupName,
+            modelPath: metadata.modelPath,
+            vaeModelPath: metadata.vaeModelPath,
+            llmModelPath: metadata.llmModelPath,
+            samplingMethod: metadata.samplingMethod,
+            scheduler: metadata.scheduler,
+            seed: metadata.seed,
+            batchCount: metadata.batchCount,
+            threads: metadata.threads,
+            preview: metadata.preview,
+            previewInterval: metadata.previewInterval,
+            verbose: metadata.verbose,
+            color: metadata.color,
+            offloadToCpu: metadata.offloadToCpu,
+            commandLine: metadata.commandLine,
+            generatedAt: metadata.generatedAt,
+          })
         }
       }
-    } catch (error) {
-      console.error(`Failed to scan directory ${dir}:`, error)
     }
+  } catch (error) {
+    console.error(`Failed to scan outputs folder ${outputsFolder}:`, error)
   }
-
-  await scanDirectory(modelsFolder)
   
   // 按修改时间降序排序
   images.sort((a, b) => b.modified - a.modified)
@@ -1839,6 +1892,8 @@ app.whenReady().then(async () => {
   await initDefaultModelsFolder()
   // 初始化默认 SD.cpp 引擎文件夹
   await initDefaultSDCppFolder()
+  // 初始化默认 outputs 文件夹
+  await initDefaultOutputsFolder()
   createWindow()
 })
 
