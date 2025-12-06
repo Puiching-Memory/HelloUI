@@ -12,6 +12,9 @@ try {
       const [channel, ...omit] = args
       return ipcRenderer.off(channel, ...omit)
     },
+    removeAllListeners(channel: string) {
+      return ipcRenderer.removeAllListeners(channel)
+    },
     send(...args: Parameters<typeof ipcRenderer.send>) {
       const [channel, ...omit] = args
       return ipcRenderer.send(channel, ...omit)

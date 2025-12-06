@@ -63,9 +63,10 @@ interface MainLayoutProps {
   onPageChange: (page: PageType) => void;
   children: ReactNode;
   navigationDisabled?: boolean;
+  navigationDisabledReason?: string;
 }
 
-export const MainLayout = ({ currentPage, onPageChange, children, navigationDisabled = false }: MainLayoutProps) => {
+export const MainLayout = ({ currentPage, onPageChange, children, navigationDisabled = false, navigationDisabledReason }: MainLayoutProps) => {
   const styles = useStyles();
 
   const navItems = [
@@ -123,7 +124,7 @@ export const MainLayout = ({ currentPage, onPageChange, children, navigationDisa
             className={styles.navButton}
             onClick={() => onPageChange(item.id)}
             disabled={navigationDisabled && currentPage !== item.id}
-            title={navigationDisabled && currentPage !== item.id ? '正在上传文件，请稍候...' : undefined}
+            title={navigationDisabled && currentPage !== item.id ? (navigationDisabledReason || '操作进行中，请稍候...') : undefined}
           >
             {item.label}
           </Button>

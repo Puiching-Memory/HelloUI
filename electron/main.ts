@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join, basename, extname, resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { promises as fs } from 'fs'
-import { existsSync, createReadStream, createWriteStream } from 'fs'
+import { existsSync, createReadStream, createWriteStream, watchFile, unwatchFile } from 'fs'
 import { pipeline } from 'stream/promises'
 import { createHash } from 'crypto'
 import { spawn } from 'child_process'
@@ -25,7 +25,6 @@ process.env.VITE_PUBLIC = app.isPackaged
   : join(process.env.DIST, '../public')
 
 let win: BrowserWindow | null = null
-// Here, you can also use other preload
 // 使用绝对路径确保 preload 脚本正确加载
 const preload = resolve(__dirname, 'preload.js')
 const url = process.env.VITE_DEV_SERVER_URL
@@ -45,7 +44,6 @@ function createWindow() {
 
 
   if (url) {
-    // electron-vite-vue#298
     win.loadURL(url)
     // Open devTool if the app is not packaged
     win.webContents.openDevTools()
@@ -607,7 +605,7 @@ ipcMain.handle('sdcpp:init-default-folder', async () => {
   try {
     const folder = await initDefaultSDCppFolder()
     sdcppFolderPath = folder
-    console.log(`[Main] SD.cpp engine search path (运行位置目录/engines/sdcpp): ${folder}`)
+    console.log(`[Main] SD.cpp engine search path (executable directory/engines/sdcpp): ${folder}`)
     // 确保设备子文件夹存在
     const deviceFolders = ['cpu', 'vulkan', 'cuda']
     for (const device of deviceFolders) {
@@ -632,7 +630,7 @@ ipcMain.handle('sdcpp:get-folder', async () => {
     sdcppFolderPath = getDefaultSDCppFolder()
   }
   if (sdcppFolderPath) {
-    console.log(`[Main] SD.cpp engine search path (运行位置目录/engines/sdcpp): ${sdcppFolderPath}`)
+    console.log(`[Main] SD.cpp engine search path (executable directory/engines/sdcpp): ${sdcppFolderPath}`)
   }
   return sdcppFolderPath
 })
@@ -745,6 +743,11 @@ interface ModelGroup {
   llmModel?: string  // LLM/CLIP模型路径
   defaultSteps?: number  // 推荐的默认采样步数
   defaultCfgScale?: number  // 推荐的默认CFG Scale值
+  defaultWidth?: number  // 推荐的默认图片宽度
+  defaultHeight?: number  // 推荐的默认图片高度
+  defaultSamplingMethod?: string  // 推荐的默认采样方法
+  defaultScheduler?: string  // 推荐的默认调度器
+  defaultSeed?: number  // 推荐的默认种子（-1表示随机）
   createdAt: number
   updatedAt: number
 }
@@ -850,6 +853,16 @@ ipcMain.handle('generate:start', async (event, params: {
   width?: number  // 图片宽度，默认 512
   height?: number  // 图片高度，默认 512
   cfgScale?: number  // CFG scale，默认 7.0
+  samplingMethod?: string  // 采样方法
+  scheduler?: string  // 调度器
+  seed?: number  // 种子，undefined 表示随机
+  batchCount?: number  // 批次数量，默认 1
+  threads?: number  // 线程数，undefined 表示自动
+  preview?: string  // 预览方法
+  previewInterval?: number  // 预览间隔
+  verbose?: boolean  // 详细输出
+  color?: boolean  // 彩色日志
+  offloadToCpu?: boolean  // 卸载到CPU
 }) => {
   try {
     const { 
@@ -861,7 +874,17 @@ ipcMain.handle('generate:start', async (event, params: {
       steps = 20,
       width = 512,
       height = 512,
-      cfgScale = 7.0
+      cfgScale = 7.0,
+      samplingMethod,
+      scheduler,
+      seed,
+      batchCount = 1,
+      threads,
+      preview,
+      previewInterval = 1,
+      verbose = false,
+      color = false,
+      offloadToCpu = false
     } = params
 
     // 确定使用的模型路径
@@ -883,14 +906,6 @@ ipcMain.handle('generate:start', async (event, params: {
       if (!existsSync(sdModelPath)) {
         throw new Error(`SD模型文件不存在: ${sdModelPath}`)
       }
-      
-      // TODO: 未来可以在这里使用 VAE 和 LLM 模型
-      // if (group.vaeModel && !existsSync(group.vaeModel)) {
-      //   throw new Error(`VAE模型文件不存在: ${group.vaeModel}`)
-      // }
-      // if (group.llmModel && !existsSync(group.llmModel)) {
-      //   throw new Error(`LLM模型文件不存在: ${group.llmModel}`)
-      // }
     } else if (modelPath) {
       // 兼容旧版本：直接使用模型路径
       sdModelPath = modelPath
@@ -916,6 +931,8 @@ ipcMain.handle('generate:start', async (event, params: {
 
     const timestamp = Date.now()
     const outputImagePath = join(outputsDir, `generated_${timestamp}.png`)
+    const outputMetadataPath = join(outputsDir, `generated_${timestamp}.json`)
+    const previewImagePath = join(outputsDir, `preview_${timestamp}.png`)
 
     // 构建命令行参数
     // 根据 sd.exe 的参数要求：
@@ -962,13 +979,76 @@ ipcMain.handle('generate:start', async (event, params: {
       args.push('--cfg-scale', cfgScale.toString())
     }
 
-    console.log(`[Generate] 启动图片生成: ${sdExePath}`)
-    console.log(`[Generate] 参数: ${args.join(' ')}`)
+    // 添加采样方法（如果指定了）
+    if (samplingMethod && typeof samplingMethod === 'string' && samplingMethod.trim() !== '') {
+      args.push('--sampling-method', samplingMethod.trim())
+      console.log(`[Generate] Sampling method: ${samplingMethod}`)
+    }
+
+    // 添加调度器（如果指定了）
+    if (scheduler && typeof scheduler === 'string' && scheduler.trim() !== '') {
+      args.push('--scheduler', scheduler.trim())
+      console.log(`[Generate] Scheduler: ${scheduler}`)
+    }
+
+    // 添加种子（如果指定了且 >= 0）
+    if (seed !== undefined && seed >= 0) {
+      args.push('--seed', seed.toString())
+      console.log(`[Generate] Seed: ${seed}`)
+    }
+
+    // 添加批次数量（如果 > 1）
+    if (batchCount !== undefined && batchCount > 1) {
+      args.push('--batch-count', batchCount.toString())
+      console.log(`[Generate] Batch count: ${batchCount}`)
+    }
+
+    // 添加线程数（如果指定了且 > 0）
+    if (threads !== undefined && threads > 0) {
+      args.push('--threads', threads.toString())
+      console.log(`[Generate] Threads: ${threads}`)
+    }
+
+    // 添加预览选项（如果指定了且不是 'none'）
+    if (preview && preview !== 'none' && preview.trim() !== '') {
+      args.push('--preview', preview.trim())
+      // 使用绝对路径，确保 SD.cpp 能找到预览文件
+      const absolutePreviewPath: string = resolve(previewImagePath)
+      args.push('--preview-path', absolutePreviewPath)
+      console.log(`[Generate] Preview method: ${preview}`)
+      console.log(`[Generate] Preview path (absolute): ${absolutePreviewPath}`)
+      // 只有当预览间隔 > 1 时才添加参数（1 是默认值）
+      if (previewInterval !== undefined && previewInterval > 1) {
+        args.push('--preview-interval', previewInterval.toString())
+        console.log(`[Generate] Preview interval: ${previewInterval}`)
+      }
+    }
+
+    // 添加详细输出（如果启用）
+    if (verbose === true) {
+      args.push('--verbose')
+      console.log(`[Generate] Verbose: enabled`)
+    }
+
+    // 添加彩色日志（如果启用）
+    if (color === true) {
+      args.push('--color')
+      console.log(`[Generate] Color: enabled`)
+    }
+
+    // 添加卸载到CPU（如果启用）
+    if (offloadToCpu === true) {
+      args.push('--offload-to-cpu')
+      console.log(`[Generate] Offload to CPU: enabled`)
+    }
+
+    console.log(`[Generate] Starting image generation: ${sdExePath}`)
+    console.log(`[Generate] Command line arguments: ${args.join(' ')}`)
 
     // 发送进度更新
     event.sender.send('generate:progress', { progress: '正在启动 SD.cpp 引擎...' })
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolvePromise, reject) => {
       const childProcess = spawn(sdExePath, args, {
         cwd: dirname(sdExePath),
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -977,6 +1057,12 @@ ipcMain.handle('generate:start', async (event, params: {
       let stdout = ''
       let stderr = ''
       let isResolved = false
+      let previewWatchedPath: string | null = null // 跟踪正在监控的文件路径
+      let lastPreviewUpdate = 0
+      let pollInterval: NodeJS.Timeout | null = null
+      // 使用一个对象引用来存储 pollInterval，确保在异步回调中也能正确清理
+      const pollIntervalRef = { current: null as NodeJS.Timeout | null }
+      let previewSetupTimeout: NodeJS.Timeout | null = null
 
       // 辅助函数：安全地终止进程
       const killProcess = () => {
@@ -991,7 +1077,7 @@ ipcMain.handle('generate:start', async (event, params: {
                   try {
                     childProcess.kill('SIGKILL')
                   } catch (e) {
-                    console.error('[Generate] 强制终止进程失败:', e)
+                    console.error('[Generate] Failed to force kill process:', e)
                   }
                 }
               }, 3000)
@@ -1002,14 +1088,40 @@ ipcMain.handle('generate:start', async (event, params: {
                   try {
                     childProcess.kill('SIGKILL')
                   } catch (e) {
-                    console.error('[Generate] 强制终止进程失败:', e)
+                    console.error('[Generate] Failed to force kill process:', e)
                   }
                 }
               }, 3000)
             }
           } catch (error) {
-            console.error('[Generate] 终止进程时出错:', error)
+            console.error('[Generate] Error killing process:', error)
           }
+        }
+      }
+
+      // 统一的清理函数
+      const cleanup = () => {
+        // 清理预览设置延迟定时器
+        if (previewSetupTimeout) {
+          clearTimeout(previewSetupTimeout)
+          previewSetupTimeout = null
+        }
+        // 停止预览文件监听
+        if (previewWatchedPath) {
+          try {
+            unwatchFile(previewWatchedPath)
+          } catch (error) {
+            console.error('[Generate] Error unwatching preview file:', error)
+          }
+          previewWatchedPath = null
+        }
+        // 清理轮询间隔（使用统一的清理逻辑，避免重复清理）
+        // 先保存引用，然后清空，最后清理，确保幂等性
+        const intervalToClear = pollIntervalRef.current || pollInterval
+        if (intervalToClear) {
+          clearInterval(intervalToClear)
+          pollInterval = null
+          pollIntervalRef.current = null
         }
       }
 
@@ -1017,6 +1129,7 @@ ipcMain.handle('generate:start', async (event, params: {
       const safeReject = (error: Error) => {
         if (!isResolved) {
           isResolved = true
+          cleanup()
           killProcess()
           reject(error)
         }
@@ -1026,7 +1139,8 @@ ipcMain.handle('generate:start', async (event, params: {
       const safeResolve = (value: any) => {
         if (!isResolved) {
           isResolved = true
-          resolve(value)
+          cleanup()
+          resolvePromise(value)
         }
       }
 
@@ -1066,22 +1180,219 @@ ipcMain.handle('generate:start', async (event, params: {
         })
       })
 
+      // 设置预览图片文件监听（如果启用了预览）
+      if (preview && preview !== 'none' && preview.trim() !== '') {
+        // 使用绝对路径进行监听
+        const absolutePreviewPath: string = resolve(previewImagePath)
+        
+        // 延迟启动监听，等待文件创建
+        previewSetupTimeout = setTimeout(async () => {
+          // 检查是否已解决或事件发送者是否仍然有效
+          if (isResolved) {
+            return
+          }
+          
+          // 检查 event.sender 是否仍然有效（防止在清理后访问无效的发送者）
+          if (!event.sender || event.sender.isDestroyed()) {
+            return
+          }
+          
+          // 读取预览图片的函数
+          const readPreviewImage = async () => {
+            try {
+              // 再次检查状态，防止在异步操作期间状态改变
+              if (isResolved || !event.sender || event.sender.isDestroyed()) {
+                return
+              }
+              if (existsSync(absolutePreviewPath)) {
+                const imageBuffer = await fs.readFile(absolutePreviewPath)
+                const base64Image = `data:image/png;base64,${imageBuffer.toString('base64')}`
+                // 在发送前再次检查
+                if (!isResolved && event.sender && !event.sender.isDestroyed()) {
+                  event.sender.send('generate:preview-update', { previewImage: base64Image })
+                }
+              }
+            } catch (error) {
+              // 忽略读取错误，可能文件正在写入
+              console.error('[Generate] Failed to read preview image:', error)
+            }
+          }
+
+          // 如果文件已存在，立即读取一次
+          if (existsSync(absolutePreviewPath) && !isResolved && event.sender && !event.sender.isDestroyed()) {
+            await readPreviewImage()
+          }
+
+          // 在创建监听器之前再次检查 isResolved 和 event.sender，防止竞态条件
+          if (isResolved || !event.sender || event.sender.isDestroyed()) {
+            return
+          }
+
+          try {
+            // 使用 watchFile 而不是 watch，因为 watchFile 是专门为监控单个文件设计的
+            // watchFile 使用轮询机制，对于文件监控更可靠
+            watchFile(absolutePreviewPath, { interval: 200 }, async (curr, prev) => {
+              // 检查文件大小或修改时间是否改变
+              if (curr.mtimeMs !== prev.mtimeMs || curr.size !== prev.size) {
+                if (!isResolved) {
+                  // 防抖：避免过于频繁的更新（至少间隔 200ms）
+                  const now = Date.now()
+                  if (now - lastPreviewUpdate < 200) {
+                    return
+                  }
+                  lastPreviewUpdate = now
+                  await readPreviewImage()
+                }
+              }
+            })
+            previewWatchedPath = absolutePreviewPath
+          } catch (error) {
+            console.error('[Generate] Failed to watch preview file:', error)
+            // 如果文件还不存在或监听失败，使用轮询方式检查
+            // 在创建轮询之前再次检查 isResolved 和 event.sender，防止竞态条件
+            if (isResolved || !event.sender || event.sender.isDestroyed()) {
+              return
+            }
+            
+            let pollCount = 0
+            const maxPollCount = 60 // 最多轮询 60 次（30秒）
+            const intervalId = setInterval(async () => {
+              if (isResolved) {
+                // 直接清理intervalId，不依赖外部变量，避免竞态条件
+                clearInterval(intervalId)
+                pollInterval = null
+                pollIntervalRef.current = null
+                return
+              }
+              pollCount++
+              if (pollCount > maxPollCount) {
+                // 直接清理intervalId，不依赖外部变量，避免竞态条件
+                clearInterval(intervalId)
+                pollInterval = null
+                pollIntervalRef.current = null
+                console.log(`[Generate] Stopped polling for preview file after ${maxPollCount} attempts`)
+                return
+              }
+              if (existsSync(absolutePreviewPath)) {
+                await readPreviewImage()
+                // 文件已创建，尝试启动监听
+                try {
+                  if (!previewWatchedPath && !isResolved) {
+                    // 使用 watchFile 而不是 watch，因为 watchFile 是专门为监控单个文件设计的
+                    watchFile(absolutePreviewPath, { interval: 200 }, async (curr, prev) => {
+                      // 检查文件大小或修改时间是否改变
+                      if (curr.mtimeMs !== prev.mtimeMs || curr.size !== prev.size) {
+                        if (!isResolved) {
+                          const now = Date.now()
+                          if (now - lastPreviewUpdate < 200) {
+                            return
+                          }
+                          lastPreviewUpdate = now
+                          console.log(`[Generate] Preview file changed, reading...`)
+                          await readPreviewImage()
+                        }
+                      }
+                    })
+                    previewWatchedPath = absolutePreviewPath
+                    // 启动监听后停止轮询，直接清理intervalId，不依赖外部变量
+                    clearInterval(intervalId)
+                    pollInterval = null
+                    pollIntervalRef.current = null
+                  }
+                } catch (error) {
+                  console.error('[Generate] Failed to watch preview file after polling:', error)
+                  // 继续轮询
+                }
+              }
+            }, 500) // 每 500ms 检查一次文件是否存在并读取
+            
+            // 立即更新两个引用，确保在回调执行前清理函数能够访问到最新的值
+            // 这样可以避免竞态条件：如果清理函数在回调执行前被调用，也能正确清理
+            pollInterval = intervalId
+            pollIntervalRef.current = intervalId
+          }
+        }, 1000) // 延迟 1 秒启动监听
+      }
+
       childProcess.on('error', (error) => {
-        console.error('[Generate] 进程启动失败:', error)
+        console.error('[Generate] Failed to start process:', error)
         event.sender.send('generate:progress', { progress: `错误: ${error.message}` })
         safeReject(new Error(`无法启动 SD.cpp 引擎: ${error.message}`))
       })
 
       childProcess.on('exit', async (code, signal) => {
+        // 使用统一的清理函数
+        cleanup()
+
         if (isResolved) return
 
         if (code === 0) {
           // 生成成功
           if (existsSync(outputImagePath)) {
             try {
+              // 获取模型组信息（如果有）
+              let groupName: string | undefined
+              let vaeModelPath: string | undefined
+              let llmModelPath: string | undefined
+              
+              if (groupId) {
+                const groups = await loadModelGroups()
+                const group = groups.find(g => g.id === groupId)
+                if (group) {
+                  groupName = group.name
+                  vaeModelPath = group.vaeModel
+                  llmModelPath = group.llmModel
+                }
+              }
+              
+              // 保存生成参数元数据
+              const metadata = {
+                prompt,
+                negativePrompt,
+                steps,
+                width,
+                height,
+                cfgScale,
+                deviceType,
+                groupId: groupId || null,
+                groupName: groupName || null,
+                modelPath: sdModelPath,
+                vaeModelPath: vaeModelPath || null,
+                llmModelPath: llmModelPath || null,
+                timestamp,
+                generatedAt: new Date().toISOString(),
+                samplingMethod: samplingMethod || null,
+                scheduler: scheduler || null,
+                seed: seed !== undefined ? seed : null,
+                batchCount,
+                threads: threads !== undefined ? threads : null,
+                preview: preview || null,
+                previewInterval: previewInterval || null,
+                verbose,
+                color,
+                offloadToCpu,
+                commandLine: args.join(' '), // 保存完整命令行用于重现
+              }
+              
+              await fs.writeFile(outputMetadataPath, JSON.stringify(metadata, null, 2), 'utf-8')
+              
               // 读取生成的图片并转换为 base64
               const imageBuffer = await fs.readFile(outputImagePath)
               const base64Image = `data:image/png;base64,${imageBuffer.toString('base64')}`
+              
+              // 删除预览图片文件（如果存在）
+              if (preview && preview !== 'none' && preview.trim() !== '') {
+                const absolutePreviewPath = resolve(previewImagePath)
+                try {
+                  if (existsSync(absolutePreviewPath)) {
+                    await fs.unlink(absolutePreviewPath)
+                    console.log(`[Generate] Deleted preview image: ${absolutePreviewPath}`)
+                  }
+                } catch (error) {
+                  // 如果删除失败，只记录错误，不影响生成结果
+                  console.error(`[Generate] Failed to delete preview image: ${absolutePreviewPath}`, error)
+                }
+              }
               
               event.sender.send('generate:progress', { 
                 progress: '生成完成',
@@ -1094,23 +1405,36 @@ ipcMain.handle('generate:start', async (event, params: {
                 imagePath: outputImagePath,
               })
             } catch (error) {
-              console.error('[Generate] 读取图片失败:', error)
+              console.error('[Generate] Failed to read image:', error)
               safeReject(new Error(`读取生成的图片失败: ${error instanceof Error ? error.message : String(error)}`))
             }
           } else {
             safeReject(new Error('生成完成但未找到输出图片文件'))
           }
         } else {
+          // 生成失败，也尝试删除预览图片
+          if (preview && preview !== 'none' && preview.trim() !== '') {
+            const absolutePreviewPath = resolve(previewImagePath)
+            try {
+              if (existsSync(absolutePreviewPath)) {
+                await fs.unlink(absolutePreviewPath)
+                console.log(`[Generate] Deleted preview image after failure: ${absolutePreviewPath}`)
+              }
+            } catch (error) {
+              console.error(`[Generate] Failed to delete preview image after failure: ${absolutePreviewPath}`, error)
+            }
+          }
+          
           // 生成失败
           const errorMsg = stderr || stdout || `进程退出，代码: ${code}, 信号: ${signal}`
-          console.error('[Generate] 生成失败:', errorMsg)
+          console.error('[Generate] Generation failed:', errorMsg)
           event.sender.send('generate:progress', { progress: `生成失败: ${errorMsg}` })
           safeReject(new Error(`图片生成失败: ${errorMsg}`))
         }
       })
     })
   } catch (error) {
-    console.error('[Generate] 生成图片失败:', error)
+    console.error('[Generate] Failed to generate image:', error)
     const errorMessage = error instanceof Error ? error.message : String(error)
     // 注意：如果进程已经在 Promise 中启动，它会在 Promise 的 reject 处理中被终止
     // 但如果错误发生在 spawn 之前，则不需要终止进程
@@ -1121,8 +1445,66 @@ ipcMain.handle('generate:start', async (event, params: {
 // ========== 已生成图片管理相关 IPC 处理程序 ==========
 
 // 递归查找所有 outputs 目录中的图片文件
-async function findAllGeneratedImages(): Promise<Array<{ name: string; path: string; size: number; modified: number }>> {
-  const images: Array<{ name: string; path: string; size: number; modified: number }> = []
+async function findAllGeneratedImages(): Promise<Array<{ 
+  name: string
+  path: string
+  size: number
+  modified: number
+  width?: number
+  height?: number
+  prompt?: string
+  negativePrompt?: string
+  steps?: number
+  cfgScale?: number
+  deviceType?: string
+  groupId?: string | null
+  groupName?: string | null
+  modelPath?: string
+  vaeModelPath?: string | null
+  llmModelPath?: string | null
+  samplingMethod?: string | null
+  scheduler?: string | null
+  seed?: number | null
+  batchCount?: number
+  threads?: number | null
+  preview?: string | null
+  previewInterval?: number | null
+  verbose?: boolean
+  color?: boolean
+  offloadToCpu?: boolean
+  commandLine?: string
+  generatedAt?: string
+}>> {
+  const images: Array<{ 
+    name: string
+    path: string
+    size: number
+    modified: number
+    width?: number
+    height?: number
+    prompt?: string
+    negativePrompt?: string
+    steps?: number
+    cfgScale?: number
+    deviceType?: string
+    groupId?: string | null
+    groupName?: string | null
+    modelPath?: string
+    vaeModelPath?: string | null
+    llmModelPath?: string | null
+    samplingMethod?: string | null
+    scheduler?: string | null
+    seed?: number | null
+    batchCount?: number
+    threads?: number | null
+    preview?: string | null
+    previewInterval?: number | null
+    verbose?: boolean
+    color?: boolean
+    offloadToCpu?: boolean
+    commandLine?: string
+    generatedAt?: string
+  }> = []
   const modelsFolder = getDefaultModelsFolder()
   
   if (!existsSync(modelsFolder)) {
@@ -1150,11 +1532,49 @@ async function findAllGeneratedImages(): Promise<Array<{ name: string; path: str
                 if (imageExtensions.includes(ext)) {
                   const filePath = join(fullPath, outputEntry.name)
                   const stats = await fs.stat(filePath)
+                  
+                  // 尝试读取对应的元数据文件
+                  const metadataPath = filePath.replace(/\.(png|jpg|jpeg|gif|bmp|webp)$/i, '.json')
+                  let metadata: any = {}
+                  
+                  if (existsSync(metadataPath)) {
+                    try {
+                      const metadataContent = await fs.readFile(metadataPath, 'utf-8')
+                      metadata = JSON.parse(metadataContent)
+                    } catch (error) {
+                      console.error(`Failed to read metadata for ${filePath}:`, error)
+                    }
+                  }
+                  
                   images.push({
                     name: outputEntry.name,
                     path: filePath,
                     size: stats.size,
                     modified: stats.mtimeMs,
+                    width: metadata.width,
+                    height: metadata.height,
+                    prompt: metadata.prompt,
+                    negativePrompt: metadata.negativePrompt,
+                    steps: metadata.steps,
+                    cfgScale: metadata.cfgScale,
+                    deviceType: metadata.deviceType,
+                    groupId: metadata.groupId,
+                    groupName: metadata.groupName,
+                    modelPath: metadata.modelPath,
+                    vaeModelPath: metadata.vaeModelPath,
+                    llmModelPath: metadata.llmModelPath,
+                    samplingMethod: metadata.samplingMethod,
+                    scheduler: metadata.scheduler,
+                    seed: metadata.seed,
+                    batchCount: metadata.batchCount,
+                    threads: metadata.threads,
+                    preview: metadata.preview,
+                    previewInterval: metadata.previewInterval,
+                    verbose: metadata.verbose,
+                    color: metadata.color,
+                    offloadToCpu: metadata.offloadToCpu,
+                    commandLine: metadata.commandLine,
+                    generatedAt: metadata.generatedAt,
                   })
                 }
               }
@@ -1192,16 +1612,23 @@ ipcMain.handle('generated-images:list', async () => {
           const stats = await fs.stat(image.path)
           if (stats.size > 5 * 1024 * 1024) {
             // 文件太大，不生成预览
+            // 返回原始对象，但不设置previewImage字段
+            // 注意：preview字段（预览方法字符串）和previewImage字段（base64图片）是不同的字段
             return image
           }
           
           const imageBuffer = await fs.readFile(image.path)
+          // 明确设置previewImage字段（base64图片）
+          // 注意：preview字段（预览方法字符串）和previewImage字段（base64图片）是不同的字段
+          // preview字段来自元数据，表示生成时使用的预览方法（"proj", "tae", "vae", "none"）
+          // previewImage字段是图片文件的base64编码，用于在UI中显示
           return {
             ...image,
-            preview: imageBuffer.toString('base64'),
+            previewImage: imageBuffer.toString('base64'),
           }
         } catch (error) {
           console.error(`Failed to generate preview for ${image.path}:`, error)
+          // 读取失败时，返回原始对象，但不设置previewImage字段
           return image
         }
       })
@@ -1248,10 +1675,25 @@ ipcMain.handle('generated-images:delete', async (_, imagePath: string) => {
     if (!existsSync(imagePath)) {
       throw new Error('图片文件不存在')
     }
+    
+    // 删除图片文件
     await fs.unlink(imagePath)
+    
+    // 删除对应的 JSON 元数据文件（如果存在）
+    const metadataPath = imagePath.replace(/\.(png|jpg|jpeg|gif|bmp|webp)$/i, '.json')
+    if (existsSync(metadataPath)) {
+      try {
+        await fs.unlink(metadataPath)
+        console.log(`[GeneratedImages] Deleted metadata file: ${metadataPath}`)
+      } catch (metadataError) {
+        // 如果删除元数据文件失败，记录错误但不影响图片删除
+        console.error(`[GeneratedImages] Failed to delete metadata file ${metadataPath}:`, metadataError)
+      }
+    }
+    
     return true
   } catch (error) {
-    console.error('Failed to delete image:', error)
+    console.error('[GeneratedImages] Failed to delete image:', error)
     throw error
   }
 })
@@ -1354,7 +1796,7 @@ ipcMain.handle('generated-images:batch-download', async (_, imagePaths: string[]
       // 监听所有归档数据都写入完成
       output.on('close', () => {
         if (!isResolved) {
-          console.log(`ZIP 文件已创建: ${zipPath} (${archive.pointer()} 字节)`)
+          console.log(`ZIP file created: ${zipPath} (${archive.pointer()} bytes)`)
           safeResolve({ success: true, zipPath, size: archive.pointer() })
         }
       })
