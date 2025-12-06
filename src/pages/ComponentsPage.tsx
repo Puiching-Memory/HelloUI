@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type React from 'react';
 import {
   Button,
   Card,
@@ -66,6 +67,7 @@ import {
   TagGroup,
   CounterBadge,
   Rating,
+  RatingDisplay,
   Textarea,
   Field,
   Toaster,
@@ -309,14 +311,14 @@ export const ComponentsPage = () => {
               <div className={styles.row}>
                 <ToggleButton
                   checked={toggleChecked}
-                  onChange={(_, data) => setToggleChecked(data.checked)}
+                  onChange={((_ev: React.FormEvent, data: { checked?: boolean }) => setToggleChecked(data.checked ?? false)) as any}
                   icon={<SettingsRegular />}
                 >
                   切换设置
                 </ToggleButton>
                 <ToggleButton
                   checked={toggleChecked}
-                  onChange={(_, data) => setToggleChecked(data.checked)}
+                  onChange={((_ev: React.FormEvent, data: { checked?: boolean }) => setToggleChecked(data.checked ?? false)) as any}
                   appearance="primary"
                 >
                   主要切换
@@ -736,11 +738,14 @@ export const ComponentsPage = () => {
             <Link href="#" appearance="subtle">
               微妙链接
             </Link>
+            <Link href="#">
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                带图标的链接
+                <ArrowRightRegular />
+              </span>
+            </Link>
             <Link href="#" disabled>
               禁用链接
-            </Link>
-            <Link href="#" icon={<ArrowRightRegular />} iconPosition="after">
-              带图标的链接
             </Link>
           </div>
         </div>
@@ -822,7 +827,7 @@ export const ComponentsPage = () => {
             <div>
               <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>矩形骨架屏</Body1>
               <Skeleton>
-                <SkeletonItem size={100} shape="rectangle" style={{ width: '200px', height: '100px' }} />
+                <SkeletonItem shape="rectangle" style={{ width: '200px', height: '100px' }} />
               </Skeleton>
             </div>
             <div>
@@ -847,13 +852,17 @@ export const ComponentsPage = () => {
                 <Tag>标签 1</Tag>
                 <Tag appearance="outline">标签 2</Tag>
                 <Tag appearance="brand">品牌标签</Tag>
-                <Tag icon={<StarRegular />}>带图标</Tag>
-                <Tag
-                  icon={<DismissRegular />}
-                  iconPosition="after"
-                  onIconClick={() => {}}
-                >
-                  可删除
+                <Tag>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    <StarRegular />
+                    带图标
+                  </span>
+                </Tag>
+                <Tag>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    可删除
+                    <DismissRegular onClick={() => {}} style={{ cursor: 'pointer' }} />
+                  </span>
                 </Tag>
               </div>
             </div>
@@ -903,13 +912,12 @@ export const ComponentsPage = () => {
               <Rating
                 value={ratingValue}
                 onChange={(_, data) => setRatingValue(data.value)}
-                count={5}
                 size="large"
               />
             </div>
             <div>
               <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>只读评分</Body1>
-              <Rating value={4} readOnly count={5} />
+              <RatingDisplay value={4} />
             </div>
           </div>
         </div>
@@ -1141,11 +1149,12 @@ export const ComponentsPage = () => {
             <InteractionTag appearance="outline">轮廓样式</InteractionTag>
             <InteractionTag appearance="brand">品牌样式</InteractionTag>
             <InteractionTag
-              icon={<StarRegular />}
-              iconPosition="before"
               onClick={() => {}}
             >
-              带图标
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <StarRegular />
+                带图标
+              </span>
             </InteractionTag>
           </div>
         </div>
