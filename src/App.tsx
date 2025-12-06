@@ -1,11 +1,14 @@
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { useState, useEffect } from 'react';
+import { PhotoProvider } from 'react-photo-view';
 import { MainLayout, PageType } from './components/MainLayout';
 import { HomePage } from './pages/HomePage';
 import { ComponentsPage } from './pages/ComponentsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ModelWeightsPage } from './pages/ModelWeightsPage';
 import { SDCppPage } from './pages/SDCppPage';
+import { GeneratePage } from './pages/GeneratePage';
+import { GeneratedImagesPage } from './pages/GeneratedImagesPage';
 
 function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -45,19 +48,25 @@ function App() {
 
   return (
     <FluentProvider theme={isDarkMode ? webDarkTheme : webLightTheme}>
-      <MainLayout 
-        currentPage={currentPage} 
-        onPageChange={handlePageChange}
-        navigationDisabled={isUploading}
-      >
-        {currentPage === 'weights' ? (
-          <ModelWeightsPage onUploadStateChange={setIsUploading} />
-        ) : currentPage === 'sdcpp' ? (
-          <SDCppPage />
-        ) : (
-          renderPage()
-        )}
-      </MainLayout>
+      <PhotoProvider>
+        <MainLayout 
+          currentPage={currentPage} 
+          onPageChange={handlePageChange}
+          navigationDisabled={isUploading}
+        >
+          {currentPage === 'weights' ? (
+            <ModelWeightsPage onUploadStateChange={setIsUploading} />
+          ) : currentPage === 'sdcpp' ? (
+            <SDCppPage />
+          ) : currentPage === 'generate' ? (
+            <GeneratePage />
+          ) : currentPage === 'images' ? (
+            <GeneratedImagesPage />
+          ) : (
+            renderPage()
+          )}
+        </MainLayout>
+      </PhotoProvider>
     </FluentProvider>
   );
 }

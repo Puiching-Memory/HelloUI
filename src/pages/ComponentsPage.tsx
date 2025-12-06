@@ -42,6 +42,48 @@ import {
   DialogBody,
   DialogActions,
   DialogContent,
+  CompoundButton,
+  MenuButton,
+  SplitButton,
+  ToggleButton,
+  Combobox,
+  Option,
+  SpinButton,
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbButton,
+  Link,
+  Popover,
+  PopoverTrigger,
+  PopoverSurface,
+  Accordion,
+  AccordionItem,
+  AccordionHeader,
+  AccordionPanel,
+  Skeleton,
+  SkeletonItem,
+  Tag,
+  TagGroup,
+  CounterBadge,
+  Rating,
+  Textarea,
+  Field,
+  Toaster,
+  useToastController,
+  Toast,
+  ToastTitle,
+  ToastBody,
+  ToastFooter,
+  Toolbar,
+  ToolbarButton,
+  ToolbarDivider,
+  ToolbarGroup,
+  Drawer,
+  DrawerBody,
+  DrawerHeader,
+  DrawerHeaderTitle,
+  InteractionTag,
+  Select,
 } from '@fluentui/react-components';
 import {
   AddRegular,
@@ -54,6 +96,13 @@ import {
   HomeRegular,
   DocumentRegular,
   FolderRegular,
+  ChevronRightRegular,
+  DismissRegular,
+  StarRegular,
+  InfoRegular,
+  ArrowRightRegular,
+  CopyRegular,
+  ShareRegular,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -103,6 +152,17 @@ export const ComponentsPage = () => {
   const [selectedOption, setSelectedOption] = useState('option1');
   const [selectedTab, setSelectedTab] = useState('tab1');
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [toggleChecked, setToggleChecked] = useState(false);
+  const [comboboxValue, setComboboxValue] = useState('');
+  const [spinButtonValue, setSpinButtonValue] = useState(10);
+  const [ratingValue, setRatingValue] = useState(3);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  
+  // Toast 控制器
+  const toasterId = 'components-toaster';
+  const { dispatchToast } = useToastController(toasterId);
 
   return (
     <div className={styles.container}>
@@ -145,6 +205,128 @@ export const ComponentsPage = () => {
         </div>
       </Card>
 
+      {/* 按钮变体 */}
+      <Card className={styles.card}>
+        <div className={styles.section}>
+          <Title2>按钮变体 (Button Variants)</Title2>
+          <Caption1>特殊功能的按钮组件</Caption1>
+          <div className={styles.column}>
+            <div>
+              <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>复合按钮 (CompoundButton)</Body1>
+              <div className={styles.row}>
+                <CompoundButton
+                  secondaryContent="附带说明文字"
+                  icon={<AddRegular />}
+                >
+                  创建新项目
+                </CompoundButton>
+                <CompoundButton
+                  secondaryContent="附带说明文字"
+                  appearance="outline"
+                  icon={<EditRegular />}
+                >
+                  编辑项目
+                </CompoundButton>
+              </div>
+            </div>
+            <div>
+              <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>菜单按钮 (MenuButton)</Body1>
+              <div className={styles.row}>
+                <Menu>
+                  <MenuTrigger disableButtonEnhancement>
+                    <MenuButton icon={<SettingsRegular />} menuIcon={<ChevronRightRegular />}>
+                      设置菜单
+                    </MenuButton>
+                  </MenuTrigger>
+                  <MenuPopover>
+                    <MenuList>
+                      <MenuItem>选项 1</MenuItem>
+                      <MenuItem>选项 2</MenuItem>
+                      <MenuDivider />
+                      <MenuItem>选项 3</MenuItem>
+                    </MenuList>
+                  </MenuPopover>
+                </Menu>
+                <Menu>
+                  <MenuTrigger disableButtonEnhancement>
+                    <MenuButton appearance="secondary">打开菜单</MenuButton>
+                  </MenuTrigger>
+                  <MenuPopover>
+                    <MenuList>
+                      <MenuItem>选项 1</MenuItem>
+                      <MenuItem>选项 2</MenuItem>
+                      <MenuDivider />
+                      <MenuItem>选项 3</MenuItem>
+                    </MenuList>
+                  </MenuPopover>
+                </Menu>
+              </div>
+            </div>
+            <div>
+              <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>分割按钮 (SplitButton)</Body1>
+              <div className={styles.row}>
+                <Menu positioning="below-end">
+                  <MenuTrigger disableButtonEnhancement>
+                    {(triggerProps) => (
+                      <SplitButton
+                        menuButton={triggerProps}
+                        icon={<AddRegular />}
+                      >
+                        新建
+                      </SplitButton>
+                    )}
+                  </MenuTrigger>
+                  <MenuPopover>
+                    <MenuList>
+                      <MenuItem icon={<DocumentRegular />}>新建文档</MenuItem>
+                      <MenuItem icon={<FolderRegular />}>新建文件夹</MenuItem>
+                    </MenuList>
+                  </MenuPopover>
+                </Menu>
+                <Menu positioning="below-end">
+                  <MenuTrigger disableButtonEnhancement>
+                    {(triggerProps) => (
+                      <SplitButton
+                        menuButton={triggerProps}
+                        appearance="secondary"
+                        icon={<EditRegular />}
+                      >
+                        编辑
+                      </SplitButton>
+                    )}
+                  </MenuTrigger>
+                  <MenuPopover>
+                    <MenuList>
+                      <MenuItem>编辑选项 1</MenuItem>
+                      <MenuItem>编辑选项 2</MenuItem>
+                    </MenuList>
+                  </MenuPopover>
+                </Menu>
+              </div>
+            </div>
+            <div>
+              <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>切换按钮 (ToggleButton)</Body1>
+              <div className={styles.row}>
+                <ToggleButton
+                  checked={toggleChecked}
+                  onChange={(_, data) => setToggleChecked(data.checked)}
+                  icon={<SettingsRegular />}
+                >
+                  切换设置
+                </ToggleButton>
+                <ToggleButton
+                  checked={toggleChecked}
+                  onChange={(_, data) => setToggleChecked(data.checked)}
+                  appearance="primary"
+                >
+                  主要切换
+                </ToggleButton>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+
       {/* 输入控件 */}
       <Card className={styles.card}>
         <div className={styles.section}>
@@ -158,6 +340,11 @@ export const ComponentsPage = () => {
               contentBefore={<SearchRegular />}
               style={{ maxWidth: '400px' }}
             />
+            <Textarea
+              placeholder="多行文本输入..."
+              style={{ maxWidth: '400px' }}
+              rows={3}
+            />
             <Dropdown
               placeholder="选择选项"
               value={selectedOption}
@@ -168,6 +355,32 @@ export const ComponentsPage = () => {
               <option value="option2">选项 2</option>
               <option value="option3">选项 3</option>
             </Dropdown>
+            <div>
+              <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>组合框 (Combobox) - 可搜索</Body1>
+              <Combobox
+                placeholder="输入或选择..."
+                value={comboboxValue}
+                onOptionSelect={(_, data) => setComboboxValue(data.optionText || '')}
+                style={{ maxWidth: '400px' }}
+              >
+                <Option value="apple">苹果 (Apple)</Option>
+                <Option value="banana">香蕉 (Banana)</Option>
+                <Option value="cherry">樱桃 (Cherry)</Option>
+                <Option value="date">枣子 (Date)</Option>
+                <Option value="elderberry">接骨木 (Elderberry)</Option>
+              </Combobox>
+            </div>
+            <div>
+              <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>数字输入框 (SpinButton)</Body1>
+              <SpinButton
+                value={spinButtonValue}
+                onChange={(_, data) => setSpinButtonValue(data.value ?? 0)}
+                min={0}
+                max={100}
+                step={1}
+                style={{ maxWidth: '200px' }}
+              />
+            </div>
           </div>
         </div>
       </Card>
@@ -492,6 +705,477 @@ export const ComponentsPage = () => {
         </Card>
       </div>
 
+      {/* 面包屑导航 */}
+      <Card className={styles.card}>
+        <div className={styles.section}>
+          <Title2>面包屑导航 (Breadcrumb)</Title2>
+          <Caption1>显示当前页面在导航层次结构中的位置</Caption1>
+          <Breadcrumb>
+            <BreadcrumbItem>
+              <BreadcrumbButton icon={<HomeRegular />}>首页</BreadcrumbButton>
+            </BreadcrumbItem>
+            <BreadcrumbItem>
+              <BreadcrumbButton>组件</BreadcrumbButton>
+            </BreadcrumbItem>
+            <BreadcrumbItem>
+              <BreadcrumbButton current>面包屑</BreadcrumbButton>
+            </BreadcrumbItem>
+          </Breadcrumb>
+        </div>
+      </Card>
+
+      {/* 链接 */}
+      <Card className={styles.card}>
+        <div className={styles.section}>
+          <Title2>链接 (Link)</Title2>
+          <Caption1>用于导航的链接组件</Caption1>
+          <div className={styles.column}>
+            <Link href="#" inline>
+              内联链接
+            </Link>
+            <Link href="#" appearance="subtle">
+              微妙链接
+            </Link>
+            <Link href="#" disabled>
+              禁用链接
+            </Link>
+            <Link href="#" icon={<ArrowRightRegular />} iconPosition="after">
+              带图标的链接
+            </Link>
+          </div>
+        </div>
+      </Card>
+
+      {/* 弹出层 */}
+      <Card className={styles.card}>
+        <div className={styles.section}>
+          <Title2>弹出层 (Popover)</Title2>
+          <Caption1>非模态弹出层组件，用于显示额外内容</Caption1>
+          <div className={styles.row}>
+            <Popover open={popoverOpen} onOpenChange={(_, data) => setPopoverOpen(data.open)}>
+              <PopoverTrigger disableButtonEnhancement>
+                <Button>打开弹出层</Button>
+              </PopoverTrigger>
+              <PopoverSurface>
+                <div style={{ padding: tokens.spacingVerticalM, minWidth: '200px' }}>
+                  <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>弹出层内容</Body1>
+                  <Body1>这是一个弹出层示例，可以显示额外的信息或操作。</Body1>
+                  <div style={{ marginTop: tokens.spacingVerticalM }}>
+                    <Button size="small" onClick={() => setPopoverOpen(false)}>
+                      关闭
+                    </Button>
+                  </div>
+                </div>
+              </PopoverSurface>
+            </Popover>
+          </div>
+        </div>
+      </Card>
+
+      {/* 手风琴 */}
+      <Card className={styles.card}>
+        <div className={styles.section}>
+          <Title2>手风琴 (Accordion)</Title2>
+          <Caption1>可折叠的内容面板组件</Caption1>
+          <Accordion>
+            <AccordionItem value="1">
+              <AccordionHeader expandIconPosition="end" icon={<ChevronRightRegular />}>
+                第一部分
+              </AccordionHeader>
+              <AccordionPanel>
+                <Body1>这是第一部分的内容。可以包含任何类型的组件或文本。</Body1>
+              </AccordionPanel>
+            </AccordionItem>
+            <AccordionItem value="2">
+              <AccordionHeader expandIconPosition="end" icon={<ChevronRightRegular />}>
+                第二部分
+              </AccordionHeader>
+              <AccordionPanel>
+                <Body1>这是第二部分的内容。手风琴组件允许用户展开或折叠不同的部分。</Body1>
+              </AccordionPanel>
+            </AccordionItem>
+            <AccordionItem value="3">
+              <AccordionHeader expandIconPosition="end" icon={<ChevronRightRegular />}>
+                第三部分
+              </AccordionHeader>
+              <AccordionPanel>
+                <Body1>这是第三部分的内容。多个面板可以同时展开或折叠。</Body1>
+              </AccordionPanel>
+            </AccordionItem>
+          </Accordion>
+        </div>
+      </Card>
+
+      {/* 骨架屏 */}
+      <Card className={styles.card}>
+        <div className={styles.section}>
+          <Title2>骨架屏 (Skeleton)</Title2>
+          <Caption1>加载状态的占位组件</Caption1>
+          <div className={styles.column}>
+            <div>
+              <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>文本骨架屏</Body1>
+              <Skeleton>
+                <SkeletonItem size={16} />
+                <SkeletonItem size={16} style={{ width: '60%' }} />
+              </Skeleton>
+            </div>
+            <div>
+              <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>矩形骨架屏</Body1>
+              <Skeleton>
+                <SkeletonItem size={100} shape="rectangle" style={{ width: '200px', height: '100px' }} />
+              </Skeleton>
+            </div>
+            <div>
+              <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>圆形骨架屏</Body1>
+              <Skeleton>
+                <SkeletonItem size={64} shape="circle" />
+              </Skeleton>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* 标签 */}
+      <Card className={styles.card}>
+        <div className={styles.section}>
+          <Title2>标签 (Tags)</Title2>
+          <Caption1>用于标记和分类的标签组件</Caption1>
+          <div className={styles.column}>
+            <div>
+              <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>基础标签</Body1>
+              <div className={styles.row}>
+                <Tag>标签 1</Tag>
+                <Tag appearance="outline">标签 2</Tag>
+                <Tag appearance="brand">品牌标签</Tag>
+                <Tag icon={<StarRegular />}>带图标</Tag>
+                <Tag
+                  icon={<DismissRegular />}
+                  iconPosition="after"
+                  onIconClick={() => {}}
+                >
+                  可删除
+                </Tag>
+              </div>
+            </div>
+            <div>
+              <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>标签组 (TagGroup)</Body1>
+              <TagGroup
+                onDismiss={(_, data) => {
+                  setSelectedTags(selectedTags.filter(tag => tag !== data.value));
+                }}
+              >
+                <Tag value="tag1">React</Tag>
+                <Tag value="tag2">TypeScript</Tag>
+                <Tag value="tag3">Fluent UI</Tag>
+                <Tag value="tag4">Electron</Tag>
+              </TagGroup>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* 计数徽章 */}
+      <Card className={styles.card}>
+        <div className={styles.section}>
+          <Title2>计数徽章 (CounterBadge)</Title2>
+          <Caption1>显示数字计数的徽章组件</Caption1>
+          <div className={styles.row}>
+            <CounterBadge count={5} />
+            <CounterBadge count={99} color="brand" />
+            <CounterBadge count={999} color="danger" />
+            <CounterBadge count={0} showZero={false} />
+            <div style={{ position: 'relative', display: 'inline-block' }}>
+              <Button>通知</Button>
+              <CounterBadge count={3} size="small" style={{ position: 'absolute', top: '-4px', right: '-4px' }} />
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* 评分 */}
+      <Card className={styles.card}>
+        <div className={styles.section}>
+          <Title2>评分 (Rating)</Title2>
+          <Caption1>星级评分组件</Caption1>
+          <div className={styles.column}>
+            <div>
+              <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>当前评分: {ratingValue} 星</Body1>
+              <Rating
+                value={ratingValue}
+                onChange={(_, data) => setRatingValue(data.value)}
+                count={5}
+                size="large"
+              />
+            </div>
+            <div>
+              <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>只读评分</Body1>
+              <Rating value={4} readOnly count={5} />
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* 信息标签 */}
+      <Card className={styles.card}>
+        <div className={styles.section}>
+          <Title2>信息标签 (InfoLabel)</Title2>
+          <Caption1>带有信息提示的表单标签</Caption1>
+          <div className={styles.column}>
+            <Field label="用户名">
+              <Input placeholder="请输入用户名" style={{ maxWidth: '400px' }} />
+            </Field>
+            <Field
+              label={
+                <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS }}>
+                  <Text>邮箱地址</Text>
+                  <Tooltip content="请输入有效的邮箱地址" relationship="label">
+                    <Button
+                      appearance="subtle"
+                      icon={<InfoRegular />}
+                      size="small"
+                      style={{ minWidth: 'auto', padding: '2px 4px' }}
+                    />
+                  </Tooltip>
+                </div>
+              }
+            >
+              <Input placeholder="请输入邮箱" type="email" style={{ maxWidth: '400px' }} />
+            </Field>
+          </div>
+        </div>
+      </Card>
+
+      {/* Toast 通知 */}
+      <Card className={styles.card}>
+        <div className={styles.section}>
+          <Title2>Toast 通知 (Toast)</Title2>
+          <Caption1>轻量级通知组件，用于显示临时消息</Caption1>
+          <div className={styles.column}>
+            <div>
+              <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>不同类型的 Toast 通知</Body1>
+              <div className={styles.row}>
+                <Button
+                  onClick={() =>
+                    dispatchToast(
+                      <Toast>
+                        <ToastTitle>成功</ToastTitle>
+                        <ToastBody>操作已成功完成！</ToastBody>
+                      </Toast>,
+                      { intent: 'success' }
+                    )
+                  }
+                >
+                  显示成功通知
+                </Button>
+                <Button
+                  onClick={() =>
+                    dispatchToast(
+                      <Toast>
+                        <ToastTitle>信息</ToastTitle>
+                        <ToastBody>这是一条信息提示。</ToastBody>
+                      </Toast>,
+                      { intent: 'info' }
+                    )
+                  }
+                >
+                  显示信息通知
+                </Button>
+                <Button
+                  onClick={() =>
+                    dispatchToast(
+                      <Toast>
+                        <ToastTitle>警告</ToastTitle>
+                        <ToastBody>请注意：这是一个警告消息。</ToastBody>
+                      </Toast>,
+                      { intent: 'warning' }
+                    )
+                  }
+                >
+                  显示警告通知
+                </Button>
+                <Button
+                  onClick={() =>
+                    dispatchToast(
+                      <Toast>
+                        <ToastTitle>错误</ToastTitle>
+                        <ToastBody>操作失败，请重试。</ToastBody>
+                      </Toast>,
+                      { intent: 'error' }
+                    )
+                  }
+                >
+                  显示错误通知
+                </Button>
+              </div>
+            </div>
+            <div>
+              <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>带操作的 Toast</Body1>
+              <Button
+                onClick={() =>
+                  dispatchToast(
+                    <Toast>
+                      <ToastTitle>文件已复制</ToastTitle>
+                      <ToastBody>文件已成功复制到剪贴板。</ToastBody>
+                      <ToastFooter>
+                        <Button appearance="subtle" size="small">
+                          撤销
+                        </Button>
+                      </ToastFooter>
+                    </Toast>,
+                    { intent: 'success' }
+                  )
+                }
+              >
+                显示带操作的 Toast
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Card>
+      <Toaster toasterId={toasterId} />
+
+      {/* 工具栏 */}
+      <Card className={styles.card}>
+        <div className={styles.section}>
+          <Title2>工具栏 (Toolbar)</Title2>
+          <Caption1>用于组织和展示操作按钮的工具栏组件</Caption1>
+          <div className={styles.column}>
+            <Toolbar>
+              <ToolbarGroup>
+                <ToolbarButton icon={<EditRegular />}>编辑</ToolbarButton>
+                <ToolbarButton icon={<DeleteRegular />}>删除</ToolbarButton>
+                <ToolbarDivider />
+                <ToolbarButton icon={<CopyRegular />}>复制</ToolbarButton>
+                <ToolbarButton icon={<ShareRegular />}>分享</ToolbarButton>
+              </ToolbarGroup>
+            </Toolbar>
+            <Toolbar>
+              <ToolbarGroup>
+                <ToolbarButton icon={<AddRegular />} appearance="primary">
+                  新建
+                </ToolbarButton>
+                <ToolbarButton icon={<EditRegular />}>编辑</ToolbarButton>
+              </ToolbarGroup>
+              <ToolbarDivider />
+              <ToolbarGroup>
+                <ToolbarButton icon={<SettingsRegular />}>设置</ToolbarButton>
+              </ToolbarGroup>
+            </Toolbar>
+          </div>
+        </div>
+      </Card>
+
+      {/* 分页 */}
+      <Card className={styles.card}>
+        <div className={styles.section}>
+          <Title2>分页 (Pagination)</Title2>
+          <Caption1>用于在多个页面之间导航的分页组件</Caption1>
+          <div>
+            <Body1>Pagination 组件需要从单独的包导入，当前主包中不包含此组件。</Body1>
+            <Body1 style={{ marginTop: tokens.spacingVerticalS, color: tokens.colorNeutralForeground3 }}>
+              如需使用 Pagination 组件，请参考 Fluent UI 文档了解正确的导入方式。
+            </Body1>
+          </div>
+        </div>
+      </Card>
+
+      {/* 抽屉 */}
+      <Card className={styles.card}>
+        <div className={styles.section}>
+          <Title2>抽屉 (Drawer)</Title2>
+          <Caption1>侧边栏抽屉组件，用于显示额外内容或导航</Caption1>
+          <div className={styles.row}>
+            <Button onClick={() => setDrawerOpen(true)}>打开抽屉</Button>
+          </div>
+        </div>
+      </Card>
+      <Drawer type="overlay" open={drawerOpen} onOpenChange={(_, data) => setDrawerOpen(data.open)}>
+        <DrawerHeader>
+          <DrawerHeaderTitle
+            action={
+              <Button
+                appearance="subtle"
+                aria-label="关闭抽屉"
+                icon={<DismissRegular />}
+                onClick={() => setDrawerOpen(false)}
+              />
+            }
+          >
+            抽屉标题
+          </DrawerHeaderTitle>
+        </DrawerHeader>
+        <DrawerBody>
+          <div className={styles.column} style={{ padding: tokens.spacingVerticalM }}>
+            <Body1>这是抽屉内容区域。</Body1>
+            <Body1>您可以在这里放置任何内容，比如导航菜单、设置选项等。</Body1>
+            <div style={{ marginTop: tokens.spacingVerticalM }}>
+              <Button appearance="primary" onClick={() => setDrawerOpen(false)}>
+                关闭
+              </Button>
+            </div>
+          </div>
+        </DrawerBody>
+      </Drawer>
+
+      {/* 导航菜单 */}
+      <Card className={styles.card}>
+        <div className={styles.section}>
+          <Title2>导航菜单 (Nav)</Title2>
+          <Caption1>用于导航的菜单组件</Caption1>
+          <div style={{ maxWidth: '300px', border: `1px solid ${tokens.colorNeutralStroke2}`, borderRadius: tokens.borderRadiusMedium, padding: tokens.spacingVerticalM }}>
+            <Body1>Nav 组件需要从 @fluentui/react-nav 包导入，当前主包中不包含此组件。</Body1>
+            <Body1 style={{ marginTop: tokens.spacingVerticalS, color: tokens.colorNeutralForeground3 }}>
+              如需使用 Nav 组件，请安装: pnpm add @fluentui/react-nav
+            </Body1>
+          </div>
+        </div>
+      </Card>
+
+      {/* 交互式标签 */}
+      <Card className={styles.card}>
+        <div className={styles.section}>
+          <Title2>交互式标签 (InteractionTag)</Title2>
+          <Caption1>可交互的标签组件，支持点击和悬停效果</Caption1>
+          <div className={styles.row}>
+            <InteractionTag>可点击标签</InteractionTag>
+            <InteractionTag appearance="outline">轮廓样式</InteractionTag>
+            <InteractionTag appearance="brand">品牌样式</InteractionTag>
+            <InteractionTag
+              icon={<StarRegular />}
+              iconPosition="before"
+              onClick={() => {}}
+            >
+              带图标
+            </InteractionTag>
+          </div>
+        </div>
+      </Card>
+
+      {/* Select 选择器 */}
+      <Card className={styles.card}>
+        <div className={styles.section}>
+          <Title2>Select 选择器</Title2>
+          <Caption1>原生 HTML select 元素的封装，提供更好的样式</Caption1>
+          <div className={styles.column}>
+            <Field label="选择颜色">
+              <Select id="color-select" style={{ maxWidth: '400px' }}>
+                <option value="red">红色</option>
+                <option value="green">绿色</option>
+                <option value="blue">蓝色</option>
+                <option value="yellow">黄色</option>
+              </Select>
+            </Field>
+            <Field label="选择大小">
+              <Select id="size-select" size="large" style={{ maxWidth: '400px' }}>
+                <option value="small">小</option>
+                <option value="medium">中</option>
+                <option value="large">大</option>
+              </Select>
+            </Field>
+          </div>
+        </div>
+      </Card>
+
       {/* 状态信息 */}
       <Card className={styles.card}>
         <div className={styles.section}>
@@ -499,9 +1183,13 @@ export const ComponentsPage = () => {
           <div className={styles.column}>
             <Text>输入值: {inputValue || '(空)'}</Text>
             <Text>下拉选择: {selectedOption}</Text>
+            <Text>组合框值: {comboboxValue || '(空)'}</Text>
+            <Text>数字输入: {spinButtonValue}</Text>
             <Text>复选框: {checkboxChecked ? '已选中' : '未选中'}</Text>
             <Text>开关: {switchChecked ? '开启' : '关闭'}</Text>
+            <Text>切换按钮: {toggleChecked ? '开启' : '关闭'}</Text>
             <Text>单选值: {radioValue}</Text>
+            <Text>评分: {ratingValue} 星</Text>
             <Text>进度: {progress}%</Text>
             <Text>滑块: {sliderValue}</Text>
           </div>

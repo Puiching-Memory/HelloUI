@@ -5,6 +5,8 @@ import { promises as fs } from 'fs'
 import { existsSync, createReadStream, createWriteStream } from 'fs'
 import { pipeline } from 'stream/promises'
 import { createHash } from 'crypto'
+import { spawn } from 'child_process'
+import archiver from 'archiver'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
@@ -722,6 +724,670 @@ ipcMain.handle('sdcpp:delete-file', async (_, filePath: string) => {
     return true
   } catch (error) {
     console.error('Failed to delete file:', error)
+    throw error
+  }
+})
+
+// ========== 模型组管理相关 IPC 处理程序 ==========
+
+// 获取模型组配置文件的路径
+function getModelGroupsFilePath(): string {
+  const userDataPath = app.getPath('userData')
+  return join(userDataPath, 'model-groups.json')
+}
+
+// 模型组接口定义
+interface ModelGroup {
+  id: string
+  name: string
+  sdModel?: string  // SD模型路径
+  vaeModel?: string  // VAE模型路径
+  llmModel?: string  // LLM/CLIP模型路径
+  defaultSteps?: number  // 推荐的默认采样步数
+  defaultCfgScale?: number  // 推荐的默认CFG Scale值
+  createdAt: number
+  updatedAt: number
+}
+
+// 加载模型组列表
+async function loadModelGroups(): Promise<ModelGroup[]> {
+  try {
+    const filePath = getModelGroupsFilePath()
+    if (!existsSync(filePath)) {
+      return []
+    }
+    const content = await fs.readFile(filePath, 'utf-8')
+    return JSON.parse(content) as ModelGroup[]
+  } catch (error) {
+    console.error('Failed to load model groups:', error)
+    return []
+  }
+}
+
+// 保存模型组列表
+async function saveModelGroups(groups: ModelGroup[]): Promise<void> {
+  try {
+    const filePath = getModelGroupsFilePath()
+    await fs.writeFile(filePath, JSON.stringify(groups, null, 2), 'utf-8')
+  } catch (error) {
+    console.error('Failed to save model groups:', error)
+    throw error
+  }
+}
+
+// IPC 处理程序：获取所有模型组
+ipcMain.handle('model-groups:list', async () => {
+  return await loadModelGroups()
+})
+
+// IPC 处理程序：创建模型组
+ipcMain.handle('model-groups:create', async (_, group: Omit<ModelGroup, 'id' | 'createdAt' | 'updatedAt'>) => {
+  const groups = await loadModelGroups()
+  const newGroup: ModelGroup = {
+    ...group,
+    id: Date.now().toString(),
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  }
+  groups.push(newGroup)
+  await saveModelGroups(groups)
+  return newGroup
+})
+
+// IPC 处理程序：更新模型组
+ipcMain.handle('model-groups:update', async (_, id: string, updates: Partial<Omit<ModelGroup, 'id' | 'createdAt'>>) => {
+  const groups = await loadModelGroups()
+  const index = groups.findIndex(g => g.id === id)
+  if (index === -1) {
+    throw new Error(`模型组不存在: ${id}`)
+  }
+  groups[index] = {
+    ...groups[index],
+    ...updates,
+    updatedAt: Date.now(),
+  }
+  await saveModelGroups(groups)
+  return groups[index]
+})
+
+// IPC 处理程序：删除模型组
+ipcMain.handle('model-groups:delete', async (_, id: string) => {
+  const groups = await loadModelGroups()
+  const index = groups.findIndex(g => g.id === id)
+  if (index === -1) {
+    throw new Error(`模型组不存在: ${id}`)
+  }
+  groups.splice(index, 1)
+  await saveModelGroups(groups)
+  return true
+})
+
+// IPC 处理程序：获取单个模型组
+ipcMain.handle('model-groups:get', async (_, id: string) => {
+  const groups = await loadModelGroups()
+  return groups.find(g => g.id === id) || null
+})
+
+// ========== 图片生成相关 IPC 处理程序 ==========
+
+// 获取 SD.cpp 可执行文件路径
+function getSDCppExecutablePath(deviceType: 'cpu' | 'vulkan' | 'cuda'): string {
+  const engineFolder = sdcppFolderPath || getDefaultSDCppFolder()
+  const deviceFolder = join(engineFolder, deviceType)
+  // Windows 使用 .exe，其他平台可能没有扩展名
+  const executableName = process.platform === 'win32' ? 'sd.exe' : 'sd'
+  return join(deviceFolder, executableName)
+}
+
+// IPC 处理程序：开始生成图片
+ipcMain.handle('generate:start', async (event, params: {
+  groupId?: string  // 使用模型组ID
+  modelPath?: string  // 兼容旧版本：直接使用模型路径
+  deviceType: 'cpu' | 'vulkan' | 'cuda'
+  prompt: string
+  negativePrompt?: string
+  steps?: number  // 采样步数，默认 20
+  width?: number  // 图片宽度，默认 512
+  height?: number  // 图片高度，默认 512
+  cfgScale?: number  // CFG scale，默认 7.0
+}) => {
+  try {
+    const { 
+      groupId, 
+      modelPath, 
+      deviceType, 
+      prompt, 
+      negativePrompt = '',
+      steps = 20,
+      width = 512,
+      height = 512,
+      cfgScale = 7.0
+    } = params
+
+    // 确定使用的模型路径
+    let sdModelPath: string | undefined
+
+    if (groupId) {
+      // 使用模型组
+      const groups = await loadModelGroups()
+      const group = groups.find(g => g.id === groupId)
+      if (!group) {
+        throw new Error(`模型组不存在: ${groupId}`)
+      }
+      if (!group.sdModel) {
+        throw new Error('模型组中未配置SD模型')
+      }
+      sdModelPath = group.sdModel
+      
+      // 检查模型文件是否存在
+      if (!existsSync(sdModelPath)) {
+        throw new Error(`SD模型文件不存在: ${sdModelPath}`)
+      }
+      
+      // TODO: 未来可以在这里使用 VAE 和 LLM 模型
+      // if (group.vaeModel && !existsSync(group.vaeModel)) {
+      //   throw new Error(`VAE模型文件不存在: ${group.vaeModel}`)
+      // }
+      // if (group.llmModel && !existsSync(group.llmModel)) {
+      //   throw new Error(`LLM模型文件不存在: ${group.llmModel}`)
+      // }
+    } else if (modelPath) {
+      // 兼容旧版本：直接使用模型路径
+      sdModelPath = modelPath
+      if (!existsSync(sdModelPath)) {
+        throw new Error(`模型文件不存在: ${sdModelPath}`)
+      }
+    } else {
+      throw new Error('必须提供模型组ID或模型路径')
+    }
+
+    // 获取 SD.cpp 可执行文件路径
+    const sdExePath = getSDCppExecutablePath(deviceType)
+    if (!existsSync(sdExePath)) {
+      throw new Error(`SD.cpp 引擎文件不存在: ${sdExePath}\n请确保已正确安装 ${deviceType.toUpperCase()} 版本的 SD.cpp 引擎`)
+    }
+
+    // 生成输出图片路径（保存在模型文件夹下的 outputs 目录）
+    const modelDir = dirname(sdModelPath)
+    const outputsDir = join(modelDir, 'outputs')
+    if (!existsSync(outputsDir)) {
+      await fs.mkdir(outputsDir, { recursive: true })
+    }
+
+    const timestamp = Date.now()
+    const outputImagePath = join(outputsDir, `generated_${timestamp}.png`)
+
+    // 构建命令行参数
+    // 根据 sd.exe 的参数要求：
+    // 必需参数：model_path/diffusion_model (位置参数) 或 --diffusion-model <string>
+    // 使用 --diffusion-model 参数指定扩散模型路径
+    const args: string[] = [
+      '--diffusion-model', sdModelPath,
+      '--prompt', prompt,
+    ]
+    
+    // 添加 VAE 和 LLM 模型支持
+    if (groupId) {
+      const groups = await loadModelGroups()
+      const group = groups.find(g => g.id === groupId)
+      if (group?.vaeModel && existsSync(group.vaeModel)) {
+        args.push('--vae', group.vaeModel)
+      }
+      // 添加 LLM 文本编码器支持（用于某些模型如 Z-Image 等）
+      if (group?.llmModel && existsSync(group.llmModel)) {
+        args.push('--llm', group.llmModel)
+      }
+      // 注意：根据 sd.exe 的帮助，还可能需要 clip_l, clip_g, clip_vision, t5xxl 等
+      // 可以根据具体模型类型进一步扩展
+    }
+
+    if (negativePrompt) {
+      args.push('--negative-prompt', negativePrompt)
+    }
+
+    args.push('--output', outputImagePath)
+
+    // 添加高级参数
+    if (steps !== 20) {
+      args.push('--steps', steps.toString())
+    }
+    if (width !== 512) {
+      args.push('--width', width.toString())
+    }
+    if (height !== 512) {
+      args.push('--height', height.toString())
+    }
+    // 使用浮点数比较而非严格相等，避免精度问题
+    if (Math.abs(cfgScale - 7.0) > 0.0001) {
+      args.push('--cfg-scale', cfgScale.toString())
+    }
+
+    console.log(`[Generate] 启动图片生成: ${sdExePath}`)
+    console.log(`[Generate] 参数: ${args.join(' ')}`)
+
+    // 发送进度更新
+    event.sender.send('generate:progress', { progress: '正在启动 SD.cpp 引擎...' })
+
+    return new Promise((resolve, reject) => {
+      const childProcess = spawn(sdExePath, args, {
+        cwd: dirname(sdExePath),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+
+      let stdout = ''
+      let stderr = ''
+      let isResolved = false
+
+      // 辅助函数：安全地终止进程
+      const killProcess = () => {
+        if (childProcess && !childProcess.killed && childProcess.pid) {
+          try {
+            // 在 Windows 上使用 taskkill，在其他平台上使用 kill
+            if (process.platform === 'win32') {
+              childProcess.kill('SIGTERM')
+              // 如果进程在 3 秒后仍未退出，强制终止
+              setTimeout(() => {
+                if (childProcess && !childProcess.killed && childProcess.pid) {
+                  try {
+                    childProcess.kill('SIGKILL')
+                  } catch (e) {
+                    console.error('[Generate] 强制终止进程失败:', e)
+                  }
+                }
+              }, 3000)
+            } else {
+              childProcess.kill('SIGTERM')
+              setTimeout(() => {
+                if (childProcess && !childProcess.killed && childProcess.pid) {
+                  try {
+                    childProcess.kill('SIGKILL')
+                  } catch (e) {
+                    console.error('[Generate] 强制终止进程失败:', e)
+                  }
+                }
+              }, 3000)
+            }
+          } catch (error) {
+            console.error('[Generate] 终止进程时出错:', error)
+          }
+        }
+      }
+
+      // 安全地拒绝 Promise 并终止进程
+      const safeReject = (error: Error) => {
+        if (!isResolved) {
+          isResolved = true
+          killProcess()
+          reject(error)
+        }
+      }
+
+      // 安全地解决 Promise
+      const safeResolve = (value: any) => {
+        if (!isResolved) {
+          isResolved = true
+          resolve(value)
+        }
+      }
+
+      childProcess.stdout?.on('data', (data: Buffer) => {
+        const text = data.toString()
+        stdout += text
+        console.log(`[SD.cpp stdout] ${text}`)
+        
+        // 发送完整的 CLI 输出到渲染进程
+        event.sender.send('generate:cli-output', { 
+          type: 'stdout', 
+          text: text 
+        })
+        
+        // 解析输出，提取进度信息
+        // SD.cpp 通常会输出进度信息，我们可以尝试提取
+        const progressMatch = text.match(/progress[:\s]+(\d+)%/i)
+        if (progressMatch) {
+          const progress = parseInt(progressMatch[1])
+          event.sender.send('generate:progress', { progress: `生成中... ${progress}%` })
+        } else if (text.includes('Generating') || text.includes('generating')) {
+          event.sender.send('generate:progress', { progress: '正在生成图片...' })
+        } else if (text.includes('Loading') || text.includes('loading')) {
+          event.sender.send('generate:progress', { progress: '正在加载模型...' })
+        }
+      })
+
+      childProcess.stderr?.on('data', (data: Buffer) => {
+        const text = data.toString()
+        stderr += text
+        console.error(`[SD.cpp stderr] ${text}`)
+        
+        // 发送完整的 CLI 输出到渲染进程
+        event.sender.send('generate:cli-output', { 
+          type: 'stderr', 
+          text: text 
+        })
+      })
+
+      childProcess.on('error', (error) => {
+        console.error('[Generate] 进程启动失败:', error)
+        event.sender.send('generate:progress', { progress: `错误: ${error.message}` })
+        safeReject(new Error(`无法启动 SD.cpp 引擎: ${error.message}`))
+      })
+
+      childProcess.on('exit', async (code, signal) => {
+        if (isResolved) return
+
+        if (code === 0) {
+          // 生成成功
+          if (existsSync(outputImagePath)) {
+            try {
+              // 读取生成的图片并转换为 base64
+              const imageBuffer = await fs.readFile(outputImagePath)
+              const base64Image = `data:image/png;base64,${imageBuffer.toString('base64')}`
+              
+              event.sender.send('generate:progress', { 
+                progress: '生成完成',
+                image: base64Image 
+              })
+              
+              safeResolve({
+                success: true,
+                image: base64Image,
+                imagePath: outputImagePath,
+              })
+            } catch (error) {
+              console.error('[Generate] 读取图片失败:', error)
+              safeReject(new Error(`读取生成的图片失败: ${error instanceof Error ? error.message : String(error)}`))
+            }
+          } else {
+            safeReject(new Error('生成完成但未找到输出图片文件'))
+          }
+        } else {
+          // 生成失败
+          const errorMsg = stderr || stdout || `进程退出，代码: ${code}, 信号: ${signal}`
+          console.error('[Generate] 生成失败:', errorMsg)
+          event.sender.send('generate:progress', { progress: `生成失败: ${errorMsg}` })
+          safeReject(new Error(`图片生成失败: ${errorMsg}`))
+        }
+      })
+    })
+  } catch (error) {
+    console.error('[Generate] 生成图片失败:', error)
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    // 注意：如果进程已经在 Promise 中启动，它会在 Promise 的 reject 处理中被终止
+    // 但如果错误发生在 spawn 之前，则不需要终止进程
+    throw new Error(`生成图片失败: ${errorMessage}`)
+  }
+})
+
+// ========== 已生成图片管理相关 IPC 处理程序 ==========
+
+// 递归查找所有 outputs 目录中的图片文件
+async function findAllGeneratedImages(): Promise<Array<{ name: string; path: string; size: number; modified: number }>> {
+  const images: Array<{ name: string; path: string; size: number; modified: number }> = []
+  const modelsFolder = getDefaultModelsFolder()
+  
+  if (!existsSync(modelsFolder)) {
+    return images
+  }
+
+  // 支持的图片格式
+  const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']
+  
+  // 递归遍历 models 文件夹
+  async function scanDirectory(dir: string) {
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true })
+      
+      for (const entry of entries) {
+        const fullPath = join(dir, entry.name)
+        
+        if (entry.isDirectory()) {
+          // 如果是 outputs 目录，扫描其中的图片
+          if (entry.name === 'outputs') {
+            const outputEntries = await fs.readdir(fullPath, { withFileTypes: true })
+            for (const outputEntry of outputEntries) {
+              if (outputEntry.isFile()) {
+                const ext = extname(outputEntry.name).toLowerCase()
+                if (imageExtensions.includes(ext)) {
+                  const filePath = join(fullPath, outputEntry.name)
+                  const stats = await fs.stat(filePath)
+                  images.push({
+                    name: outputEntry.name,
+                    path: filePath,
+                    size: stats.size,
+                    modified: stats.mtimeMs,
+                  })
+                }
+              }
+            }
+          } else {
+            // 递归扫描子目录
+            await scanDirectory(fullPath)
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`Failed to scan directory ${dir}:`, error)
+    }
+  }
+
+  await scanDirectory(modelsFolder)
+  
+  // 按修改时间降序排序
+  images.sort((a, b) => b.modified - a.modified)
+  
+  return images
+}
+
+// IPC 处理程序：列出所有已生成的图片
+ipcMain.handle('generated-images:list', async () => {
+  try {
+    const images = await findAllGeneratedImages()
+    // 为每个图片生成预览（完整文件，base64）
+    // 注意：如果图片很多或很大，可以考虑只加载缩略图
+    const imagesWithPreview = await Promise.all(
+      images.map(async (image) => {
+        try {
+          // 读取完整图片文件用于预览
+          // 如果文件太大（>5MB），跳过预览以提高性能
+          const stats = await fs.stat(image.path)
+          if (stats.size > 5 * 1024 * 1024) {
+            // 文件太大，不生成预览
+            return image
+          }
+          
+          const imageBuffer = await fs.readFile(image.path)
+          return {
+            ...image,
+            preview: imageBuffer.toString('base64'),
+          }
+        } catch (error) {
+          console.error(`Failed to generate preview for ${image.path}:`, error)
+          return image
+        }
+      })
+    )
+    return imagesWithPreview
+  } catch (error) {
+    console.error('Failed to list generated images:', error)
+    return []
+  }
+})
+
+// IPC 处理程序：下载图片
+ipcMain.handle('generated-images:download', async (_, imagePath: string) => {
+  try {
+    const window = win || BrowserWindow.getFocusedWindow()
+    if (!window) {
+      throw new Error('没有可用的窗口')
+    }
+    
+    const fileName = basename(imagePath)
+    const result = await dialog.showSaveDialog(window, {
+      title: '保存图片',
+      defaultPath: fileName,
+      filters: [
+        { name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+    })
+    
+    if (!result.canceled && result.filePath) {
+      await fs.copyFile(imagePath, result.filePath)
+      return true
+    }
+    return false
+  } catch (error) {
+    console.error('Failed to download image:', error)
+    throw error
+  }
+})
+
+// IPC 处理程序：删除图片
+ipcMain.handle('generated-images:delete', async (_, imagePath: string) => {
+  try {
+    if (!existsSync(imagePath)) {
+      throw new Error('图片文件不存在')
+    }
+    await fs.unlink(imagePath)
+    return true
+  } catch (error) {
+    console.error('Failed to delete image:', error)
+    throw error
+  }
+})
+
+// IPC 处理程序：获取图片预览（完整 base64）
+ipcMain.handle('generated-images:get-preview', async (_, imagePath: string) => {
+  try {
+    if (!existsSync(imagePath)) {
+      throw new Error('图片文件不存在')
+    }
+    const imageBuffer = await fs.readFile(imagePath)
+    return imageBuffer.toString('base64')
+  } catch (error) {
+    console.error('Failed to get image preview:', error)
+    throw error
+  }
+})
+
+// IPC 处理程序：批量下载并打包为 ZIP
+ipcMain.handle('generated-images:batch-download', async (_, imagePaths: string[]) => {
+  try {
+    const window = win || BrowserWindow.getFocusedWindow()
+    if (!window) {
+      throw new Error('没有可用的窗口')
+    }
+    
+    if (!imagePaths || imagePaths.length === 0) {
+      throw new Error('没有选择要下载的图片')
+    }
+
+    // 验证所有文件是否存在
+    for (const imagePath of imagePaths) {
+      if (!existsSync(imagePath)) {
+        throw new Error(`图片文件不存在: ${imagePath}`)
+      }
+    }
+
+    // 生成 ZIP 文件名（使用时间戳）
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5)
+    const defaultZipName = `generated-images-${timestamp}.zip`
+    
+    // 让用户选择保存位置
+    const result = await dialog.showSaveDialog(window, {
+      title: '保存压缩包',
+      defaultPath: defaultZipName,
+      filters: [
+        { name: 'ZIP 文件', extensions: ['zip'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+    })
+    
+    if (result.canceled || !result.filePath) {
+      return { success: false, canceled: true }
+    }
+
+    const zipPath = result.filePath
+    
+    // 创建 ZIP 文件
+    return new Promise((resolve, reject) => {
+      const output = createWriteStream(zipPath)
+      const archive = archiver('zip', {
+        zlib: { level: 9 } // 最高压缩级别
+      })
+
+      let isResolved = false
+
+      // 安全地解决 Promise
+      const safeResolve = (value: any) => {
+        if (!isResolved) {
+          isResolved = true
+          resolve(value)
+        }
+      }
+
+      // 安全地拒绝 Promise
+      const safeReject = (error: any) => {
+        if (!isResolved) {
+          isResolved = true
+          // 清理资源：关闭输出流和归档
+          try {
+            output.destroy()
+          } catch (e) {
+            console.error('Error destroying output stream:', e)
+          }
+          try {
+            archive.abort()
+          } catch (e) {
+            console.error('Error aborting archive:', e)
+          }
+          reject(error)
+        }
+      }
+
+      // 监听输出流的错误（例如权限拒绝、磁盘满等）
+      output.on('error', (err) => {
+        console.error('Output stream error:', err)
+        safeReject(new Error(`写入ZIP文件失败: ${err.message}`))
+      })
+
+      // 监听所有归档数据都写入完成
+      output.on('close', () => {
+        if (!isResolved) {
+          console.log(`ZIP 文件已创建: ${zipPath} (${archive.pointer()} 字节)`)
+          safeResolve({ success: true, zipPath, size: archive.pointer() })
+        }
+      })
+
+      // 监听警告（例如 stat 失败等）
+      archive.on('warning', (err) => {
+        if (err.code === 'ENOENT') {
+          console.warn('Archive warning:', err)
+        } else {
+          safeReject(err)
+        }
+      })
+
+      // 监听归档错误
+      archive.on('error', (err) => {
+        console.error('Archive error:', err)
+        safeReject(err)
+      })
+
+      // 将输出流管道连接到归档
+      archive.pipe(output)
+
+      // 添加所有图片文件到 ZIP
+      for (const imagePath of imagePaths) {
+        const fileName = basename(imagePath)
+        archive.file(imagePath, { name: fileName })
+      }
+
+      // 完成归档（即我们已经附加了所有文件，但流必须完成）
+      archive.finalize()
+    })
+  } catch (error) {
+    console.error('Failed to batch download images:', error)
     throw error
   }
 })
