@@ -110,6 +110,11 @@ interface ModelGroup {
   llmModel?: string;
   defaultSteps?: number;  // 推荐的默认采样步数
   defaultCfgScale?: number;  // 推荐的默认CFG Scale值
+  defaultWidth?: number;  // 推荐的默认图片宽度
+  defaultHeight?: number;  // 推荐的默认图片高度
+  defaultSamplingMethod?: string;  // 推荐的默认采样方法
+  defaultScheduler?: string;  // 推荐的默认调度器
+  defaultSeed?: number;  // 推荐的默认种子（-1表示随机）
   createdAt: number;
   updatedAt: number;
 }
@@ -141,6 +146,11 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
   const [groupLlmModel, setGroupLlmModel] = useState<string>('');
   const [groupDefaultSteps, setGroupDefaultSteps] = useState<string>('20');
   const [groupDefaultCfgScale, setGroupDefaultCfgScale] = useState<string>('7.0');
+  const [groupDefaultWidth, setGroupDefaultWidth] = useState<string>('512');
+  const [groupDefaultHeight, setGroupDefaultHeight] = useState<string>('512');
+  const [groupDefaultSamplingMethod, setGroupDefaultSamplingMethod] = useState<string>('euler_a');
+  const [groupDefaultScheduler, setGroupDefaultScheduler] = useState<string>('discrete');
+  const [groupDefaultSeed, setGroupDefaultSeed] = useState<string>('');
 
   // 加载权重文件夹路径
   useEffect(() => {
@@ -382,6 +392,11 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     setGroupLlmModel('');
     setGroupDefaultSteps('20');
     setGroupDefaultCfgScale('7.0');
+    setGroupDefaultWidth('512');
+    setGroupDefaultHeight('512');
+    setGroupDefaultSamplingMethod('euler_a');
+    setGroupDefaultScheduler('discrete');
+    setGroupDefaultSeed('');
     setGroupDialogOpen(true);
   };
 
@@ -393,6 +408,11 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     setGroupLlmModel(group.llmModel || '');
     setGroupDefaultSteps(group.defaultSteps?.toString() || '20');
     setGroupDefaultCfgScale(group.defaultCfgScale?.toString() || '7.0');
+    setGroupDefaultWidth(group.defaultWidth?.toString() || '512');
+    setGroupDefaultHeight(group.defaultHeight?.toString() || '512');
+    setGroupDefaultSamplingMethod(group.defaultSamplingMethod || 'euler_a');
+    setGroupDefaultScheduler(group.defaultScheduler || 'discrete');
+    setGroupDefaultSeed(group.defaultSeed !== undefined && group.defaultSeed >= 0 ? group.defaultSeed.toString() : '');
     setGroupDialogOpen(true);
   };
 
@@ -429,6 +449,11 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
           llmModel: groupLlmModel || undefined,
           defaultSteps: groupDefaultSteps ? parseFloat(groupDefaultSteps) : undefined,
           defaultCfgScale: groupDefaultCfgScale ? parseFloat(groupDefaultCfgScale) : undefined,
+          defaultWidth: groupDefaultWidth ? parseInt(groupDefaultWidth) : undefined,
+          defaultHeight: groupDefaultHeight ? parseInt(groupDefaultHeight) : undefined,
+          defaultSamplingMethod: groupDefaultSamplingMethod || undefined,
+          defaultScheduler: groupDefaultScheduler || undefined,
+          defaultSeed: groupDefaultSeed ? parseInt(groupDefaultSeed) : undefined,
         });
       } else {
         // 创建新组
@@ -439,6 +464,11 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
           llmModel: groupLlmModel || undefined,
           defaultSteps: groupDefaultSteps ? parseFloat(groupDefaultSteps) : undefined,
           defaultCfgScale: groupDefaultCfgScale ? parseFloat(groupDefaultCfgScale) : undefined,
+          defaultWidth: groupDefaultWidth ? parseInt(groupDefaultWidth) : undefined,
+          defaultHeight: groupDefaultHeight ? parseInt(groupDefaultHeight) : undefined,
+          defaultSamplingMethod: groupDefaultSamplingMethod || undefined,
+          defaultScheduler: groupDefaultScheduler || undefined,
+          defaultSeed: groupDefaultSeed ? parseInt(groupDefaultSeed) : undefined,
         });
       }
       await loadModelGroups();
@@ -741,6 +771,11 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
           setGroupLlmModel('');
           setGroupDefaultSteps('20');
           setGroupDefaultCfgScale('7.0');
+          setGroupDefaultWidth('512');
+          setGroupDefaultHeight('512');
+          setGroupDefaultSamplingMethod('euler_a');
+          setGroupDefaultScheduler('discrete');
+          setGroupDefaultSeed('');
         }
       }}>
         <DialogSurface style={{ minWidth: '600px' }}>
@@ -857,6 +892,122 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                       min={0.1}
                       max={30}
                       step={0.1}
+                    />
+                  </Field>
+                  <Field label="图片宽度" hint="默认: 512">
+                    <Input
+                      type="number"
+                      value={groupDefaultWidth}
+                      onChange={(_, data) => {
+                        // 允许用户自由输入，不立即限制
+                        setGroupDefaultWidth(data.value);
+                      }}
+                      onBlur={() => {
+                        const val = parseInt(groupDefaultWidth);
+                        if (isNaN(val) || val < 64) {
+                          // 无效值或小于最小值，重置为默认值
+                          setGroupDefaultWidth('512');
+                        } else if (val > 2048) {
+                          // 超过最大值，设置为最大值
+                          setGroupDefaultWidth('2048');
+                        } else {
+                          // 对齐到64的倍数
+                          const aligned = Math.round(val / 64) * 64;
+                          setGroupDefaultWidth(aligned.toString());
+                        }
+                      }}
+                      min={64}
+                      max={2048}
+                      step={64}
+                    />
+                  </Field>
+                  <Field label="图片高度" hint="默认: 512">
+                    <Input
+                      type="number"
+                      value={groupDefaultHeight}
+                      onChange={(_, data) => {
+                        // 允许用户自由输入，不立即限制
+                        setGroupDefaultHeight(data.value);
+                      }}
+                      onBlur={() => {
+                        const val = parseInt(groupDefaultHeight);
+                        if (isNaN(val) || val < 64) {
+                          // 无效值或小于最小值，重置为默认值
+                          setGroupDefaultHeight('512');
+                        } else if (val > 2048) {
+                          // 超过最大值，设置为最大值
+                          setGroupDefaultHeight('2048');
+                        } else {
+                          // 对齐到64的倍数
+                          const aligned = Math.round(val / 64) * 64;
+                          setGroupDefaultHeight(aligned.toString());
+                        }
+                      }}
+                      min={64}
+                      max={2048}
+                      step={64}
+                    />
+                  </Field>
+                  <Field label="采样方法" hint="默认: euler_a">
+                    <Dropdown
+                      value={groupDefaultSamplingMethod}
+                      selectedOptions={[groupDefaultSamplingMethod]}
+                      onOptionSelect={(_, data) => {
+                        if (data.optionValue) {
+                          setGroupDefaultSamplingMethod(data.optionValue);
+                        }
+                      }}
+                    >
+                      <Option value="euler">Euler</Option>
+                      <Option value="euler_a">Euler A</Option>
+                      <Option value="heun">Heun</Option>
+                      <Option value="dpm2">DPM2</Option>
+                      <Option value="dpm++2s_a">DPM++ 2S A</Option>
+                      <Option value="dpm++2m">DPM++ 2M</Option>
+                      <Option value="dpm++2mv2">DPM++ 2M V2</Option>
+                      <Option value="ipndm">IPNDM</Option>
+                      <Option value="ipndm_v">IPNDM V</Option>
+                      <Option value="lcm">LCM</Option>
+                      <Option value="ddim_trailing">DDIM Trailing</Option>
+                      <Option value="tcd">TCD</Option>
+                    </Dropdown>
+                  </Field>
+                  <Field label="调度器" hint="默认: discrete">
+                    <Dropdown
+                      value={groupDefaultScheduler}
+                      selectedOptions={[groupDefaultScheduler]}
+                      onOptionSelect={(_, data) => {
+                        if (data.optionValue) {
+                          setGroupDefaultScheduler(data.optionValue);
+                        }
+                      }}
+                    >
+                      <Option value="discrete">Discrete</Option>
+                      <Option value="karras">Karras</Option>
+                      <Option value="exponential">Exponential</Option>
+                      <Option value="ays">AYS</Option>
+                      <Option value="gits">GITS</Option>
+                      <Option value="smoothstep">Smoothstep</Option>
+                      <Option value="sgm_uniform">SGM Uniform</Option>
+                      <Option value="simple">Simple</Option>
+                      <Option value="lcm">LCM</Option>
+                    </Dropdown>
+                  </Field>
+                  <Field label="种子" hint="留空表示随机">
+                    <Input
+                      type="number"
+                      value={groupDefaultSeed}
+                      placeholder="随机"
+                      onChange={(_, data) => {
+                        setGroupDefaultSeed(data.value);
+                      }}
+                      onBlur={() => {
+                        const val = parseInt(groupDefaultSeed);
+                        if (isNaN(val) || val < 0) {
+                          setGroupDefaultSeed('');
+                        }
+                      }}
+                      min={0}
                     />
                   </Field>
                 </div>

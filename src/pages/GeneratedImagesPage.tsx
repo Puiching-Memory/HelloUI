@@ -4,12 +4,6 @@ import {
   Title2,
   Body1,
   Button,
-  Table,
-  TableHeader,
-  TableHeaderCell,
-  TableBody,
-  TableRow,
-  TableCell,
   makeStyles,
   tokens,
   Spinner,
@@ -20,12 +14,18 @@ import {
   DialogActions,
   DialogContent,
   Checkbox,
+  Badge,
+  Text,
 } from '@fluentui/react-components';
 import {
   ArrowDownloadRegular,
   DeleteRegular,
   ImageRegular,
   ArrowSyncRegular,
+  InfoRegular,
+  DocumentRegular,
+  CopyRegular,
+  CheckmarkRegular,
 } from '@fluentui/react-icons';
 import { PhotoView } from 'react-photo-view';
 import { useState, useEffect } from 'react';
@@ -36,7 +36,7 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalXL,
     padding: tokens.spacingVerticalXXL,
-    maxWidth: '1400px',
+    maxWidth: '1600px',
     margin: '0 auto',
   },
   section: {
@@ -49,21 +49,164 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalM,
     flexWrap: 'wrap',
   },
-  tableContainer: {
-    overflowX: 'auto',
+  headerActions: {
+    display: 'flex',
+    gap: tokens.spacingHorizontalM,
+    alignItems: 'center',
   },
-  emptyState: {
-    textAlign: 'center',
-    padding: tokens.spacingVerticalXXL,
-    color: tokens.colorNeutralForeground3,
+  gridContainer: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+    gap: tokens.spacingVerticalL,
+    padding: tokens.spacingVerticalM,
+  },
+  imageCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    borderRadius: tokens.borderRadiusLarge,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    overflow: 'hidden',
+    transition: 'all 0.2s ease',
+    cursor: 'pointer',
+    position: 'relative',
+    ':hover': {
+      borderTopColor: tokens.colorNeutralStroke1,
+      borderRightColor: tokens.colorNeutralStroke1,
+      borderBottomColor: tokens.colorNeutralStroke1,
+      borderLeftColor: tokens.colorNeutralStroke1,
+      boxShadow: tokens.shadow8,
+      transform: 'translateY(-2px)',
+    },
+  },
+  imageCardSelected: {
+    borderTopColor: tokens.colorBrandStroke1,
+    borderRightColor: tokens.colorBrandStroke1,
+    borderBottomColor: tokens.colorBrandStroke1,
+    borderLeftColor: tokens.colorBrandStroke1,
+    borderTopWidth: '2px',
+    borderRightWidth: '2px',
+    borderBottomWidth: '2px',
+    borderLeftWidth: '2px',
+    boxShadow: tokens.shadow8,
+  },
+  imageCardCheckbox: {
+    position: 'absolute',
+    top: tokens.spacingVerticalS,
+    left: tokens.spacingHorizontalS,
+    zIndex: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: tokens.borderRadiusSmall,
+    padding: '4px',
+  },
+  imagePreviewContainer: {
+    position: 'relative',
+    width: '100%',
+    aspectRatio: '1',
+    backgroundColor: tokens.colorNeutralBackground2,
+    overflow: 'hidden',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   imagePreview: {
-    width: '100px',
-    height: '100px',
+    width: '100%',
+    height: '100%',
     objectFit: 'cover',
-    borderRadius: tokens.borderRadiusSmall,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    cursor: 'pointer',
+    transition: 'transform 0.3s ease',
+    ':hover': {
+      transform: 'scale(1.05)',
+    },
+  },
+  imagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: tokens.colorNeutralForeground3,
+    fontSize: '48px',
+  },
+  imageCardContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+    padding: tokens.spacingVerticalM,
+  },
+  imageCardHeader: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+  },
+  imageFileName: {
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  imagePrompt: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    lineHeight: 1.4,
+    minHeight: '2.8em',
+  },
+  imageCardMeta: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+  },
+  imageCardMetaRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: tokens.spacingHorizontalS,
+  },
+  imageCardMetaItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+  },
+  imageCardActions: {
+    display: 'flex',
+    gap: tokens.spacingHorizontalXS,
+    paddingTop: tokens.spacingVerticalS,
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+    opacity: 0,
+    transition: 'opacity 0.2s ease',
+  },
+  emptyState: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: tokens.spacingVerticalXXL,
+    minHeight: '500px',
+    textAlign: 'center',
+    color: tokens.colorNeutralForeground3,
+  },
+  emptyStateIcon: {
+    fontSize: '80px',
+    marginBottom: tokens.spacingVerticalL,
+    opacity: 0.4,
+    color: tokens.colorNeutralForeground3,
+  },
+  emptyStateTitle: {
+    marginBottom: tokens.spacingVerticalS,
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase500,
+  },
+  emptyStateDescription: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground3,
+    maxWidth: '600px',
+    lineHeight: 1.6,
   },
   previewDialog: {
     maxWidth: '90vw',
@@ -81,8 +224,6 @@ const useStyles = makeStyles({
     position: 'relative',
   },
   previewImage: {
-    maxWidth: '100%',
-    maxHeight: '75vh',
     width: 'auto',
     height: 'auto',
     objectFit: 'contain',
@@ -90,31 +231,8 @@ const useStyles = makeStyles({
     boxShadow: tokens.shadow16,
     userSelect: 'none',
     pointerEvents: 'auto',
-  },
-  tableCellPreview: {
-    width: '120px',
-  },
-  tableCellFileName: {
-    maxWidth: '300px',
-    minWidth: '200px',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  tableCellPath: {
-    maxWidth: '400px',
-    minWidth: '250px',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  tableCellSize: {
-    maxWidth: '120px',
-    minWidth: '100px',
-  },
-  tableCellDate: {
-    maxWidth: '180px',
-    minWidth: '150px',
+    maxWidth: 'min(100%, 1200px)',
+    maxHeight: 'min(75vh, 800px)',
   },
 });
 
@@ -123,7 +241,31 @@ interface GeneratedImage {
   path: string;
   size: number;
   modified: number;
-  preview?: string; // base64 预览图
+  width?: number;
+  height?: number;
+  prompt?: string;
+  negativePrompt?: string;
+  steps?: number;
+  cfgScale?: number;
+  deviceType?: string;
+  groupId?: string | null;
+  groupName?: string | null;
+  modelPath?: string;
+  vaeModelPath?: string | null;
+  llmModelPath?: string | null;
+  samplingMethod?: string | null;
+  scheduler?: string | null;
+  seed?: number | null;
+  batchCount?: number;
+  threads?: number | null;
+  preview?: string | null; // 预览方法
+  previewInterval?: number | null;
+  verbose?: boolean;
+  color?: boolean;
+  offloadToCpu?: boolean;
+  commandLine?: string;
+  generatedAt?: string;
+  previewImage?: string; // base64 预览图（后端返回的字段名是 preview，但这里用 previewImage 避免与预览方法冲突）
 }
 
 export const GeneratedImagesPage = () => {
@@ -134,6 +276,10 @@ export const GeneratedImagesPage = () => {
   const [deletingImage, setDeletingImage] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false);
+  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [selectedImageForDetail, setSelectedImageForDetail] = useState<GeneratedImage | null>(null);
+  const [hoveredImagePath, setHoveredImagePath] = useState<string | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // 加载图片列表
   useEffect(() => {
@@ -184,7 +330,6 @@ export const GeneratedImagesPage = () => {
 
   // 检查是否全选
   const isAllSelected = images.length > 0 && selectedImages.size === images.length;
-  const isIndeterminate = selectedImages.size > 0 && selectedImages.size < images.length;
 
   const handleDownload = async (image: GeneratedImage) => {
     try {
@@ -347,14 +492,36 @@ export const GeneratedImagesPage = () => {
     });
   };
 
+  const handleCopyToClipboard = async (text: string, fieldName: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedField(fieldName);
+      setTimeout(() => setCopiedField(null), 2000);
+    } catch (error) {
+      console.error('Failed to copy to clipboard:', error);
+    }
+  };
+
   return (
     <div className={styles.container}>
       <Title1>已生成图片管理</Title1>
 
       <Card className={styles.section}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalM }}>
-          <Title2>图片列表</Title2>
-          <div style={{ display: 'flex', gap: tokens.spacingHorizontalM }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM }}>
+            <Title2 style={{ margin: 0 }}>图片列表</Title2>
+            {images.length > 0 && (
+              <Badge appearance="filled" color="brand">
+                {images.length}
+              </Badge>
+            )}
+            {selectedImages.size > 0 && (
+              <Badge appearance="filled" color="success">
+                已选择 {selectedImages.size}
+              </Badge>
+            )}
+          </div>
+          <div className={styles.headerActions}>
             {selectedImages.size > 0 && (
               <>
                 <Button
@@ -362,7 +529,7 @@ export const GeneratedImagesPage = () => {
                   onClick={handleBatchDownload}
                   disabled={loading}
                 >
-                  批量下载 ({selectedImages.size})
+                  批量下载
                 </Button>
                 <Button
                   icon={<DeleteRegular />}
@@ -370,7 +537,7 @@ export const GeneratedImagesPage = () => {
                   onClick={handleBatchDeleteClick}
                   disabled={loading}
                 >
-                  批量删除 ({selectedImages.size})
+                  批量删除
                 </Button>
               </>
             )}
@@ -390,86 +557,191 @@ export const GeneratedImagesPage = () => {
           </div>
         ) : images.length === 0 ? (
           <div className={styles.emptyState}>
-            <ImageRegular style={{ fontSize: '48px', marginBottom: tokens.spacingVerticalM }} />
-            <Body1>暂无已生成的图片</Body1>
-            <Body1 style={{ fontSize: tokens.fontSizeBase200, marginTop: tokens.spacingVerticalS }}>
+            <ImageRegular className={styles.emptyStateIcon} />
+            <Title2 className={styles.emptyStateTitle}>暂无已生成的图片</Title2>
+            <Body1 className={styles.emptyStateDescription}>
               生成的图片将保存在模型文件夹下的 outputs 目录中
+              <br />
+              请在"图片生成"页面生成图片后，它们将显示在这里
             </Body1>
           </div>
         ) : (
-          <div className={styles.tableContainer}>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHeaderCell style={{ width: '50px' }}>
-                    <Checkbox
-                      checked={isAllSelected}
-                      onChange={(_, data) => handleSelectAll(data.checked === true)}
-                      indeterminate={isIndeterminate}
-                    />
-                  </TableHeaderCell>
-                  <TableHeaderCell>预览</TableHeaderCell>
-                  <TableHeaderCell>文件名</TableHeaderCell>
-                  <TableHeaderCell>路径</TableHeaderCell>
-                  <TableHeaderCell>大小</TableHeaderCell>
-                  <TableHeaderCell>修改时间</TableHeaderCell>
-                  <TableHeaderCell>操作</TableHeaderCell>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {images.map((image) => (
-                  <TableRow key={image.path}>
-                    <TableCell style={{ width: '50px' }}>
+          <>
+            {/* 全选控制 */}
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: tokens.spacingHorizontalS,
+              padding: `0 ${tokens.spacingVerticalM}`,
+              marginBottom: tokens.spacingVerticalS 
+            }}>
+              <Checkbox
+                checked={isAllSelected}
+                onChange={(_, data) => handleSelectAll(data.checked === true)}
+                label="全选"
+              />
+            </div>
+            
+            {/* 图片网格 */}
+            <div className={styles.gridContainer}>
+              {images.map((image) => {
+                const isSelected = selectedImages.has(image.path);
+                // 只使用previewImage，不使用本地文件路径（浏览器无法加载本地路径）
+                const imageSrc = image.previewImage 
+                  ? `data:${getImageMimeType(image.name)};base64,${image.previewImage}`
+                  : null;
+                const hasImage = !!image.previewImage;
+                
+                return (
+                  <div
+                    key={image.path}
+                    className={`${styles.imageCard} ${isSelected ? styles.imageCardSelected : ''}`}
+                    onClick={(e) => {
+                      // 如果点击的是复选框或按钮，不触发卡片选择
+                      const target = e.target as HTMLElement;
+                      if (target.closest('button') || target.closest('input[type="checkbox"]')) {
+                        return;
+                      }
+                      handleToggleSelect(image.path);
+                    }}
+                    onMouseEnter={() => setHoveredImagePath(image.path)}
+                    onMouseLeave={() => setHoveredImagePath(null)}
+                  >
+                    {/* 复选框 */}
+                    <div className={styles.imageCardCheckbox} onClick={(e) => e.stopPropagation()}>
                       <Checkbox
-                        checked={selectedImages.has(image.path)}
+                        checked={isSelected}
                         onChange={() => handleToggleSelect(image.path)}
                       />
-                    </TableCell>
-                    <TableCell className={styles.tableCellPreview}>
-                      {image.preview ? (
-                        <PhotoView src={`data:${getImageMimeType(image.name)};base64,${image.preview}`}>
-                          <img
-                            src={`data:${getImageMimeType(image.name)};base64,${image.preview}`}
-                            alt={image.name}
-                            className={styles.imagePreview}
-                          />
-                        </PhotoView>
-                      ) : (
-                        <PhotoView src={image.path}>
-                          <div
-                            style={{
-                              width: '100px',
-                              height: '100px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              backgroundColor: tokens.colorNeutralBackground2,
-                              borderRadius: tokens.borderRadiusSmall,
-                              border: `1px solid ${tokens.colorNeutralStroke2}`,
-                              cursor: 'pointer',
-                            }}
-                          >
+                    </div>
+
+                    {/* 图片预览 */}
+                    <div className={styles.imagePreviewContainer}>
+                      {hasImage && imageSrc ? (
+                        <>
+                          <PhotoView src={imageSrc}>
+                            <img
+                              src={imageSrc}
+                              alt={image.name}
+                              className={styles.imagePreview}
+                              onError={(e) => {
+                                // 如果图片加载失败，显示占位符
+                                const target = e.target as HTMLImageElement;
+                                target.style.display = 'none';
+                                const container = target.parentElement;
+                                if (container) {
+                                  const placeholder = container.querySelector(`.${styles.imagePlaceholder}`);
+                                  if (placeholder) {
+                                    (placeholder as HTMLElement).style.display = 'flex';
+                                  }
+                                }
+                              }}
+                            />
+                          </PhotoView>
+                          <div className={styles.imagePlaceholder} style={{ display: 'none' }}>
                             <ImageRegular />
                           </div>
-                        </PhotoView>
+                        </>
+                      ) : (
+                        <div className={styles.imagePlaceholder}>
+                          <ImageRegular />
+                        </div>
                       )}
-                    </TableCell>
-                    <TableCell className={styles.tableCellFileName}>
-                      <Body1>{image.name}</Body1>
-                    </TableCell>
-                    <TableCell className={styles.tableCellPath}>
-                      <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-                        {image.path}
-                      </Body1>
-                    </TableCell>
-                    <TableCell className={styles.tableCellSize}>
-                      <Body1>{formatFileSize(image.size)}</Body1>
-                    </TableCell>
-                    <TableCell className={styles.tableCellDate}>
-                      <Body1>{formatDate(image.modified)}</Body1>
-                    </TableCell>
-                    <TableCell>
-                      <div className={styles.actions}>
+                    </div>
+
+                    {/* 卡片内容 */}
+                    <div className={styles.imageCardContent}>
+                      <div className={styles.imageCardHeader}>
+                        <Body1 className={styles.imageFileName} title={image.name}>
+                          {image.name}
+                        </Body1>
+                        {image.prompt && (
+                          <Body1 className={styles.imagePrompt} title={image.prompt}>
+                            {image.prompt}
+                          </Body1>
+                        )}
+                      </div>
+
+                      {/* 元信息 */}
+                      <div className={styles.imageCardMeta}>
+                        {/* 第一行：基本信息和分辨率 */}
+                        <div className={styles.imageCardMetaRow}>
+                          {image.width && image.height && (
+                            <div className={styles.imageCardMetaItem}>
+                              <DocumentRegular style={{ fontSize: '14px' }} />
+                              <span>{image.width} × {image.height}</span>
+                            </div>
+                          )}
+                          <div className={styles.imageCardMetaItem}>
+                            <span>{formatFileSize(image.size)}</span>
+                          </div>
+                          {image.deviceType && (
+                            <div className={styles.imageCardMetaItem}>
+                              <span>{image.deviceType.toUpperCase()}</span>
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* 第二行：生成参数 */}
+                        {(image.steps || image.cfgScale || image.samplingMethod || image.scheduler) && (
+                          <div className={styles.imageCardMetaRow}>
+                            {image.steps && (
+                              <div className={styles.imageCardMetaItem}>
+                                <span>步数: {image.steps}</span>
+                              </div>
+                            )}
+                            {image.cfgScale && (
+                              <div className={styles.imageCardMetaItem}>
+                                <span>CFG: {image.cfgScale}</span>
+                              </div>
+                            )}
+                            {image.samplingMethod && (
+                              <div className={styles.imageCardMetaItem}>
+                                <span>采样: {image.samplingMethod}</span>
+                              </div>
+                            )}
+                            {image.scheduler && (
+                              <div className={styles.imageCardMetaItem}>
+                                <span>调度: {image.scheduler}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
+                        {/* 第三行：种子和批次 */}
+                        {(image.seed !== null && image.seed !== undefined) || image.batchCount ? (
+                          <div className={styles.imageCardMetaRow}>
+                            {image.seed !== null && image.seed !== undefined && (
+                              <div className={styles.imageCardMetaItem}>
+                                <span>种子: {image.seed}</span>
+                              </div>
+                            )}
+                            {image.batchCount && image.batchCount > 1 && (
+                              <div className={styles.imageCardMetaItem}>
+                                <span>批次: {image.batchCount}</span>
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {/* 操作按钮 */}
+                      <div 
+                        className={styles.imageCardActions} 
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ opacity: hoveredImagePath === image.path ? 1 : 0 }}
+                      >
+                        <Button
+                          icon={<InfoRegular />}
+                          appearance="subtle"
+                          size="small"
+                          onClick={() => {
+                            setSelectedImageForDetail(image);
+                            setDetailDialogOpen(true);
+                          }}
+                        >
+                          详情
+                        </Button>
                         <Button
                           icon={<ArrowDownloadRegular />}
                           appearance="subtle"
@@ -487,12 +759,12 @@ export const GeneratedImagesPage = () => {
                           删除
                         </Button>
                       </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
         )}
       </Card>
 
@@ -547,6 +819,354 @@ export const GeneratedImagesPage = () => {
               onClick={handleBatchDeleteConfirm}
             >
               删除
+            </Button>
+          </DialogActions>
+        </DialogSurface>
+      </Dialog>
+
+      {/* 详情对话框 */}
+      <Dialog open={detailDialogOpen} onOpenChange={(_, data) => {
+        setDetailDialogOpen(data.open);
+        if (!data.open) {
+          setSelectedImageForDetail(null);
+          setCopiedField(null);
+        }
+      }}>
+        <DialogSurface style={{ maxWidth: '900px', maxHeight: '90vh', width: '90vw' }}>
+          <DialogTitle>图片详情</DialogTitle>
+          <DialogBody>
+            <DialogContent style={{ maxHeight: '75vh', overflowY: 'auto', padding: 0 }}>
+              {selectedImageForDetail && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                  {/* 图片预览区域 - 顶部大图 */}
+                  {selectedImageForDetail.previewImage && (
+                    <div style={{ 
+                      width: '100%', 
+                      backgroundColor: tokens.colorNeutralBackground2,
+                      padding: tokens.spacingVerticalL,
+                      display: 'flex',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+                    }}>
+                      <PhotoView src={`data:${getImageMimeType(selectedImageForDetail.name)};base64,${selectedImageForDetail.previewImage}`}>
+                        <img
+                          src={`data:${getImageMimeType(selectedImageForDetail.name)};base64,${selectedImageForDetail.previewImage}`}
+                          alt={selectedImageForDetail.name}
+                          style={{
+                            maxWidth: '100%',
+                            maxHeight: '400px',
+                            borderRadius: tokens.borderRadiusLarge,
+                            border: `1px solid ${tokens.colorNeutralStroke2}`,
+                            cursor: 'pointer',
+                            boxShadow: tokens.shadow8,
+                          }}
+                        />
+                      </PhotoView>
+                    </div>
+                  )}
+
+                  {/* 内容区域 - 使用卡片分组 */}
+                  <div style={{ padding: tokens.spacingVerticalL, display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalL }}>
+                    {/* 基本信息卡片 */}
+                    <Card>
+                      <div style={{ padding: tokens.spacingVerticalM, display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM }}>
+                        <Title2 style={{ fontSize: tokens.fontSizeBase400, margin: 0 }}>基本信息</Title2>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: tokens.spacingVerticalM }}>
+                          <div>
+                            <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                              文件名
+                            </Text>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS, marginTop: tokens.spacingVerticalS }}>
+                              <Body1 style={{ fontSize: tokens.fontSizeBase300, wordBreak: 'break-all' }}>
+                                {selectedImageForDetail.name}
+                              </Body1>
+                              <Button
+                                size="small"
+                                appearance="subtle"
+                                icon={copiedField === 'filename' ? <CheckmarkRegular /> : <CopyRegular />}
+                                onClick={() => handleCopyToClipboard(selectedImageForDetail.name, 'filename')}
+                                title="复制文件名"
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                              文件大小
+                            </Text>
+                            <Body1 style={{ fontSize: tokens.fontSizeBase300, marginTop: tokens.spacingVerticalS }}>
+                              {formatFileSize(selectedImageForDetail.size)}
+                            </Body1>
+                          </div>
+                          {selectedImageForDetail.width && selectedImageForDetail.height && (
+                            <div>
+                              <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                                分辨率
+                              </Text>
+                              <Body1 style={{ fontSize: tokens.fontSizeBase300, marginTop: tokens.spacingVerticalS }}>
+                                {selectedImageForDetail.width} × {selectedImageForDetail.height}
+                              </Body1>
+                            </div>
+                          )}
+                          <div>
+                            <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                              生成时间
+                            </Text>
+                            <Body1 style={{ fontSize: tokens.fontSizeBase300, marginTop: tokens.spacingVerticalS }}>
+                              {selectedImageForDetail.generatedAt 
+                                ? new Date(selectedImageForDetail.generatedAt).toLocaleString('zh-CN')
+                                : formatDate(selectedImageForDetail.modified)}
+                            </Body1>
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+
+                    {/* 提示词卡片 */}
+                    <Card>
+                      <div style={{ padding: tokens.spacingVerticalM, display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Title2 style={{ fontSize: tokens.fontSizeBase400, margin: 0 }}>提示词</Title2>
+                          {selectedImageForDetail.prompt && (
+                            <Button
+                              size="small"
+                              appearance="subtle"
+                              icon={copiedField === 'prompt' ? <CheckmarkRegular /> : <CopyRegular />}
+                              onClick={() => handleCopyToClipboard(selectedImageForDetail.prompt || '', 'prompt')}
+                            >
+                              {copiedField === 'prompt' ? '已复制' : '复制'}
+                            </Button>
+                          )}
+                        </div>
+                        {selectedImageForDetail.prompt && (
+                          <div style={{
+                            padding: tokens.spacingVerticalM,
+                            backgroundColor: tokens.colorNeutralBackground2,
+                            borderRadius: tokens.borderRadiusMedium,
+                            border: `1px solid ${tokens.colorNeutralStroke2}`,
+                          }}>
+                            <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginBottom: tokens.spacingVerticalXS, display: 'block' }}>
+                              正面提示词
+                            </Text>
+                            <Body1 style={{ fontSize: tokens.fontSizeBase300, whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.6 }}>
+                              {selectedImageForDetail.prompt}
+                            </Body1>
+                          </div>
+                        )}
+                        {selectedImageForDetail.negativePrompt && (
+                          <div style={{
+                            padding: tokens.spacingVerticalM,
+                            backgroundColor: tokens.colorNeutralBackground2,
+                            borderRadius: tokens.borderRadiusMedium,
+                            border: `1px solid ${tokens.colorNeutralStroke2}`,
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalXS }}>
+                              <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                                负面提示词
+                              </Text>
+                              <Button
+                                size="small"
+                                appearance="subtle"
+                                icon={copiedField === 'negativePrompt' ? <CheckmarkRegular /> : <CopyRegular />}
+                                onClick={() => handleCopyToClipboard(selectedImageForDetail.negativePrompt || '', 'negativePrompt')}
+                              >
+                                {copiedField === 'negativePrompt' ? '已复制' : '复制'}
+                              </Button>
+                            </div>
+                            <Body1 style={{ fontSize: tokens.fontSizeBase300, whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.6 }}>
+                              {selectedImageForDetail.negativePrompt}
+                            </Body1>
+                          </div>
+                        )}
+                      </div>
+                    </Card>
+
+                    {/* 生成参数卡片 */}
+                    <Card>
+                      <div style={{ padding: tokens.spacingVerticalM, display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM }}>
+                        <Title2 style={{ fontSize: tokens.fontSizeBase400, margin: 0 }}>生成参数</Title2>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: tokens.spacingVerticalM }}>
+                          {selectedImageForDetail.steps && (
+                            <div>
+                              <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                                采样步数
+                              </Text>
+                              <Badge appearance="filled" color="brand" style={{ marginTop: tokens.spacingVerticalS }}>
+                                {selectedImageForDetail.steps}
+                              </Badge>
+                            </div>
+                          )}
+                          {selectedImageForDetail.cfgScale && (
+                            <div>
+                              <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                                CFG Scale
+                              </Text>
+                              <Badge appearance="filled" color="brand" style={{ marginTop: tokens.spacingVerticalS }}>
+                                {selectedImageForDetail.cfgScale}
+                              </Badge>
+                            </div>
+                          )}
+                          {selectedImageForDetail.samplingMethod && (
+                            <div>
+                              <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                                采样方法
+                              </Text>
+                              <Badge appearance="outline" style={{ marginTop: tokens.spacingVerticalS }}>
+                                {selectedImageForDetail.samplingMethod}
+                              </Badge>
+                            </div>
+                          )}
+                          {selectedImageForDetail.scheduler && (
+                            <div>
+                              <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                                调度器
+                              </Text>
+                              <Badge appearance="outline" style={{ marginTop: tokens.spacingVerticalS }}>
+                                {selectedImageForDetail.scheduler}
+                              </Badge>
+                            </div>
+                          )}
+                          {selectedImageForDetail.seed !== null && selectedImageForDetail.seed !== undefined && (
+                            <div>
+                              <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                                种子
+                              </Text>
+                              <Badge appearance="outline" style={{ marginTop: tokens.spacingVerticalS }}>
+                                {selectedImageForDetail.seed}
+                              </Badge>
+                            </div>
+                          )}
+                          {selectedImageForDetail.batchCount && (
+                            <div>
+                              <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                                批次数量
+                              </Text>
+                              <Badge appearance="outline" style={{ marginTop: tokens.spacingVerticalS }}>
+                                {selectedImageForDetail.batchCount}
+                              </Badge>
+                            </div>
+                          )}
+                          {selectedImageForDetail.deviceType && (
+                            <div>
+                              <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                                推理引擎
+                              </Text>
+                              <Badge appearance="filled" color="success" style={{ marginTop: tokens.spacingVerticalS }}>
+                                {selectedImageForDetail.deviceType.toUpperCase()}
+                              </Badge>
+                            </div>
+                          )}
+                          {selectedImageForDetail.threads !== null && selectedImageForDetail.threads !== undefined && (
+                            <div>
+                              <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                                线程数
+                              </Text>
+                              <Body1 style={{ fontSize: tokens.fontSizeBase300, marginTop: tokens.spacingVerticalS }}>
+                                {selectedImageForDetail.threads}
+                              </Body1>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </Card>
+
+                    {/* 模型信息卡片 */}
+                    {(selectedImageForDetail.groupName || selectedImageForDetail.modelPath || selectedImageForDetail.vaeModelPath || selectedImageForDetail.llmModelPath) && (
+                      <Card>
+                        <div style={{ padding: tokens.spacingVerticalM, display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM }}>
+                          <Title2 style={{ fontSize: tokens.fontSizeBase400, margin: 0 }}>模型信息</Title2>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM }}>
+                            {selectedImageForDetail.groupName && (
+                              <div>
+                                <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                                  模型组
+                                </Text>
+                                <Body1 style={{ fontSize: tokens.fontSizeBase300, marginTop: tokens.spacingVerticalS }}>
+                                  {selectedImageForDetail.groupName}
+                                </Body1>
+                              </div>
+                            )}
+                            {selectedImageForDetail.modelPath && (
+                              <div>
+                                <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                                  SD模型
+                                </Text>
+                                <Body1 style={{ fontSize: tokens.fontSizeBase300, wordBreak: 'break-all', marginTop: tokens.spacingVerticalS }}>
+                                  {selectedImageForDetail.modelPath.split(/[/\\]/).pop() || selectedImageForDetail.modelPath}
+                                </Body1>
+                              </div>
+                            )}
+                            {selectedImageForDetail.vaeModelPath && (
+                              <div>
+                                <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                                  VAE模型
+                                </Text>
+                                <Body1 style={{ fontSize: tokens.fontSizeBase300, wordBreak: 'break-all', marginTop: tokens.spacingVerticalS }}>
+                                  {selectedImageForDetail.vaeModelPath.split(/[/\\]/).pop() || selectedImageForDetail.vaeModelPath}
+                                </Body1>
+                              </div>
+                            )}
+                            {selectedImageForDetail.llmModelPath && (
+                              <div>
+                                <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                                  LLM模型
+                                </Text>
+                                <Body1 style={{ fontSize: tokens.fontSizeBase300, wordBreak: 'break-all', marginTop: tokens.spacingVerticalS }}>
+                                  {selectedImageForDetail.llmModelPath.split(/[/\\]/).pop() || selectedImageForDetail.llmModelPath}
+                                </Body1>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </Card>
+                    )}
+
+                    {/* 命令行卡片 */}
+                    {selectedImageForDetail.commandLine && (
+                      <Card>
+                        <div style={{ padding: tokens.spacingVerticalM, display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Title2 style={{ fontSize: tokens.fontSizeBase400, margin: 0 }}>命令行</Title2>
+                            <Button
+                              size="small"
+                              appearance="subtle"
+                              icon={copiedField === 'commandLine' ? <CheckmarkRegular /> : <CopyRegular />}
+                              onClick={() => handleCopyToClipboard(selectedImageForDetail.commandLine || '', 'commandLine')}
+                            >
+                              {copiedField === 'commandLine' ? '已复制' : '复制'}
+                            </Button>
+                          </div>
+                          <div style={{
+                            padding: tokens.spacingVerticalM,
+                            backgroundColor: tokens.colorNeutralBackground2,
+                            borderRadius: tokens.borderRadiusMedium,
+                            fontFamily: 'Consolas, "Courier New", monospace',
+                            fontSize: tokens.fontSizeBase200,
+                            wordBreak: 'break-all',
+                            whiteSpace: 'pre-wrap',
+                            overflowX: 'auto',
+                            border: `1px solid ${tokens.colorNeutralStroke2}`,
+                          }}>
+                            {selectedImageForDetail.commandLine}
+                          </div>
+                        </div>
+                      </Card>
+                    )}
+                  </div>
+                </div>
+              )}
+            </DialogContent>
+          </DialogBody>
+          <DialogActions>
+            <Button
+              appearance="primary"
+              onClick={() => {
+                setDetailDialogOpen(false);
+                setSelectedImageForDetail(null);
+                setCopiedField(null);
+              }}
+            >
+              关闭
             </Button>
           </DialogActions>
         </DialogSurface>

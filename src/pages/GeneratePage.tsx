@@ -12,6 +12,7 @@ import {
   Dropdown,
   Option,
   Input,
+  Checkbox,
 } from '@fluentui/react-components';
 import {
   ImageAddRegular,
@@ -50,14 +51,15 @@ const useStyles = makeStyles({
     justifyContent: 'center',
   },
   previewImage: {
-    maxWidth: '100%',
-    maxHeight: '100%',
     width: 'auto',
     height: 'auto',
     objectFit: 'contain',
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     borderRadius: tokens.borderRadiusMedium,
     cursor: 'pointer',
+    // 限制图片最大尺寸为屏幕的50%
+    maxWidth: '50vw',
+    maxHeight: '50vh',
   },
   emptyState: {
     textAlign: 'center',
@@ -148,6 +150,11 @@ interface ModelGroup {
   llmModel?: string;
   defaultSteps?: number;  // 推荐的默认采样步数
   defaultCfgScale?: number;  // 推荐的默认CFG Scale值
+  defaultWidth?: number;  // 推荐的默认图片宽度
+  defaultHeight?: number;  // 推荐的默认图片高度
+  defaultSamplingMethod?: string;  // 推荐的默认采样方法
+  defaultScheduler?: string;  // 推荐的默认调度器
+  defaultSeed?: number;  // 推荐的默认种子（-1表示随机）
   createdAt: number;
   updatedAt: number;
 }
@@ -170,7 +177,11 @@ const stripAnsiCodes = (text: string): string => {
     .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, ''); // 移除八进制格式的转义序列（使用十六进制替代）
 };
 
-export const GeneratePage = () => {
+interface GeneratePageProps {
+  onGeneratingStateChange?: (isGenerating: boolean) => void;
+}
+
+export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => {
   const styles = useStyles();
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [deviceType, setDeviceType] = useState<DeviceType>('cpu');
@@ -186,11 +197,28 @@ export const GeneratePage = () => {
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [generationProgress, setGenerationProgress] = useState<string>('');
   const [cliOutput, setCliOutput] = useState<Array<{ type: 'stdout' | 'stderr'; text: string; timestamp: number }>>([]);
   const [cliOutputExpanded, setCliOutputExpanded] = useState(false);
   const cliOutputRef = useRef<HTMLDivElement>(null);
   const cliOutputListenerRef = useRef<((_event: unknown, data: { type: 'stdout' | 'stderr'; text: string }) => void) | null>(null);
+  const previewListenerRef = useRef<((_event: unknown, data: { previewImage?: string }) => void) | null>(null);
+  
+  // 新增参数状态
+  const [samplingMethod, setSamplingMethod] = useState<string>('euler_a');
+  const [scheduler, setScheduler] = useState<string>('discrete');
+  const [seed, setSeed] = useState<number>(-1); // -1 表示随机种子
+  const [seedInput, setSeedInput] = useState<string>('');
+  const [batchCount, setBatchCount] = useState<number>(1);
+  const [threads, setThreads] = useState<number>(-1); // -1 表示自动
+  const [threadsInput, setThreadsInput] = useState<string>('');
+  const [preview, setPreview] = useState<string>('proj');
+  const [previewInterval, setPreviewInterval] = useState<number>(1);
+  const [verbose, setVerbose] = useState<boolean>(false);
+  const [color, setColor] = useState<boolean>(false);
+  const [offloadToCpu, setOffloadToCpu] = useState<boolean>(false);
+  const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
 
   // 加载模型组列表
   useEffect(() => {
@@ -239,7 +267,11 @@ export const GeneratePage = () => {
     // 如果监听器已存在，先移除它（防止重复注册）
     if (cliOutputListenerRef.current) {
       window.ipcRenderer.off('generate:cli-output', cliOutputListenerRef.current);
+      cliOutputListenerRef.current = null;
     }
+
+    // 先移除所有该事件的监听器，确保没有重复注册（针对 React Strict Mode）
+    window.ipcRenderer.removeAllListeners('generate:cli-output');
 
     const cliOutputListener = (_event: unknown, data: { type: 'stdout' | 'stderr'; text: string }) => {
       // 清理 ANSI 转义序列
@@ -263,12 +295,55 @@ export const GeneratePage = () => {
     };
   }, []);
 
+  // 监听预览图片更新
+  useEffect(() => {
+    // 检查 ipcRenderer 是否可用
+    if (!window.ipcRenderer) {
+      console.error('window.ipcRenderer is not available');
+      return;
+    }
+
+    // 如果监听器已存在，先移除它（防止重复注册）
+    if (previewListenerRef.current) {
+      window.ipcRenderer.off('generate:preview-update', previewListenerRef.current);
+      previewListenerRef.current = null;
+    }
+
+    // 先移除所有该事件的监听器，确保没有重复注册（针对 React Strict Mode）
+    window.ipcRenderer.removeAllListeners('generate:preview-update');
+
+    const previewListener = (_event: unknown, data: { previewImage?: string }) => {
+      if (data?.previewImage) {
+        setPreviewImage(data.previewImage);
+      }
+    };
+
+    // 保存监听器引用
+    previewListenerRef.current = previewListener;
+
+    window.ipcRenderer.on('generate:preview-update', previewListener);
+
+    return () => {
+      if (window.ipcRenderer && previewListenerRef.current) {
+        window.ipcRenderer.off('generate:preview-update', previewListenerRef.current);
+        previewListenerRef.current = null;
+      }
+    };
+  }, []);
+
   // 自动滚动到底部
   useEffect(() => {
     if (cliOutputRef.current && cliOutputExpanded) {
       cliOutputRef.current.scrollTop = cliOutputRef.current.scrollHeight;
     }
   }, [cliOutput, cliOutputExpanded]);
+
+  // 通知父组件生成状态变化
+  useEffect(() => {
+    if (onGeneratingStateChange) {
+      onGeneratingStateChange(generating);
+    }
+  }, [generating, onGeneratingStateChange]);
 
   const loadModelGroups = async () => {
     try {
@@ -334,9 +409,10 @@ export const GeneratePage = () => {
       return;
     }
 
-    try {
+      try {
       setGenerating(true);
       setGeneratedImage(null);
+      setPreviewImage(null); // 清空预览图片
       setGenerationProgress('正在初始化...');
       setCliOutput([]); // 清空之前的输出
 
@@ -370,10 +446,21 @@ export const GeneratePage = () => {
           width,
           height,
           cfgScale,
+          samplingMethod,
+          scheduler,
+          seed: seed < 0 ? undefined : seed,
+          batchCount,
+          threads: threads < 0 ? undefined : threads,
+          preview: preview !== 'none' ? preview : undefined,
+          previewInterval: preview !== 'none' ? previewInterval : undefined,
+          verbose,
+          color,
+          offloadToCpu,
         });
 
         if (result.success && result.image) {
           setGeneratedImage(result.image);
+          setPreviewImage(null); // 清除预览图片，显示最终图片
           setGenerationProgress('生成完成');
         } else {
           throw new Error(result.error || '生成失败');
@@ -435,10 +522,28 @@ export const GeneratePage = () => {
         <div className={styles.previewSection}>
           {generating ? (
             <div className={styles.emptyState}>
-              <Spinner size="large" />
-              <Body1 style={{ marginTop: tokens.spacingVerticalM }}>
-                {generationProgress || '正在生成...'}
-              </Body1>
+              {previewImage ? (
+                <>
+                  <PhotoView src={previewImage}>
+                    <img 
+                      src={previewImage} 
+                      alt="预览图片" 
+                      className={styles.previewImage}
+                      title="点击放大查看预览"
+                    />
+                  </PhotoView>
+                  <Body1 style={{ marginTop: tokens.spacingVerticalM }}>
+                    {generationProgress || '正在生成...'}
+                  </Body1>
+                </>
+              ) : (
+                <>
+                  <Spinner size="large" />
+                  <Body1 style={{ marginTop: tokens.spacingVerticalM }}>
+                    {generationProgress || '正在生成...'}
+                  </Body1>
+                </>
+              )}
             </div>
           ) : generatedImage ? (
             <>
@@ -525,6 +630,29 @@ export const GeneratePage = () => {
                     }
                     if (selectedGroup.defaultCfgScale !== undefined) {
                       setCfgScale(selectedGroup.defaultCfgScale);
+                    }
+                    if (selectedGroup.defaultWidth !== undefined) {
+                      setWidth(selectedGroup.defaultWidth);
+                      setWidthInput(selectedGroup.defaultWidth.toString());
+                    }
+                    if (selectedGroup.defaultHeight !== undefined) {
+                      setHeight(selectedGroup.defaultHeight);
+                      setHeightInput(selectedGroup.defaultHeight.toString());
+                    }
+                    if (selectedGroup.defaultSamplingMethod !== undefined) {
+                      setSamplingMethod(selectedGroup.defaultSamplingMethod);
+                    }
+                    if (selectedGroup.defaultScheduler !== undefined) {
+                      setScheduler(selectedGroup.defaultScheduler);
+                    }
+                    if (selectedGroup.defaultSeed !== undefined) {
+                      if (selectedGroup.defaultSeed >= 0) {
+                        setSeed(selectedGroup.defaultSeed);
+                        setSeedInput(selectedGroup.defaultSeed.toString());
+                      } else {
+                        setSeed(-1);
+                        setSeedInput('');
+                      }
                     }
                   }
                 }
@@ -699,7 +827,181 @@ export const GeneratePage = () => {
                 step={64}
               />
             </Field>
+            <Field label="采样方法" hint="默认: euler_a">
+              <Dropdown
+                value={samplingMethod}
+                selectedOptions={[samplingMethod]}
+                onOptionSelect={(_, data) => {
+                  if (data.optionValue) {
+                    setSamplingMethod(data.optionValue);
+                  }
+                }}
+              >
+                <Option value="euler">Euler</Option>
+                <Option value="euler_a">Euler A</Option>
+                <Option value="heun">Heun</Option>
+                <Option value="dpm2">DPM2</Option>
+                <Option value="dpm++2s_a">DPM++ 2S A</Option>
+                <Option value="dpm++2m">DPM++ 2M</Option>
+                <Option value="dpm++2mv2">DPM++ 2M V2</Option>
+                <Option value="ipndm">IPNDM</Option>
+                <Option value="ipndm_v">IPNDM V</Option>
+                <Option value="lcm">LCM</Option>
+                <Option value="ddim_trailing">DDIM Trailing</Option>
+                <Option value="tcd">TCD</Option>
+              </Dropdown>
+            </Field>
+            <Field label="调度器" hint="默认: discrete">
+              <Dropdown
+                value={scheduler}
+                selectedOptions={[scheduler]}
+                onOptionSelect={(_, data) => {
+                  if (data.optionValue) {
+                    setScheduler(data.optionValue);
+                  }
+                }}
+              >
+                <Option value="discrete">Discrete</Option>
+                <Option value="karras">Karras</Option>
+                <Option value="exponential">Exponential</Option>
+                <Option value="ays">AYS</Option>
+                <Option value="gits">GITS</Option>
+                <Option value="smoothstep">Smoothstep</Option>
+                <Option value="sgm_uniform">SGM Uniform</Option>
+                <Option value="simple">Simple</Option>
+                <Option value="lcm">LCM</Option>
+              </Dropdown>
+            </Field>
+            <Field label="种子" hint="留空或-1表示随机">
+              <Input
+                type="number"
+                value={seedInput}
+                placeholder="随机"
+                onChange={(_, data) => {
+                  setSeedInput(data.value);
+                  const val = parseInt(data.value);
+                  if (!isNaN(val) && val >= 0) {
+                    setSeed(val);
+                  } else {
+                    setSeed(-1);
+                  }
+                }}
+                onBlur={() => {
+                  const val = parseInt(seedInput);
+                  if (isNaN(val) || val < 0) {
+                    setSeedInput('');
+                    setSeed(-1);
+                  } else {
+                    setSeed(val);
+                  }
+                }}
+                min={0}
+              />
+            </Field>
+            <Field label="批次数量" hint="默认: 1">
+              <Input
+                type="number"
+                value={batchCount.toString()}
+                onChange={(_, data) => {
+                  const val = parseInt(data.value) || 1;
+                  setBatchCount(Math.max(1, Math.min(10, val)));
+                }}
+                min={1}
+                max={10}
+              />
+            </Field>
           </div>
+
+          {/* 展开更多选项按钮 */}
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: tokens.spacingVerticalM }}>
+            <Button
+              size="medium"
+              appearance="subtle"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+            >
+              {showAdvanced ? '收起更多选项' : '展开更多选项'}
+            </Button>
+          </div>
+
+          {/* 更多高级选项 */}
+          {showAdvanced && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: tokens.spacingHorizontalM, marginTop: tokens.spacingVerticalM }}>
+              <Field label="线程数" hint="留空或-1表示自动">
+                <Input
+                  type="number"
+                  value={threadsInput}
+                  placeholder="自动"
+                  onChange={(_, data) => {
+                    setThreadsInput(data.value);
+                    const val = parseInt(data.value);
+                    if (!isNaN(val) && val > 0) {
+                      setThreads(val);
+                    } else {
+                      setThreads(-1);
+                    }
+                  }}
+                  onBlur={() => {
+                    const val = parseInt(threadsInput);
+                    if (isNaN(val) || val <= 0) {
+                      setThreadsInput('');
+                      setThreads(-1);
+                    } else {
+                      setThreads(val);
+                    }
+                  }}
+                  min={1}
+                />
+              </Field>
+              <Field label="预览方法" hint="默认: proj">
+                <Dropdown
+                  value={preview}
+                  selectedOptions={[preview]}
+                  onOptionSelect={(_, data) => {
+                    if (data.optionValue) {
+                      setPreview(data.optionValue);
+                    }
+                  }}
+                >
+                  <Option value="none">无</Option>
+                  <Option value="proj">Proj</Option>
+                  <Option value="tae">TAE</Option>
+                  <Option value="vae">VAE</Option>
+                </Dropdown>
+              </Field>
+              {preview !== 'none' && (
+                <Field label="预览间隔" hint="默认: 1">
+                  <Input
+                    type="number"
+                    value={previewInterval.toString()}
+                    onChange={(_, data) => {
+                      const val = parseInt(data.value) || 1;
+                      setPreviewInterval(Math.max(1, Math.min(100, val)));
+                    }}
+                    min={1}
+                    max={100}
+                  />
+                </Field>
+              )}
+              <Field label="详细输出" hint="打印额外信息">
+                <Checkbox
+                  checked={verbose}
+                  onChange={(_, data) => setVerbose(data.checked === true)}
+                />
+              </Field>
+              <Field label="彩色日志" hint="按级别着色日志标签">
+                <Checkbox
+                  checked={color}
+                  onChange={(_, data) => setColor(data.checked === true)}
+                />
+              </Field>
+              <Field label="卸载到CPU" hint="将权重放在RAM中以节省VRAM，需要时自动加载到VRAM">
+                <Checkbox
+                  checked={offloadToCpu}
+                  onChange={(_, data) => setOffloadToCpu(data.checked === true)}
+                />
+              </Field>
+            </div>
+          )}
 
           {/* 生成按钮 */}
           <div className={styles.actions}>

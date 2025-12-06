@@ -13,6 +13,7 @@ declare global {
     ipcRenderer: {
       on(channel: string, listener: (event: any, ...args: any[]) => void): void
       off(channel: string, ...args: any[]): void
+      removeAllListeners(channel: string): void
       send(channel: string, ...args: any[]): void
       invoke(channel: string, ...args: any[]): Promise<any>
     }

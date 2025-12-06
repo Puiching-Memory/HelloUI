@@ -14,6 +14,7 @@ function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [currentPage, setCurrentPage] = useState<PageType>('home');
   const [isUploading, setIsUploading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   // 检测系统主题偏好
   useEffect(() => {
@@ -39,8 +40,8 @@ function App() {
   };
 
   const handlePageChange = (page: PageType) => {
-    // 如果正在上传，禁止切换页面
-    if (isUploading) {
+    // 如果正在上传或正在生成，禁止切换页面
+    if (isUploading || isGenerating) {
       return;
     }
     setCurrentPage(page);
@@ -52,14 +53,15 @@ function App() {
         <MainLayout 
           currentPage={currentPage} 
           onPageChange={handlePageChange}
-          navigationDisabled={isUploading}
+          navigationDisabled={isUploading || isGenerating}
+          navigationDisabledReason={isGenerating ? '正在生成图片，请稍候...' : isUploading ? '正在上传文件，请稍候...' : undefined}
         >
           {currentPage === 'weights' ? (
             <ModelWeightsPage onUploadStateChange={setIsUploading} />
           ) : currentPage === 'sdcpp' ? (
             <SDCppPage />
           ) : currentPage === 'generate' ? (
-            <GeneratePage />
+            <GeneratePage onGeneratingStateChange={setIsGenerating} />
           ) : currentPage === 'images' ? (
             <GeneratedImagesPage />
           ) : (
