@@ -23,12 +23,16 @@ import {
   Field,
   ProgressBar,
   Tooltip,
+  Dropdown,
+  Option,
 } from '@fluentui/react-components';
 import {
   ArrowUploadRegular,
   ArrowDownloadRegular,
   DeleteRegular,
   DismissRegular,
+  AddRegular,
+  EditRegular,
 } from '@fluentui/react-icons';
 import { useState, useEffect } from 'react';
 
@@ -98,6 +102,18 @@ interface WeightFile {
   modified: number;
 }
 
+interface ModelGroup {
+  id: string;
+  name: string;
+  sdModel?: string;
+  vaeModel?: string;
+  llmModel?: string;
+  defaultSteps?: number;  // 推荐的默认采样步数
+  defaultCfgScale?: number;  // 推荐的默认CFG Scale值
+  createdAt: number;
+  updatedAt: number;
+}
+
 interface ModelWeightsPageProps {
   onUploadStateChange?: (isUploading: boolean) => void;
 }
@@ -116,6 +132,15 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     total: number;
   } | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [modelGroups, setModelGroups] = useState<ModelGroup[]>([]);
+  const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<ModelGroup | null>(null);
+  const [groupName, setGroupName] = useState('');
+  const [groupSdModel, setGroupSdModel] = useState<string>('');
+  const [groupVaeModel, setGroupVaeModel] = useState<string>('');
+  const [groupLlmModel, setGroupLlmModel] = useState<string>('');
+  const [groupDefaultSteps, setGroupDefaultSteps] = useState<string>('20');
+  const [groupDefaultCfgScale, setGroupDefaultCfgScale] = useState<string>('7.0');
 
   // 加载权重文件夹路径
   useEffect(() => {
@@ -128,6 +153,11 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
       loadFiles();
     }
   }, [weightsFolder]);
+
+  // 加载模型组列表
+  useEffect(() => {
+    loadModelGroups().catch(console.error);
+  }, []);
 
   const loadWeightsFolder = async () => {
     try {
@@ -334,6 +364,119 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     return new Date(timestamp).toLocaleString('zh-CN');
   };
 
+  const loadModelGroups = async () => {
+    try {
+      const groups = await window.ipcRenderer.invoke('model-groups:list');
+      setModelGroups(groups || []);
+    } catch (error) {
+      console.error('Failed to load model groups:', error);
+      setModelGroups([]);
+    }
+  };
+
+  const handleCreateGroup = () => {
+    setEditingGroup(null);
+    setGroupName('');
+    setGroupSdModel('');
+    setGroupVaeModel('');
+    setGroupLlmModel('');
+    setGroupDefaultSteps('20');
+    setGroupDefaultCfgScale('7.0');
+    setGroupDialogOpen(true);
+  };
+
+  const handleEditGroup = (group: ModelGroup) => {
+    setEditingGroup(group);
+    setGroupName(group.name);
+    setGroupSdModel(group.sdModel || '');
+    setGroupVaeModel(group.vaeModel || '');
+    setGroupLlmModel(group.llmModel || '');
+    setGroupDefaultSteps(group.defaultSteps?.toString() || '20');
+    setGroupDefaultCfgScale(group.defaultCfgScale?.toString() || '7.0');
+    setGroupDialogOpen(true);
+  };
+
+  const handleSaveGroup = async () => {
+    if (!groupName.trim()) {
+      alert('请输入组名称');
+      return;
+    }
+
+    // 创建新模型组时，必须所有三个模型都选择了有效模型
+    if (!editingGroup) {
+      if (!groupSdModel || !groupSdModel.trim()) {
+        alert('创建新模型组时，必须选择SD模型');
+        return;
+      }
+      if (!groupVaeModel || !groupVaeModel.trim()) {
+        alert('创建新模型组时，必须选择VAE模型');
+        return;
+      }
+      if (!groupLlmModel || !groupLlmModel.trim()) {
+        alert('创建新模型组时，必须选择LLM/CLIP模型');
+        return;
+      }
+    }
+
+    try {
+      setLoading(true);
+      if (editingGroup) {
+        // 更新组
+        await window.ipcRenderer.invoke('model-groups:update', editingGroup.id, {
+          name: groupName.trim(),
+          sdModel: groupSdModel || undefined,
+          vaeModel: groupVaeModel || undefined,
+          llmModel: groupLlmModel || undefined,
+          defaultSteps: groupDefaultSteps ? parseFloat(groupDefaultSteps) : undefined,
+          defaultCfgScale: groupDefaultCfgScale ? parseFloat(groupDefaultCfgScale) : undefined,
+        });
+      } else {
+        // 创建新组
+        await window.ipcRenderer.invoke('model-groups:create', {
+          name: groupName.trim(),
+          sdModel: groupSdModel || undefined,
+          vaeModel: groupVaeModel || undefined,
+          llmModel: groupLlmModel || undefined,
+          defaultSteps: groupDefaultSteps ? parseFloat(groupDefaultSteps) : undefined,
+          defaultCfgScale: groupDefaultCfgScale ? parseFloat(groupDefaultCfgScale) : undefined,
+        });
+      }
+      await loadModelGroups();
+      setGroupDialogOpen(false);
+      setEditingGroup(null);
+    } catch (error) {
+      console.error('Failed to save group:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      alert(`保存模型组失败: ${errorMessage}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteGroup = async (group: ModelGroup) => {
+    if (!confirm(`确定要删除模型组 "${group.name}" 吗？`)) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await window.ipcRenderer.invoke('model-groups:delete', group.id);
+      await loadModelGroups();
+    } catch (error) {
+      console.error('Failed to delete group:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      alert(`删除模型组失败: ${errorMessage}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getModelFileName = (path: string | undefined): string => {
+    if (!path) return '未选择';
+    const file = files.find(f => f.path === path);
+    return file ? file.name : path.split(/[/\\]/).pop() || path;
+  };
+
   return (
     <div className={styles.container}>
       <Title1>模型权重管理</Title1>
@@ -417,6 +560,97 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
         )}
       </Card>
 
+      {/* 模型组管理 */}
+      <Card className={styles.section}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalM }}>
+          <Title2>模型组管理</Title2>
+          <Button
+            icon={<AddRegular />}
+            onClick={handleCreateGroup}
+            disabled={loading || !weightsFolder || files.length === 0}
+            appearance="primary"
+          >
+            创建模型组
+          </Button>
+        </div>
+        <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginBottom: tokens.spacingVerticalM }}>
+          模型组用于组合SD模型、VAE模型和LLM/CLIP模型，便于在生成图片时统一使用。
+        </Body1>
+        {modelGroups.length === 0 ? (
+          <div className={styles.emptyState}>
+            <Body1>暂无模型组</Body1>
+            <Body1 style={{ fontSize: tokens.fontSizeBase200, marginTop: tokens.spacingVerticalS }}>
+              点击"创建模型组"按钮创建一个新的模型组
+            </Body1>
+          </div>
+        ) : (
+          <div className={styles.tableContainer}>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHeaderCell>组名称</TableHeaderCell>
+                  <TableHeaderCell>SD模型</TableHeaderCell>
+                  <TableHeaderCell>VAE模型</TableHeaderCell>
+                  <TableHeaderCell>LLM模型</TableHeaderCell>
+                  <TableHeaderCell>操作</TableHeaderCell>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {modelGroups.map((group) => (
+                  <TableRow key={group.id}>
+                    <TableCell>
+                      <Body1>{group.name}</Body1>
+                    </TableCell>
+                    <TableCell>
+                      <Tooltip content={getModelFileName(group.sdModel)} relationship="label">
+                        <div className={styles.truncatedText} title={getModelFileName(group.sdModel)}>
+                          <Body1>{getModelFileName(group.sdModel)}</Body1>
+                        </div>
+                      </Tooltip>
+                    </TableCell>
+                    <TableCell>
+                      <Tooltip content={getModelFileName(group.vaeModel)} relationship="label">
+                        <div className={styles.truncatedText} title={getModelFileName(group.vaeModel)}>
+                          <Body1>{getModelFileName(group.vaeModel)}</Body1>
+                        </div>
+                      </Tooltip>
+                    </TableCell>
+                    <TableCell>
+                      <Tooltip content={getModelFileName(group.llmModel)} relationship="label">
+                        <div className={styles.truncatedText} title={getModelFileName(group.llmModel)}>
+                          <Body1>{getModelFileName(group.llmModel)}</Body1>
+                        </div>
+                      </Tooltip>
+                    </TableCell>
+                    <TableCell>
+                      <div style={{ display: 'flex', gap: tokens.spacingHorizontalS }}>
+                        <Button
+                          icon={<EditRegular />}
+                          size="small"
+                          onClick={() => handleEditGroup(group)}
+                          disabled={loading}
+                        >
+                          编辑
+                        </Button>
+                        <Button
+                          icon={<DeleteRegular />}
+                          size="small"
+                          appearance="secondary"
+                          onClick={() => handleDeleteGroup(group)}
+                          disabled={loading}
+                        >
+                          删除
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </Card>
+
       {/* 文件列表 */}
       <Card className={styles.section}>
         <Title2>权重文件列表</Title2>
@@ -495,6 +729,164 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
           </div>
         )}
       </Card>
+
+      {/* 模型组编辑对话框 */}
+      <Dialog open={groupDialogOpen} onOpenChange={(_, data) => {
+        setGroupDialogOpen(data.open);
+        if (!data.open) {
+          setEditingGroup(null);
+          setGroupName('');
+          setGroupSdModel('');
+          setGroupVaeModel('');
+          setGroupLlmModel('');
+          setGroupDefaultSteps('20');
+          setGroupDefaultCfgScale('7.0');
+        }
+      }}>
+        <DialogSurface style={{ minWidth: '600px' }}>
+          <DialogTitle>{editingGroup ? '编辑模型组' : '创建模型组'}</DialogTitle>
+          <DialogBody>
+            <DialogContent>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM }}>
+                <Field label="组名称" required>
+                  <Input
+                    value={groupName}
+                    onChange={(_, data) => setGroupName(data.value)}
+                    placeholder="请输入模型组名称"
+                  />
+                </Field>
+                <Field label="SD模型（必选）">
+                  <Dropdown
+                    placeholder="请选择SD模型"
+                    value={getModelFileName(groupSdModel)}
+                    selectedOptions={[groupSdModel]}
+                    onOptionSelect={(_, data) => {
+                      if (data.optionValue) {
+                        setGroupSdModel(data.optionValue);
+                      }
+                    }}
+                  >
+                    {files.filter(file => {
+                      // 当前已选择的SD模型可以显示（如果正在编辑）
+                      if (file.path === groupSdModel) return true;
+                      // 过滤掉已被VAE或LLM选择的模型
+                      return file.path !== groupVaeModel && file.path !== groupLlmModel;
+                    }).map((file) => (
+                      <Option key={file.path} value={file.path} text={file.name}>
+                        {file.name}
+                      </Option>
+                    ))}
+                  </Dropdown>
+                </Field>
+                <Field label={editingGroup ? "VAE模型（可选）" : "VAE模型（必选）"}>
+                  <Dropdown
+                    placeholder={editingGroup ? "请选择VAE模型（可选）" : "请选择VAE模型（必选）"}
+                    value={getModelFileName(groupVaeModel)}
+                    selectedOptions={[groupVaeModel]}
+                    onOptionSelect={(_, data) => {
+                      if (data.optionValue) {
+                        setGroupVaeModel(data.optionValue);
+                      } else {
+                        setGroupVaeModel('');
+                      }
+                    }}
+                  >
+                    {editingGroup && <Option value="" text="无">无</Option>}
+                    {files.filter(file => {
+                      // 当前已选择的VAE模型可以显示（如果正在编辑）
+                      if (file.path === groupVaeModel) return true;
+                      // 过滤掉已被SD或LLM选择的模型
+                      return file.path !== groupSdModel && file.path !== groupLlmModel;
+                    }).map((file) => (
+                      <Option key={file.path} value={file.path} text={file.name}>
+                        {file.name}
+                      </Option>
+                    ))}
+                  </Dropdown>
+                </Field>
+                <Field label={editingGroup ? "LLM/CLIP模型（可选）" : "LLM/CLIP模型（必选）"}>
+                  <Dropdown
+                    placeholder={editingGroup ? "请选择LLM/CLIP模型（可选）" : "请选择LLM/CLIP模型（必选）"}
+                    value={getModelFileName(groupLlmModel)}
+                    selectedOptions={[groupLlmModel]}
+                    onOptionSelect={(_, data) => {
+                      if (data.optionValue) {
+                        setGroupLlmModel(data.optionValue);
+                      } else {
+                        setGroupLlmModel('');
+                      }
+                    }}
+                  >
+                    {editingGroup && <Option value="" text="无">无</Option>}
+                    {files.filter(file => {
+                      // 当前已选择的LLM模型可以显示（如果正在编辑）
+                      if (file.path === groupLlmModel) return true;
+                      // 过滤掉已被SD或VAE选择的模型
+                      return file.path !== groupSdModel && file.path !== groupVaeModel;
+                    }).map((file) => (
+                      <Option key={file.path} value={file.path} text={file.name}>
+                        {file.name}
+                      </Option>
+                    ))}
+                  </Dropdown>
+                </Field>
+                <Title2 style={{ fontSize: tokens.fontSizeBase400, marginTop: tokens.spacingVerticalM }}>
+                  推荐默认设置（可选）
+                </Title2>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: tokens.spacingHorizontalM }}>
+                  <Field label="采样步数" hint="默认: 20">
+                    <Input
+                      type="number"
+                      value={groupDefaultSteps}
+                      onChange={(_, data) => {
+                        const val = parseInt(data.value) || 20;
+                        setGroupDefaultSteps(Math.max(1, Math.min(100, val)).toString());
+                      }}
+                      min={1}
+                      max={100}
+                    />
+                  </Field>
+                  <Field label="CFG Scale" hint="默认: 7.0">
+                    <Input
+                      type="number"
+                      value={groupDefaultCfgScale}
+                      onChange={(_, data) => {
+                        const val = parseFloat(data.value) || 7.0;
+                        setGroupDefaultCfgScale(Math.max(0.1, Math.min(30, val)).toString());
+                      }}
+                      min={0.1}
+                      max={30}
+                      step={0.1}
+                    />
+                  </Field>
+                </div>
+              </div>
+            </DialogContent>
+            <DialogActions>
+              <Button
+                appearance="secondary"
+                onClick={() => {
+                  setGroupDialogOpen(false);
+                  setEditingGroup(null);
+                }}
+              >
+                取消
+              </Button>
+              <Button
+                appearance="primary"
+                onClick={handleSaveGroup}
+                disabled={
+                  loading || 
+                  !groupName.trim() || 
+                  (!editingGroup && (!groupSdModel || !groupSdModel.trim() || !groupVaeModel || !groupVaeModel.trim() || !groupLlmModel || !groupLlmModel.trim()))
+                }
+              >
+                保存
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
 
       {/* 删除确认对话框 */}
       <Dialog open={deleteDialogOpen} onOpenChange={(_, data) => setDeleteDialogOpen(data.open)}>

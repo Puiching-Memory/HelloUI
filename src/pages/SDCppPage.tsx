@@ -13,9 +13,6 @@ import {
   makeStyles,
   tokens,
   Spinner,
-  RadioGroup,
-  Radio,
-  Label,
   Tooltip,
 } from '@fluentui/react-components';
 import { useState, useEffect } from 'react';
@@ -33,14 +30,6 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
-  },
-  deviceSelection: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-    padding: tokens.spacingVerticalM,
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderRadius: tokens.borderRadiusMedium,
   },
   tableContainer: {
     overflowX: 'auto',
@@ -79,6 +68,7 @@ interface EngineFile {
   size: number;
   path: string;
   modified: number;
+  deviceType: DeviceType;
 }
 
 type DeviceType = 'cpu' | 'vulkan' | 'cuda';
@@ -86,29 +76,25 @@ type DeviceType = 'cpu' | 'vulkan' | 'cuda';
 export const SDCppPage = () => {
   const styles = useStyles();
   const [engineFolder, setEngineFolder] = useState<string>('');
-  const [deviceType, setDeviceType] = useState<DeviceType>('cpu');
   const [files, setFiles] = useState<EngineFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // 加载引擎文件夹路径和设备类型
+  // 加载引擎文件夹路径
   useEffect(() => {
     const initialize = async () => {
-      await Promise.all([
-        loadEngineFolder().catch(console.error),
-        loadDeviceType().catch(console.error),
-      ]);
+      await loadEngineFolder().catch(console.error);
       setIsInitialized(true);
     };
     initialize();
   }, []);
 
-  // 当文件夹路径或设备类型改变时，加载文件列表（仅在初始化完成后）
+  // 当文件夹路径改变时，加载文件列表（仅在初始化完成后）
   useEffect(() => {
-    if (isInitialized && engineFolder && deviceType) {
+    if (isInitialized && engineFolder) {
       loadFiles();
     }
-  }, [engineFolder, deviceType, isInitialized]);
+  }, [engineFolder, isInitialized]);
 
   const loadEngineFolder = async () => {
     try {
@@ -127,45 +113,39 @@ export const SDCppPage = () => {
     }
   };
 
-  const loadDeviceType = async () => {
-    try {
-      const device = await window.ipcRenderer.invoke('sdcpp:get-device');
-      if (device) {
-        setDeviceType(device as DeviceType);
-      }
-    } catch (error) {
-      console.error('Failed to load device type:', error);
-    }
-  };
-
-  const loadFiles = async (targetDeviceType?: DeviceType) => {
-    const currentDeviceType = targetDeviceType || deviceType;
-    if (!engineFolder || !currentDeviceType) return;
+  const loadFiles = async () => {
+    if (!engineFolder) return;
     setLoading(true);
     try {
-      const devicePath = `${engineFolder}/${currentDeviceType}`;
-      console.log(`[SDCppPage] Loading files from SD.cpp engine path (${currentDeviceType}): ${devicePath}`);
-      const fileList = await window.ipcRenderer.invoke('sdcpp:list-files', engineFolder, currentDeviceType);
-      console.log(`[SDCppPage] Found ${fileList?.length || 0} files in SD.cpp engine path`);
-      setFiles(fileList || []);
+      // 加载所有设备类型的文件
+      const deviceTypes: DeviceType[] = ['cpu', 'vulkan', 'cuda'];
+      const allFilesPromises = deviceTypes.map(async (deviceType) => {
+        try {
+          const fileList = await window.ipcRenderer.invoke('sdcpp:list-files', engineFolder, deviceType);
+          // 为每个文件添加设备类型信息
+          return (fileList || []).map((file: Omit<EngineFile, 'deviceType'>) => ({
+            ...file,
+            deviceType,
+          }));
+        } catch (error) {
+          console.error(`Failed to load files for ${deviceType}:`, error);
+          return [];
+        }
+      });
+
+      const allFilesArrays = await Promise.all(allFilesPromises);
+      const allFiles = allFilesArrays.flat();
+      
+      // 按修改时间降序排序
+      allFiles.sort((a, b) => b.modified - a.modified);
+      
+      console.log(`[SDCppPage] Found ${allFiles.length} files across all device types`);
+      setFiles(allFiles);
     } catch (error) {
       console.error('Failed to load file list:', error);
       setFiles([]);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleDeviceTypeChange = async (value: DeviceType) => {
-    // 先更新状态
-    setDeviceType(value);
-    try {
-      // 保存设备类型到主进程
-      await window.ipcRenderer.invoke('sdcpp:set-device', value);
-      // 使用新的设备类型加载文件列表
-      await loadFiles(value);
-    } catch (error) {
-      console.error('Failed to set device type:', error);
     }
   };
 
@@ -194,42 +174,33 @@ export const SDCppPage = () => {
     }
   };
 
-  return (
-    <div className={styles.container}>
-      <Title1>SD.cpp 推理引擎</Title1>
+  // 按设备类型分组文件
+  const filesByDevice = files.reduce((acc, file) => {
+    if (!acc[file.deviceType]) {
+      acc[file.deviceType] = [];
+    }
+    acc[file.deviceType].push(file);
+    return acc;
+  }, {} as Record<DeviceType, EngineFile[]>);
 
-      {/* 设备类型选择 */}
-      <Card className={styles.section}>
-        <Title2>推理设备选择</Title2>
-        <div className={styles.deviceSelection}>
-          <Label>选择推理设备类型</Label>
-          <RadioGroup
-            value={deviceType}
-            onChange={(_, data) => handleDeviceTypeChange(data.value as DeviceType)}
-          >
-            <Radio value="cpu" label="CPU" />
-            <Radio value="vulkan" label="Vulkan" />
-            <Radio value="cuda" label="CUDA" />
-          </RadioGroup>
-        </div>
-        <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalXS }}>
-          当前选择: {getDeviceLabel(deviceType)}。引擎文件将根据选择的设备类型存放在对应的子文件夹中。
-        </Body1>
-      </Card>
+  // 渲染单个设备类型的文件列表
+  const renderDeviceFileList = (deviceType: DeviceType) => {
+    const deviceFiles = filesByDevice[deviceType] || [];
+    const deviceLabel = getDeviceLabel(deviceType);
 
-      {/* 文件列表 */}
-      <Card className={styles.section}>
-        <Title2>引擎文件列表 ({getDeviceLabel(deviceType)})</Title2>
-        {loading && files.length === 0 ? (
+    return (
+      <Card className={styles.section} key={deviceType}>
+        <Title2>{deviceLabel} 引擎文件</Title2>
+        {loading && deviceFiles.length === 0 ? (
           <div className={styles.emptyState}>
             <Spinner size="large" />
             <Body1 style={{ marginTop: tokens.spacingVerticalM }}>加载中...</Body1>
           </div>
-        ) : files.length === 0 ? (
+        ) : deviceFiles.length === 0 ? (
           <div className={styles.emptyState}>
             <Body1>暂无引擎文件</Body1>
             <Body1 style={{ fontSize: tokens.fontSizeBase200, marginTop: tokens.spacingVerticalS }}>
-              {engineFolder && deviceType ? '暂无引擎文件' : '请先选择设备类型'}
+              {deviceLabel} 设备类型下暂无引擎文件
             </Body1>
           </div>
         ) : (
@@ -243,7 +214,7 @@ export const SDCppPage = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {files.map((file) => (
+                {deviceFiles.map((file) => (
                   <TableRow key={file.path}>
                     <TableCell className={styles.tableCellFileName}>
                       <Tooltip content={file.name} relationship="label">
@@ -273,7 +244,17 @@ export const SDCppPage = () => {
           </div>
         )}
       </Card>
+    );
+  };
 
+  return (
+    <div className={styles.container}>
+      <Title1>SD.cpp 推理引擎</Title1>
+
+      {/* 按设备类型分组的文件列表 */}
+      {renderDeviceFileList('cpu')}
+      {renderDeviceFileList('cuda')}
+      {renderDeviceFileList('vulkan')}
     </div>
   );
 };

@@ -10,6 +10,8 @@ import {
   SettingsRegular,
   DatabaseRegular,
   CodeRegular,
+  ImageAddRegular,
+  ImageRegular,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -54,7 +56,7 @@ const useStyles = makeStyles({
   },
 });
 
-export type PageType = 'home' | 'components' | 'settings' | 'weights' | 'sdcpp';
+export type PageType = 'home' | 'components' | 'settings' | 'weights' | 'sdcpp' | 'generate' | 'images';
 
 interface MainLayoutProps {
   currentPage: PageType;
@@ -81,6 +83,16 @@ export const MainLayout = ({ currentPage, onPageChange, children, navigationDisa
       id: 'sdcpp' as PageType,
       label: 'SD.cpp 推理引擎',
       icon: <CodeRegular />,
+    },
+    {
+      id: 'generate' as PageType,
+      label: '图片生成',
+      icon: <ImageAddRegular />,
+    },
+    {
+      id: 'images' as PageType,
+      label: '已生成图片',
+      icon: <ImageRegular />,
     },
     {
       id: 'components' as PageType,
