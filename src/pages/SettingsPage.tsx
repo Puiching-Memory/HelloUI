@@ -4,9 +4,11 @@ import {
   Title2,
   Body1,
   Switch,
+  Button,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
+import { CodeRegular } from '@fluentui/react-icons';
 import { useState } from 'react';
 
 const useStyles = makeStyles({
@@ -29,6 +31,7 @@ export const SettingsPage = () => {
   const styles = useStyles();
   const [notifications, setNotifications] = useState(true);
   const [autoSave, setAutoSave] = useState(false);
+  const [devToolsOpen, setDevToolsOpen] = useState(false);
 
   return (
     <div className={styles.container}>
@@ -60,6 +63,38 @@ export const SettingsPage = () => {
               checked={autoSave}
               onChange={(_, data) => setAutoSave(data.checked || false)}
             />
+          </div>
+        </div>
+      </Card>
+
+      <Card className={styles.section}>
+        <Title2>开发者工具</Title2>
+        <div className={styles.section}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <Body1>打开开发者工具</Body1>
+              <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                打开浏览器调试工具栏（F12）
+              </Body1>
+            </div>
+            <Button
+              icon={<CodeRegular />}
+              onClick={async () => {
+                if (window.ipcRenderer) {
+                  try {
+                    const result = await window.ipcRenderer.invoke('devtools:toggle');
+                    if (result?.success && result.isOpen !== undefined) {
+                      setDevToolsOpen(result.isOpen);
+                    }
+                  } catch (error) {
+                    console.error('Failed to toggle DevTools:', error);
+                  }
+                }
+              }}
+              appearance="secondary"
+            >
+              {devToolsOpen ? '关闭开发者工具' : '打开开发者工具'}
+            </Button>
           </div>
         </div>
       </Card>

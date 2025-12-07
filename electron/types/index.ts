@@ -1,5 +1,5 @@
 /**
- * 模型相关类型定义（前后端共享）
+ * 主进程类型定义（前后端共享）
  */
 
 /**
@@ -7,6 +7,9 @@
  */
 export type DeviceType = 'cpu' | 'vulkan' | 'cuda';
 
+/**
+ * 权重文件接口
+ */
 export interface WeightFile {
   name: string;
   size: number;
@@ -14,19 +17,22 @@ export interface WeightFile {
   modified: number;
 }
 
+/**
+ * 模型组接口
+ */
 export interface ModelGroup {
   id: string;
   name: string;
-  sdModel?: string;
-  vaeModel?: string;
-  llmModel?: string;
-  defaultSteps?: number;
-  defaultCfgScale?: number;
-  defaultWidth?: number;
-  defaultHeight?: number;
-  defaultSamplingMethod?: string;
-  defaultScheduler?: string;
-  defaultSeed?: number;
+  sdModel?: string;  // SD模型路径
+  vaeModel?: string;  // VAE模型路径
+  llmModel?: string;  // LLM/CLIP模型路径
+  defaultSteps?: number;  // 推荐的默认采样步数
+  defaultCfgScale?: number;  // 推荐的默认CFG Scale值
+  defaultWidth?: number;  // 推荐的默认图片宽度
+  defaultHeight?: number;  // 推荐的默认图片高度
+  defaultSamplingMethod?: string;  // 推荐的默认采样方法
+  defaultScheduler?: string;  // 推荐的默认调度器
+  defaultSeed?: number;  // 推荐的默认种子（-1表示随机）
   createdAt: number;
   updatedAt: number;
 }

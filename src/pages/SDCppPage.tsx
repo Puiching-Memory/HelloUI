@@ -97,6 +97,10 @@ export const SDCppPage = () => {
   }, [engineFolder, isInitialized]);
 
   const loadEngineFolder = async () => {
+    if (!window.ipcRenderer) {
+      return;
+    }
+    
     try {
       let folder = await window.ipcRenderer.invoke('sdcpp:get-folder');
       
@@ -114,7 +118,7 @@ export const SDCppPage = () => {
   };
 
   const loadFiles = async () => {
-    if (!engineFolder) return;
+    if (!engineFolder || !window.ipcRenderer) return;
     setLoading(true);
     try {
       // 加载所有设备类型的文件

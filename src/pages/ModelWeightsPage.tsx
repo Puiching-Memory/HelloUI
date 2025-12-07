@@ -170,60 +170,49 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
   }, []);
 
   const loadWeightsFolder = async () => {
-    try {
-      // 先尝试获取已保存的文件夹路径
-      let folder = await window.ipcRenderer.invoke('weights:get-folder');
-      
-      // 如果没有保存的路径，则使用默认文件夹
-      if (!folder) {
-        folder = await window.ipcRenderer.invoke('weights:init-default-folder');
-        // 保存默认文件夹路径
-        await window.ipcRenderer.invoke('weights:set-folder', folder);
-      }
-      
-      if (folder) {
-        setWeightsFolder(folder);
-      }
-    } catch (error) {
-      console.error('Failed to load weights folder:', error);
+    if (!window.ipcRenderer) {
+      return;
+    }
+    
+    let folder = await window.ipcRenderer.invoke('weights:get-folder');
+    
+    if (!folder) {
+      folder = await window.ipcRenderer.invoke('weights:init-default-folder');
+      await window.ipcRenderer.invoke('weights:set-folder', folder);
+    }
+    
+    if (folder) {
+      setWeightsFolder(folder);
     }
   };
 
   const loadFiles = async () => {
-    if (!weightsFolder) return;
+    if (!weightsFolder || !window.ipcRenderer) return;
     setLoading(true);
     try {
       const fileList = await window.ipcRenderer.invoke('weights:list-files', weightsFolder);
       setFiles(fileList || []);
-    } catch (error) {
-      console.error('Failed to load file list:', error);
-      setFiles([]);
     } finally {
       setLoading(false);
     }
   };
 
   const handleSetFolder = async () => {
-    if (!weightsFolder.trim()) {
-      alert('请输入有效的文件夹路径');
+    if (!weightsFolder.trim() || !window.ipcRenderer) {
+      if (!weightsFolder.trim()) {
+        alert('请输入有效的文件夹路径');
+      }
       return;
     }
     
-    try {
-      // 验证文件夹是否存在
-      const exists = await window.ipcRenderer.invoke('weights:check-folder', weightsFolder.trim());
-      if (!exists) {
-        alert('文件夹不存在，请检查路径是否正确');
-        return;
-      }
-      
-      await window.ipcRenderer.invoke('weights:set-folder', weightsFolder.trim());
-      await loadFiles();
-    } catch (error) {
-      console.error('Failed to set folder:', error);
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      alert(`设置文件夹失败: ${errorMessage}`);
+    const exists = await window.ipcRenderer.invoke('weights:check-folder', weightsFolder.trim());
+    if (!exists) {
+      alert('文件夹不存在，请检查路径是否正确');
+      return;
     }
+    
+    await window.ipcRenderer.invoke('weights:set-folder', weightsFolder.trim());
+    await loadFiles();
   };
 
   const handleFolderPathChange = (value: string) => {
@@ -231,22 +220,18 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
   };
 
   const handleCancelUpload = async () => {
-    try {
-      await window.ipcRenderer.invoke('weights:cancel-upload');
-      
-      // 清理状态
-      setUploadProgress(null);
-      setLoading(false);
-      setIsUploading(false);
-      // 通知父组件上传结束，恢复导航
-      onUploadStateChange?.(false);
-    } catch (error) {
-      console.error('Failed to cancel upload:', error);
-    }
+    if (!window.ipcRenderer) return;
+    
+    await window.ipcRenderer.invoke('weights:cancel-upload');
+    
+    setUploadProgress(null);
+    setLoading(false);
+    setIsUploading(false);
+    onUploadStateChange?.(false);
   };
 
   const handleUpload = async () => {
-    if (!weightsFolder) return;
+    if (!weightsFolder || !window.ipcRenderer) return;
     try {
       const filePath = await window.ipcRenderer.invoke('weights:select-file');
       if (filePath) {
@@ -268,75 +253,43 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
         try {
           const result = await window.ipcRenderer.invoke('weights:upload-file', filePath, weightsFolder);
           
-          // 检查是否已取消
-          if (result && result.cancelled) {
-            // 清除进度显示和加载状态
-            setUploadProgress(null);
-            setLoading(false);
-            setIsUploading(false);
-            window.ipcRenderer.off('weights:upload-progress', progressListener);
-            // 通知父组件上传结束，恢复导航
-            onUploadStateChange?.(false);
+          if (result?.cancelled) {
             return;
           }
           
-          // 检查是否因为重复文件而跳过
-          if (result && result.skipped && result.reason === 'duplicate') {
-            // 清除进度显示和加载状态
-            setUploadProgress(null);
-            setLoading(false);
-            setIsUploading(false);
-            window.ipcRenderer.off('weights:upload-progress', progressListener);
-            // 通知父组件上传结束，恢复导航
-            onUploadStateChange?.(false);
-            // 显示提示信息
+          if (result?.skipped && result.reason === 'duplicate') {
             alert(`文件已存在，跳过上传。\n\n已存在的文件: ${result.existingFile}\n当前文件: ${fileName}\n\n这两个文件的内容完全相同（哈希值一致）。`);
             await loadFiles();
             return;
           }
           
-          // 确保显示 100%
           setUploadProgress((prev) => prev ? { ...prev, progress: 100 } : null);
           await loadFiles();
         } finally {
           window.ipcRenderer.off('weights:upload-progress', progressListener);
           setLoading(false);
           setIsUploading(false);
-          // 通知父组件上传结束，恢复导航
           onUploadStateChange?.(false);
-          // 延迟清除进度，让用户看到 100%
           setTimeout(() => setUploadProgress(null), 1000);
         }
       }
     } catch (error) {
-      console.error('Failed to upload file:', error);
       setUploadProgress(null);
       setLoading(false);
       setIsUploading(false);
-      // 通知父组件上传结束，恢复导航
       onUploadStateChange?.(false);
       
-      // 检查是否是取消操作导致的错误
       const errorMessage = error instanceof Error ? error.message : String(error);
-      const errorCode = (error as any)?.code
-      const isCancellationError = errorMessage.includes('上传已取消') || 
-        errorMessage.includes('Premature close') ||
-        errorMessage.includes('ERR_STREAM_PREMATURE_CLOSE') ||
-        errorCode === 'ERR_STREAM_PREMATURE_CLOSE';
-      
-      // 如果是取消操作，不显示错误提示
-      if (!isCancellationError) {
+      if (!errorMessage.includes('上传已取消')) {
         alert(`上传文件失败: ${errorMessage}`);
       }
     }
   };
 
   const handleDownload = async (file: WeightFile) => {
+    setLoading(true);
     try {
-      setLoading(true);
       await window.ipcRenderer.invoke('weights:download-file', file.path);
-    } catch (error) {
-      console.error('Failed to download file:', error);
     } finally {
       setLoading(false);
     }
@@ -349,14 +302,12 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
 
   const handleDeleteConfirm = async () => {
     if (!fileToDelete) return;
+    setLoading(true);
     try {
-      setLoading(true);
       await window.ipcRenderer.invoke('weights:delete-file', fileToDelete.path);
       await loadFiles();
       setDeleteDialogOpen(false);
       setFileToDelete(null);
-    } catch (error) {
-      console.error('Failed to delete file:', error);
     } finally {
       setLoading(false);
     }
@@ -375,13 +326,9 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
   };
 
   const loadModelGroups = async () => {
-    try {
-      const groups = await window.ipcRenderer.invoke('model-groups:list');
-      setModelGroups(groups || []);
-    } catch (error) {
-      console.error('Failed to load model groups:', error);
-      setModelGroups([]);
-    }
+    if (!window.ipcRenderer) return;
+    const groups = await window.ipcRenderer.invoke('model-groups:list');
+    setModelGroups(groups || []);
   };
 
   const handleCreateGroup = () => {
@@ -438,10 +385,9 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
       }
     }
 
+    setLoading(true);
     try {
-      setLoading(true);
       if (editingGroup) {
-        // 更新组
         await window.ipcRenderer.invoke('model-groups:update', editingGroup.id, {
           name: groupName.trim(),
           sdModel: groupSdModel || undefined,
@@ -488,12 +434,11 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
       return;
     }
 
+    setLoading(true);
     try {
-      setLoading(true);
       await window.ipcRenderer.invoke('model-groups:delete', group.id);
       await loadModelGroups();
     } catch (error) {
-      console.error('Failed to delete group:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       alert(`删除模型组失败: ${errorMessage}`);
     } finally {

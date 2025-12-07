@@ -18,9 +18,11 @@ import {
   ImageAddRegular,
   ChevronDownRegular,
   ChevronUpRegular,
+  CopyRegular,
+  DocumentArrowDownRegular,
 } from '@fluentui/react-icons';
 import { PhotoView } from 'react-photo-view';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
 
 const useStyles = makeStyles({
@@ -104,12 +106,29 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalM,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    minHeight: '44px',
+  },
+  cliOutputHeaderLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
     cursor: 'pointer',
-    padding: tokens.spacingVerticalS,
+    flex: 1,
+    minWidth: 0,
+    padding: tokens.spacingVerticalXS,
+    margin: `-${tokens.spacingVerticalXS}`,
     borderRadius: tokens.borderRadiusSmall,
     ':hover': {
       backgroundColor: tokens.colorNeutralBackground2,
     },
+  },
+  cliOutputHeaderActions: {
+    display: 'flex',
+    gap: tokens.spacingHorizontalXS,
+    alignItems: 'center',
+    flexShrink: 0,
   },
   cliOutputContent: {
     display: 'flex',
@@ -202,6 +221,7 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
   const [generationProgress, setGenerationProgress] = useState<string>('');
   const [cliOutput, setCliOutput] = useState<Array<{ type: 'stdout' | 'stderr'; text: string; timestamp: number }>>([]);
   const [cliOutputExpanded, setCliOutputExpanded] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
   const cliOutputRef = useRef<HTMLDivElement>(null);
   
   // 新增参数状态
@@ -255,17 +275,27 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
     checkAndLoad();
   }, []);
 
+  // 处理 CLI 输出的回调函数
+  const handleCliOutput = useCallback((data: { type: 'stdout' | 'stderr'; text: string }) => {
+    // 清理 ANSI 转义序列
+    const cleanedText = stripAnsiCodes(data.text);
+    // 如果清理后的文本不为空，才添加到输出中
+    if (cleanedText.trim()) {
+      setCliOutput(prev => {
+        // 检查是否与最后一行重复（避免重复添加相同的行）
+        const lastLine = prev[prev.length - 1];
+        if (lastLine && lastLine.text === cleanedText && lastLine.type === data.type) {
+          return prev;
+        }
+        return [...prev, { ...data, text: cleanedText, timestamp: Date.now() }];
+      });
+    }
+  }, []);
+
   // 监听 CLI 输出
   useIpcListener<{ type: 'stdout' | 'stderr'; text: string }>(
     'generate:cli-output',
-    (data) => {
-      // 清理 ANSI 转义序列
-      const cleanedText = stripAnsiCodes(data.text);
-      // 如果清理后的文本不为空，才添加到输出中
-      if (cleanedText.trim()) {
-        setCliOutput(prev => [...prev, { ...data, text: cleanedText, timestamp: Date.now() }]);
-      }
-    }
+    handleCliOutput
   );
 
   // 监听预览图片更新
@@ -277,6 +307,13 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
       }
     }
   );
+
+  // 当 CLI 输出从无内容变为有内容时，自动展开
+  useEffect(() => {
+    if (cliOutput.length > 0 && !cliOutputExpanded) {
+      setCliOutputExpanded(true);
+    }
+  }, [cliOutput.length, cliOutputExpanded]);
 
   // 自动滚动到底部
   useEffect(() => {
@@ -421,9 +458,23 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
     } catch (error) {
       console.error('Failed to generate image:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      alert(`生成图片失败: ${errorMessage}`);
+      // 检查是否是取消操作
+      if (!errorMessage.includes('生成已取消') && !errorMessage.includes('cancelled')) {
+        alert(`生成图片失败: ${errorMessage}`);
+      }
       setGenerationProgress('');
       setGenerating(false);
+    }
+  };
+
+  const handleCancelGenerate = async () => {
+    if (!window.ipcRenderer) return;
+    
+    try {
+      await window.ipcRenderer.invoke('generate:cancel');
+      setGenerationProgress('正在取消...');
+    } catch (error) {
+      console.error('Failed to cancel generation:', error);
     }
   };
 
@@ -519,14 +570,59 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
 
       {/* CLI 输出窗口 - 在第二个位置 */}
       <Card className={styles.cliOutputCard}>
-        <div 
-          className={styles.cliOutputHeader}
-          onClick={() => setCliOutputExpanded(!cliOutputExpanded)}
-        >
-          <Title2 style={{ fontSize: tokens.fontSizeBase400, margin: 0 }}>
-            CLI 输出
-          </Title2>
-          {cliOutputExpanded ? <ChevronUpRegular /> : <ChevronDownRegular />}
+        <div className={styles.cliOutputHeader}>
+          <div 
+            className={styles.cliOutputHeaderLeft}
+            onClick={() => setCliOutputExpanded(!cliOutputExpanded)}
+          >
+            <Title2 style={{ fontSize: tokens.fontSizeBase400, margin: 0, whiteSpace: 'nowrap' }}>
+              CLI 输出
+            </Title2>
+            {cliOutputExpanded ? <ChevronUpRegular /> : <ChevronDownRegular />}
+          </div>
+          <div className={styles.cliOutputHeaderActions}>
+            <Button
+              size="small"
+              icon={<CopyRegular />}
+              onClick={(e) => {
+                e.stopPropagation();
+                const text = cliOutput.map(line => line.text).join('');
+                navigator.clipboard.writeText(text).then(() => {
+                  setCopySuccess(true);
+                  setTimeout(() => setCopySuccess(false), 2000);
+                }).catch((error) => {
+                  console.error('复制失败:', error);
+                });
+              }}
+              disabled={cliOutput.length === 0}
+              appearance="subtle"
+              style={copySuccess ? { color: tokens.colorPaletteGreenForeground1 } : undefined}
+            >
+              {copySuccess ? '已复制' : '复制'}
+            </Button>
+            <Button
+              size="small"
+              icon={<DocumentArrowDownRegular />}
+              onClick={(e) => {
+                e.stopPropagation();
+                const text = cliOutput.map(line => line.text).join('');
+                const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `cli-output-${timestamp}.txt`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+              }}
+              disabled={cliOutput.length === 0}
+              appearance="subtle"
+            >
+              导出
+            </Button>
+          </div>
         </div>
         {cliOutputExpanded && (
           <div 
@@ -952,15 +1048,25 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
 
           {/* 生成按钮 */}
           <div className={styles.actions}>
-            <Button
-              icon={<ImageAddRegular />}
-              onClick={handleGenerate}
-              disabled={!selectedGroupId || !prompt.trim() || generating || loading}
-              appearance="primary"
-              size="large"
-            >
-              {generating ? '生成中...' : '开始生成'}
-            </Button>
+            {generating ? (
+              <Button
+                onClick={handleCancelGenerate}
+                appearance="secondary"
+                size="large"
+              >
+                取消生成
+              </Button>
+            ) : (
+              <Button
+                icon={<ImageAddRegular />}
+                onClick={handleGenerate}
+                disabled={!selectedGroupId || !prompt.trim() || loading}
+                appearance="primary"
+                size="large"
+              >
+                开始生成
+              </Button>
+            )}
             <Button
               onClick={loadModelGroups}
               disabled={loading || generating}

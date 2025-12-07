@@ -26,7 +26,6 @@ export function useIpcListener<T = any>(
   deps?: React.DependencyList
 ): void {
   const handlerRef = useRef(handler);
-  const listenerRef = useRef<((_event: unknown, data: T) => void) | null>(null);
 
   // 更新 handler 引用，确保使用最新的 handler
   useEffect(() => {
@@ -34,38 +33,18 @@ export function useIpcListener<T = any>(
   }, [handler]);
 
   useEffect(() => {
-    // 检查 ipcRenderer 是否可用
     if (!window.ipcRenderer) {
-      console.error(`[useIpcListener] window.ipcRenderer is not available for channel: ${channel}`);
       return;
     }
 
-    // 如果监听器已存在，先移除它（防止重复注册）
-    if (listenerRef.current) {
-      window.ipcRenderer.off(channel, listenerRef.current);
-      listenerRef.current = null;
-    }
-
-    // 先移除所有该事件的监听器，确保没有重复注册（针对 React Strict Mode）
-    window.ipcRenderer.removeAllListeners(channel);
-
-    // 创建监听器，使用 ref 中的最新 handler
     const listener = (_event: unknown, data: T) => {
       handlerRef.current(data);
     };
 
-    // 保存监听器引用
-    listenerRef.current = listener;
-
-    // 注册监听器
     window.ipcRenderer.on(channel, listener);
 
-    // 清理函数
     return () => {
-      if (window.ipcRenderer && listenerRef.current) {
-        window.ipcRenderer.off(channel, listenerRef.current);
-        listenerRef.current = null;
-      }
+      window.ipcRenderer.off(channel, listener);
     };
   }, [channel, ...(deps || [])]);
 }
