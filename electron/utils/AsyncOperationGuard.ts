@@ -47,24 +47,10 @@ export class AsyncOperationGuard {
    * @returns 执行结果，如果操作已失效则返回 null
    */
   async execute<T>(fn: () => T | Promise<T>): Promise<T | null> {
-    if (!this.isValid) {
-      return null;
-    }
+    if (!this.isValid) return null;
     
-    try {
-      const result = await fn();
-      // 再次检查，防止在执行过程中被失效
-      if (!this.isValid) {
-        return null;
-      }
-      return result;
-    } catch (error) {
-      // 如果操作已失效，忽略错误
-      if (!this.isValid) {
-        return null;
-      }
-      throw error;
-    }
+    const result = await fn();
+    return this.isValid ? result : null;
   }
 
   /**
@@ -73,24 +59,10 @@ export class AsyncOperationGuard {
    * @returns 执行结果，如果操作已失效则返回 null
    */
   executeSync<T>(fn: () => T): T | null {
-    if (!this.isValid) {
-      return null;
-    }
+    if (!this.isValid) return null;
     
-    try {
-      const result = fn();
-      // 再次检查，防止在执行过程中被失效
-      if (!this.isValid) {
-        return null;
-      }
-      return result;
-    } catch (error) {
-      // 如果操作已失效，忽略错误
-      if (!this.isValid) {
-        return null;
-      }
-      throw error;
-    }
+    const result = fn();
+    return this.isValid ? result : null;
   }
 }
 

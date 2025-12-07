@@ -2,7 +2,7 @@
  * IPC 通信类型定义（前后端共享）
  */
 
-import type { DeviceType, ModelGroup, WeightFile, GenerateImageParams, GeneratedImageInfo } from '../../electron/types/index';
+import type { DeviceType, ModelGroup, WeightFile, GenerateImageParams, GeneratedImageInfo } from './models';
 
 // 重新导出主进程类型，供渲染进程使用
 export type { DeviceType, ModelGroup, WeightFile, GenerateImageParams, GeneratedImageInfo };

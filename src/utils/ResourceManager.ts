@@ -25,11 +25,7 @@ export class ResourceManager {
   unregister(id: string): void {
     const resource = this.resources.get(id);
     if (resource) {
-      try {
-        resource.cleanup();
-      } catch (error) {
-        console.error(`[ResourceManager] Error cleaning up resource ${id}:`, error);
-      }
+      resource.cleanup();
       this.resources.delete(id);
     }
   }
@@ -38,15 +34,11 @@ export class ResourceManager {
    * 清理所有资源
    */
   cleanupAll(): void {
-    const resources = Array.from(this.resources.entries());
+    const resources = Array.from(this.resources.values());
     this.resources.clear();
     
-    for (const [id, resource] of resources) {
-      try {
-        resource.cleanup();
-      } catch (error) {
-        console.error(`[ResourceManager] Error cleaning up resource ${id}:`, error);
-      }
+    for (const resource of resources) {
+      resource.cleanup();
     }
   }
 
@@ -55,21 +47,11 @@ export class ResourceManager {
    * @param type 资源类型
    */
   cleanupByType(type: string): void {
-    const toRemove: string[] = [];
-    
     for (const [id, resource] of this.resources.entries()) {
       if (resource.type === type) {
-        try {
-          resource.cleanup();
-        } catch (error) {
-          console.error(`[ResourceManager] Error cleaning up resource ${id}:`, error);
-        }
-        toRemove.push(id);
+        resource.cleanup();
+        this.resources.delete(id);
       }
-    }
-    
-    for (const id of toRemove) {
-      this.resources.delete(id);
     }
   }
 

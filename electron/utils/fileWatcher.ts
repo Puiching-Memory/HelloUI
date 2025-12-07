@@ -36,11 +36,7 @@ export class FileWatcher {
 
     // 创建清理函数
     const cleanup = () => {
-      try {
-        unwatchFile(path);
-      } catch (error) {
-        console.error(`[FileWatcher] Error unwatching file ${pathStr}:`, error);
-      }
+      unwatchFile(path);
       this.watchedFiles.delete(pathStr);
     };
 
@@ -71,11 +67,7 @@ export class FileWatcher {
 
     // 创建清理函数
     const cleanup = () => {
-      try {
-        watcher.close();
-      } catch (error) {
-        console.error(`[FileWatcher] Error closing directory watcher ${pathStr}:`, error);
-      }
+      watcher.close();
       this.watchedDirs.delete(pathStr);
     };
 
