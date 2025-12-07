@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron'
-import { join, basename, extname, resolve, dirname } from 'path'
+import { join, basename, extname, resolve, dirname, isAbsolute } from 'path'
 import { fileURLToPath } from 'url'
 import { promises as fs } from 'fs'
 import { existsSync, createReadStream, createWriteStream, watchFile, unwatchFile } from 'fs'
@@ -91,6 +91,16 @@ let currentGenerateKill: (() => void) | null = null
 // 获取运行位置目录（可执行文件所在目录）
 function getRunPath(): string {
   return app.isPackaged ? dirname(process.execPath) : join(__dirname, '..')
+}
+
+// 将相对路径转换为绝对路径（基于运行路径）
+function resolveModelPath(modelPath: string): string {
+  // 如果已经是绝对路径，直接返回
+  if (isAbsolute(modelPath)) {
+    return modelPath
+  }
+  // 如果是相对路径，基于运行路径解析
+  return resolve(getRunPath(), modelPath)
 }
 
 // 获取默认的 models 文件夹路径
@@ -687,7 +697,8 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
       if (!group.sdModel) {
         throw new Error('模型组中未配置SD模型')
       }
-      sdModelPath = group.sdModel
+      // 将相对路径转换为绝对路径
+      sdModelPath = resolveModelPath(group.sdModel)
       
       // 检查模型文件是否存在
       if (!existsSync(sdModelPath)) {
@@ -695,7 +706,8 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
       }
     } else if (modelPath) {
       // 兼容旧版本：直接使用模型路径
-      sdModelPath = modelPath
+      // 将相对路径转换为绝对路径
+      sdModelPath = resolveModelPath(modelPath)
       if (!existsSync(sdModelPath)) {
         throw new Error(`模型文件不存在: ${sdModelPath}`)
       }
@@ -733,12 +745,20 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
     if (groupId) {
       const groups = await loadModelGroups()
       const group = groups.find(g => g.id === groupId)
-      if (group?.vaeModel && existsSync(group.vaeModel)) {
-        args.push('--vae', group.vaeModel)
+      if (group?.vaeModel) {
+        // 将相对路径转换为绝对路径
+        const vaeModelPath = resolveModelPath(group.vaeModel)
+        if (existsSync(vaeModelPath)) {
+          args.push('--vae', vaeModelPath)
+        }
       }
       // 添加 LLM 文本编码器支持（用于某些模型如 Z-Image 等）
-      if (group?.llmModel && existsSync(group.llmModel)) {
-        args.push('--llm', group.llmModel)
+      if (group?.llmModel) {
+        // 将相对路径转换为绝对路径
+        const llmModelPath = resolveModelPath(group.llmModel)
+        if (existsSync(llmModelPath)) {
+          args.push('--llm', llmModelPath)
+        }
       }
       // 注意：根据 sd.exe 的帮助，还可能需要 clip_l, clip_g, clip_vision, t5xxl 等
       // 可以根据具体模型类型进一步扩展
