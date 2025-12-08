@@ -75,7 +75,7 @@ export interface IPCRequestMap {
   'model-groups:update': { request: { id: string; updates: Partial<Omit<ModelGroup, 'id' | 'createdAt'>> }; response: ModelGroup };
   'model-groups:delete': { request: string; response: boolean };
   'model-groups:get': { request: string; response: ModelGroup | null };
-  'generate:start': { request: GenerateImageParams; response: { success: boolean; image?: string; imagePath?: string } };
+  'generate:start': { request: GenerateImageParams; response: { success: boolean; image?: string; imagePath?: string; duration?: number } };
   'generated-images:list': { request: void; response: GeneratedImageInfo[] };
   'generated-images:download': { request: string; response: boolean };
   'generated-images:delete': { request: string; response: boolean };

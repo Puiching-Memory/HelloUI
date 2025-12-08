@@ -9,7 +9,7 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { CodeRegular } from '@fluentui/react-icons';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 const useStyles = makeStyles({
   container: {
@@ -32,6 +32,23 @@ export const SettingsPage = () => {
   const [notifications, setNotifications] = useState(true);
   const [autoSave, setAutoSave] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>('');
+
+  // 加载应用版本号
+  useEffect(() => {
+    const loadVersion = async () => {
+      if (window.ipcRenderer) {
+        try {
+          const version = await window.ipcRenderer.invoke('app:get-version');
+          setAppVersion(version || '');
+        } catch (error) {
+          console.error('Failed to load app version:', error);
+          setAppVersion('');
+        }
+      }
+    };
+    loadVersion();
+  }, []);
 
   return (
     <div className={styles.container}>
@@ -101,7 +118,7 @@ export const SettingsPage = () => {
 
       <Card className={styles.section}>
         <Title2>关于</Title2>
-        <Body1>HelloUI v1.0.0</Body1>
+        <Body1>HelloUI {appVersion ? `v${appVersion}` : ''}</Body1>
         <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
           基于 Electron + React 19 + Fluent UI 构建
         </Body1>

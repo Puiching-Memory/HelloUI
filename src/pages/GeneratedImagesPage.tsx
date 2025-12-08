@@ -26,10 +26,12 @@ import {
   DocumentRegular,
   CopyRegular,
   CheckmarkRegular,
+  SplitHorizontalRegular,
 } from '@fluentui/react-icons';
 import { PhotoView } from 'react-photo-view';
 import { useState, useEffect } from 'react';
 import { GeneratedImage } from '../types/generatedImage';
+import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
 
 const useStyles = makeStyles({
   container: {
@@ -235,6 +237,59 @@ const useStyles = makeStyles({
     maxWidth: 'min(100%, 1200px)',
     maxHeight: 'min(75vh, 800px)',
   },
+  compareDialog: {
+    maxWidth: '95vw',
+    maxHeight: '95vh',
+    width: '90vw',
+    height: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  compareDialogContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: 1,
+    minHeight: 0,
+    maxHeight: 'calc(95vh - 120px)', // 减去 DialogTitle 和 DialogActions 的高度
+    padding: 0,
+    overflow: 'hidden',
+  },
+  compareDialogHeader: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+    padding: tokens.spacingVerticalM,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    flexShrink: 0,
+  },
+  compareImageNames: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+  },
+  compareImageName: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  compareSliderContainer: {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: tokens.spacingVerticalM,
+    minHeight: 0,
+    maxHeight: '100%',
+    backgroundColor: tokens.colorNeutralBackground2,
+    overflow: 'hidden',
+  },
 });
 
 export const GeneratedImagesPage = () => {
@@ -249,6 +304,9 @@ export const GeneratedImagesPage = () => {
   const [selectedImageForDetail, setSelectedImageForDetail] = useState<GeneratedImage | null>(null);
   const [hoveredImagePath, setHoveredImagePath] = useState<string | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [compareDialogOpen, setCompareDialogOpen] = useState(false);
+  const [compareImage1, setCompareImage1] = useState<GeneratedImage | null>(null);
+  const [compareImage2, setCompareImage2] = useState<GeneratedImage | null>(null);
 
   // 加载图片列表
   useEffect(() => {
@@ -461,6 +519,23 @@ export const GeneratedImagesPage = () => {
     });
   };
 
+  const formatDuration = (durationMs?: number): string => {
+    if (!durationMs) return '';
+    const seconds = durationMs / 1000;
+    if (seconds < 60) {
+      return `${seconds.toFixed(1)}秒`;
+    } else if (seconds < 3600) {
+      const minutes = Math.floor(seconds / 60);
+      const remainingSeconds = (seconds % 60).toFixed(0);
+      return `${minutes}分${remainingSeconds}秒`;
+    } else {
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const remainingSeconds = (seconds % 60).toFixed(0);
+      return `${hours}小时${minutes}分${remainingSeconds}秒`;
+    }
+  };
+
   const handleCopyToClipboard = async (text: string, fieldName: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -469,6 +544,25 @@ export const GeneratedImagesPage = () => {
     } catch (error) {
       console.error('Failed to copy to clipboard:', error);
     }
+  };
+
+  // 打开对比弹窗
+  const handleCompare = () => {
+    if (selectedImages.size !== 2) {
+      return;
+    }
+    const selectedPaths = Array.from(selectedImages);
+    const image1 = images.find(img => img.path === selectedPaths[0]);
+    const image2 = images.find(img => img.path === selectedPaths[1]);
+    
+    if (!image1 || !image2) {
+      alert('无法找到选中的图片');
+      return;
+    }
+
+    setCompareImage1(image1);
+    setCompareImage2(image2);
+    setCompareDialogOpen(true);
   };
 
   return (
@@ -493,6 +587,16 @@ export const GeneratedImagesPage = () => {
           <div className={styles.headerActions}>
             {selectedImages.size > 0 && (
               <>
+                {selectedImages.size === 2 && (
+                  <Button
+                    icon={<SplitHorizontalRegular />}
+                    appearance="primary"
+                    onClick={handleCompare}
+                    disabled={loading}
+                  >
+                    对比
+                  </Button>
+                )}
                 <Button
                   icon={<ArrowDownloadRegular />}
                   onClick={handleBatchDownload}
@@ -647,6 +751,11 @@ export const GeneratedImagesPage = () => {
                           {image.deviceType && (
                             <div className={styles.imageCardMetaItem}>
                               <span>{image.deviceType.toUpperCase()}</span>
+                            </div>
+                          )}
+                          {image.duration && (
+                            <div className={styles.imageCardMetaItem}>
+                              <span>耗时: {formatDuration(image.duration)}</span>
                             </div>
                           )}
                         </div>
@@ -887,6 +996,16 @@ export const GeneratedImagesPage = () => {
                                 : formatDate(selectedImageForDetail.modified)}
                             </Body1>
                           </div>
+                          {selectedImageForDetail.duration && (
+                            <div>
+                              <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                                生成耗时
+                              </Text>
+                              <Body1 style={{ fontSize: tokens.fontSizeBase300, marginTop: tokens.spacingVerticalS }}>
+                                {formatDuration(selectedImageForDetail.duration)}
+                              </Body1>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </Card>
@@ -1133,6 +1252,69 @@ export const GeneratedImagesPage = () => {
                 setDetailDialogOpen(false);
                 setSelectedImageForDetail(null);
                 setCopiedField(null);
+              }}
+            >
+              关闭
+            </Button>
+          </DialogActions>
+        </DialogSurface>
+      </Dialog>
+
+      {/* 对比对话框 */}
+      <Dialog open={compareDialogOpen} onOpenChange={(_, data) => {
+        setCompareDialogOpen(data.open);
+        if (!data.open) {
+          setCompareImage1(null);
+          setCompareImage2(null);
+        }
+      }}>
+        <DialogSurface className={styles.compareDialog}>
+          <DialogTitle>图片对比</DialogTitle>
+          <DialogBody style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <DialogContent className={styles.compareDialogContent}>
+              {compareImage1 && compareImage2 && (
+                <>
+                  <div className={styles.compareDialogHeader}>
+                    <div className={styles.compareImageNames}>
+                      <div className={styles.compareImageName} title={compareImage1.name}>
+                        {compareImage1.name}
+                      </div>
+                      <Body1 style={{ color: tokens.colorNeutralForeground3 }}>vs</Body1>
+                      <div className={styles.compareImageName} title={compareImage2.name}>
+                        {compareImage2.name}
+                      </div>
+                    </div>
+                  </div>
+                  <div className={styles.compareSliderContainer}>
+                    <ReactCompareSlider
+                      itemOne={
+                        <ReactCompareSliderImage 
+                          src={`data:${getImageMimeType(compareImage1.name)};base64,${compareImage1.previewImage}`} 
+                          alt={compareImage1.name} 
+                        />
+                      }
+                      itemTwo={
+                        <ReactCompareSliderImage 
+                          src={`data:${getImageMimeType(compareImage2.name)};base64,${compareImage2.previewImage}`} 
+                          alt={compareImage2.name} 
+                        />
+                      }
+                      style={{ width: '100%', height: '100%' }}
+                      position={50}
+                      keyboardIncrement="5%"
+                    />
+                  </div>
+                </>
+              )}
+            </DialogContent>
+          </DialogBody>
+          <DialogActions>
+            <Button
+              appearance="primary"
+              onClick={() => {
+                setCompareDialogOpen(false);
+                setCompareImage1(null);
+                setCompareImage2(null);
               }}
             >
               关闭
