@@ -5,7 +5,7 @@ import { promises as fs } from 'fs'
 import { existsSync, createReadStream, createWriteStream, watchFile, unwatchFile } from 'fs'
 import { pipeline } from 'stream/promises'
 import { createHash } from 'crypto'
-import { spawn } from 'child_process'
+import { spawn, exec } from 'child_process'
 import archiver from 'archiver'
 import { AsyncOperationGuard } from './utils/AsyncOperationGuard.js'
 import { ResourceManager } from './utils/ResourceManager.js'
@@ -72,7 +72,7 @@ let weightsFolderPath: string | null = null
 
 // 存储 SD.cpp 引擎文件夹路径和设备类型
 let sdcppFolderPath: string | null = null
-let sdcppDeviceType: DeviceType = 'cpu'
+let sdcppDeviceType: DeviceType = 'cuda'
 
 // 存储当前上传的流引用，用于取消上传
 interface UploadState {
@@ -681,7 +681,14 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
       previewInterval = 1,
       verbose = false,
       color = false,
-      offloadToCpu = false
+      offloadToCpu = false,
+      diffusionFa = false,
+      controlNetCpu = false,
+      clipOnCpu = false,
+      vaeOnCpu = false,
+      diffusionConvDirect = false,
+      vaeConvDirect = false,
+      vaeTiling = false
     } = params
 
     // 确定使用的模型路径
@@ -848,8 +855,53 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
       console.log(`[Generate] Offload to CPU: enabled`)
     }
 
+    // 添加 diffusion-fa 选项（如果启用）
+    if (diffusionFa === true) {
+      args.push('--diffusion-fa')
+      console.log(`[Generate] Diffusion FA: enabled`)
+    }
+
+    // 添加 control-net-cpu 选项（如果启用）
+    if (controlNetCpu === true) {
+      args.push('--control-net-cpu')
+      console.log(`[Generate] ControlNet CPU: enabled`)
+    }
+
+    // 添加 clip-on-cpu 选项（如果启用）
+    if (clipOnCpu === true) {
+      args.push('--clip-on-cpu')
+      console.log(`[Generate] CLIP on CPU: enabled`)
+    }
+
+    // 添加 vae-on-cpu 选项（如果启用）
+    if (vaeOnCpu === true) {
+      args.push('--vae-on-cpu')
+      console.log(`[Generate] VAE on CPU: enabled`)
+    }
+
+    // 添加 diffusion-conv-direct 选项（如果启用）
+    if (diffusionConvDirect === true) {
+      args.push('--diffusion-conv-direct')
+      console.log(`[Generate] Diffusion Conv Direct: enabled`)
+    }
+
+    // 添加 vae-conv-direct 选项（如果启用）
+    if (vaeConvDirect === true) {
+      args.push('--vae-conv-direct')
+      console.log(`[Generate] VAE Conv Direct: enabled`)
+    }
+
+    // 添加 vae-tiling 选项（如果启用）
+    if (vaeTiling === true) {
+      args.push('--vae-tiling')
+      console.log(`[Generate] VAE Tiling: enabled`)
+    }
+
     console.log(`[Generate] Starting image generation: ${sdExePath}`)
     console.log(`[Generate] Command line arguments: ${args.join(' ')}`)
+
+    // 记录生成开始时间
+    const startTime = Date.now()
 
     // 发送进度更新
     event.sender.send('generate:progress', { progress: '正在启动 SD.cpp 引擎...' })
@@ -902,13 +954,48 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
             killTimeout = null
           }
 
-          childProcess.kill('SIGTERM')
-          killTimeout = setTimeout(() => {
-            if (childProcess && !childProcess.killed && childProcess.pid) {
-              childProcess.kill('SIGKILL')
-            }
-            killTimeout = null
-          }, 3000)
+          const pid = childProcess.pid
+          console.log(`[Generate] Attempting to kill process tree (PID: ${pid})`)
+          
+          // 在 Windows 上，使用 taskkill 来终止整个进程树（包括所有子进程）
+          // /F = 强制终止，/T = 终止进程树，/PID = 指定进程ID
+          // 这样可以确保 sdcpp 进程也被终止
+          if (process.platform === 'win32') {
+            // 首先尝试通过 PID 终止进程树
+            exec(`taskkill /F /T /PID ${pid}`, (error) => {
+              if (error) {
+                console.warn(`[Generate] Failed to kill process tree by PID: ${error.message}`)
+                // 如果通过 PID 失败，尝试通过进程名称终止 sdcpp
+                // 获取可执行文件名（不包含路径）
+                const exeName = basename(sdExePath)
+                console.log(`[Generate] Attempting to kill process by name: ${exeName}`)
+                exec(`taskkill /F /T /IM ${exeName}`, (nameError) => {
+                  if (nameError) {
+                    console.warn(`[Generate] Failed to kill process by name: ${nameError.message}`)
+                  } else {
+                    console.log(`[Generate] Successfully killed process by name: ${exeName}`)
+                  }
+                  // 无论成功与否，都尝试标准的 kill 方法作为最后手段
+                  try {
+                    childProcess.kill('SIGTERM')
+                  } catch (e) {
+                    console.warn(`[Generate] Failed to send SIGTERM: ${e}`)
+                  }
+                })
+              } else {
+                console.log(`[Generate] Successfully killed process tree (PID: ${pid})`)
+              }
+            })
+          } else {
+            // 非 Windows 平台使用标准方法
+            childProcess.kill('SIGTERM')
+            killTimeout = setTimeout(() => {
+              if (childProcess && !childProcess.killed && childProcess.pid) {
+                childProcess.kill('SIGKILL')
+              }
+              killTimeout = null
+            }, 3000)
+          }
         }
       }
 
@@ -1039,6 +1126,10 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
           // 生成成功
           if (existsSync(outputImagePath)) {
             try {
+              // 计算生成耗时（毫秒）
+              const endTime = Date.now()
+              const duration = endTime - startTime
+              
               // 获取模型组信息（如果有）
               let groupName: string | undefined
               let vaeModelPath: string | undefined
@@ -1080,7 +1171,15 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
                 verbose,
                 color,
                 offloadToCpu,
+                diffusionFa,
+                controlNetCpu,
+                clipOnCpu,
+                vaeOnCpu,
+                diffusionConvDirect,
+                vaeConvDirect,
+                vaeTiling,
                 commandLine: args.join(' '), // 保存完整命令行用于重现
+                duration, // 生成耗时（毫秒）
               }
               
               await fs.writeFile(outputMetadataPath, JSON.stringify(metadata, null, 2), 'utf-8')
@@ -1097,8 +1196,12 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
                 }
               }
               
+              // 格式化耗时显示（秒，保留2位小数）
+              const durationSeconds = (duration / 1000).toFixed(2)
+              console.log(`[Generate] Image generation completed in ${durationSeconds}s (${duration}ms)`)
+              
               event.sender.send('generate:progress', { 
-                progress: '生成完成',
+                progress: `生成完成（耗时: ${durationSeconds}秒）`,
                 image: base64Image 
               })
               
@@ -1106,6 +1209,7 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
                 success: true,
                 image: base64Image,
                 imagePath: outputImagePath,
+                duration, // 返回耗时（毫秒）
               })
             } catch (error) {
               console.error('[Generate] Failed to read image:', error)
@@ -1115,6 +1219,11 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
             safeReject(new Error('生成完成但未找到输出图片文件'))
           }
         } else {
+          // 计算生成耗时（毫秒）
+          const endTime = Date.now()
+          const duration = endTime - startTime
+          const durationSeconds = (duration / 1000).toFixed(2)
+          
           if (preview && preview !== 'none' && preview.trim() !== '') {
             const absolutePreviewPath = resolve(previewImagePath)
             if (existsSync(absolutePreviewPath)) {
@@ -1126,11 +1235,13 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
           const wasCancelled = signal === 'SIGTERM' || signal === 'SIGKILL'
           
           if (wasCancelled) {
-            event.sender.send('generate:progress', { progress: '生成已取消' })
+            console.log(`[Generate] Image generation cancelled after ${durationSeconds}s (${duration}ms)`)
+            event.sender.send('generate:progress', { progress: `生成已取消（耗时: ${durationSeconds}秒）` })
             safeReject(new Error('生成已取消'))
           } else {
             const errorMsg = stderr || stdout || `进程退出，代码: ${code}, 信号: ${signal}`
-            event.sender.send('generate:progress', { progress: `生成失败: ${errorMsg}` })
+            console.log(`[Generate] Image generation failed after ${durationSeconds}s (${duration}ms)`)
+            event.sender.send('generate:progress', { progress: `生成失败: ${errorMsg}（耗时: ${durationSeconds}秒）` })
             safeReject(new Error(`图片生成失败: ${errorMsg}`))
           }
         }
@@ -1363,6 +1474,11 @@ ipcMain.handle('devtools:toggle', async () => {
     }
   }
   return { success: false, error: 'No available window' }
+})
+
+// IPC 处理程序：获取应用版本号
+ipcMain.handle('app:get-version', async () => {
+  return app.getVersion()
 })
 
 app.whenReady().then(async () => {

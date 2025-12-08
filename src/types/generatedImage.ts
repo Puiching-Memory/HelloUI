@@ -53,10 +53,18 @@ export interface GeneratedImageMetadata {
   verbose?: boolean;
   color?: boolean;
   offloadToCpu?: boolean;
+  diffusionFa?: boolean;  // 启用 diffusion-fa 选项
+  controlNetCpu?: boolean;  // 将controlnet保持在CPU（低显存）
+  clipOnCpu?: boolean;  // 将clip保持在CPU（低显存）
+  vaeOnCpu?: boolean;  // 将VAE保持在CPU（低显存）
+  diffusionConvDirect?: boolean;  // 在扩散模型中使用ggml_conv2d_direct
+  vaeConvDirect?: boolean;  // 在VAE模型中使用ggml_conv2d_direct
+  vaeTiling?: boolean;  // 分块处理VAE以减少内存使用
   
   // 元数据
   commandLine?: string;
   generatedAt?: string;
+  duration?: number; // 生成耗时（毫秒）
 }
 
 /**

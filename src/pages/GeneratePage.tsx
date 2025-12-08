@@ -13,6 +13,7 @@ import {
   Option,
   Input,
   Checkbox,
+  Text,
 } from '@fluentui/react-components';
 import {
   ImageAddRegular,
@@ -143,6 +144,62 @@ const useStyles = makeStyles({
     overflowY: 'auto',
     overflowX: 'auto',
   },
+  modelDeviceCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+    padding: tokens.spacingVerticalM,
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  modelDeviceHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: tokens.spacingVerticalXS,
+  },
+  modelDeviceList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+  },
+  modelDeviceItem: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: tokens.borderRadiusSmall,
+  },
+  modelDeviceItemLeft: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+    flex: 1,
+  },
+  modelDeviceItemRight: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    flexShrink: 0,
+  },
+  modelDeviceSelector: {
+    minWidth: '120px',
+  },
+  modelDeviceInfo: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    marginTop: tokens.spacingVerticalXXS,
+  },
+  offloadToCpuSection: {
+    marginTop: tokens.spacingVerticalM,
+    paddingTop: tokens.spacingVerticalM,
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
   cliOutputLine: {
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
@@ -204,7 +261,7 @@ interface GeneratePageProps {
 export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => {
   const styles = useStyles();
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
-  const [deviceType, setDeviceType] = useState<DeviceType>('cpu');
+  const [deviceType, setDeviceType] = useState<DeviceType>('cuda');
   const [prompt, setPrompt] = useState<string>('');
   const [negativePrompt, setNegativePrompt] = useState<string>(DEFAULT_NEGATIVE_PROMPT);
   const [steps, setSteps] = useState<number>(20);
@@ -237,6 +294,13 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
   const [verbose, setVerbose] = useState<boolean>(false);
   const [color, setColor] = useState<boolean>(false);
   const [offloadToCpu, setOffloadToCpu] = useState<boolean>(false);
+  const [diffusionFa, setDiffusionFa] = useState<boolean>(true); // 默认启用
+  const [controlNetCpu, setControlNetCpu] = useState<boolean>(false);
+  const [clipOnCpu, setClipOnCpu] = useState<boolean>(false);
+  const [vaeOnCpu, setVaeOnCpu] = useState<boolean>(false);
+  const [diffusionConvDirect, setDiffusionConvDirect] = useState<boolean>(false);
+  const [vaeConvDirect, setVaeConvDirect] = useState<boolean>(false);
+  const [vaeTiling, setVaeTiling] = useState<boolean>(true);
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
 
   // 加载模型组列表
@@ -440,6 +504,13 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
           verbose,
           color,
           offloadToCpu,
+          diffusionFa,
+          controlNetCpu,
+          clipOnCpu,
+          vaeOnCpu,
+          diffusionConvDirect,
+          vaeConvDirect,
+          vaeTiling,
         });
 
         if (result.success && result.image) {
@@ -716,23 +787,6 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
               : '未选择'}
           </Body1>
 
-          {/* 推理引擎选择 */}
-          <Field label="推理引擎" hint={`当前选择: ${getDeviceLabel(deviceType)}`}>
-            <Dropdown
-              value={getDeviceLabel(deviceType)}
-              selectedOptions={[deviceType]}
-              onOptionSelect={(_, data) => {
-                if (data.optionValue) {
-                  handleDeviceTypeChange(data.optionValue as DeviceType);
-                }
-              }}
-            >
-              <Option value="cpu">CPU</Option>
-              <Option value="vulkan">Vulkan</Option>
-              <Option value="cuda">CUDA</Option>
-            </Dropdown>
-          </Field>
-
           {/* 提示词输入 */}
           <Field label="提示词" required>
             <Textarea
@@ -769,6 +823,162 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
               resize="vertical"
             />
           </Field>
+
+          {/* 推理引擎和模型设备分配 */}
+          <div className={styles.modelDeviceCard}>
+            <div className={styles.modelDeviceHeader}>
+              <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase400 }}>
+                推理引擎和模型设备分配
+              </Text>
+            </div>
+            <div style={{ marginBottom: tokens.spacingVerticalM }}>
+              <Field label="推理引擎" hint="选择主要的推理引擎（CUDA/Vulkan/CPU）">
+                <Dropdown
+                  value={getDeviceLabel(deviceType)}
+                  selectedOptions={[deviceType]}
+                  onOptionSelect={(_, data) => {
+                    if (data.optionValue) {
+                      handleDeviceTypeChange(data.optionValue as DeviceType);
+                    }
+                  }}
+                >
+                  <Option value="cpu">CPU</Option>
+                  <Option value="vulkan">Vulkan</Option>
+                  <Option value="cuda">CUDA</Option>
+                </Dropdown>
+              </Field>
+            </div>
+            <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginBottom: tokens.spacingVerticalM }}>
+              为每个模型组件选择使用的设备。强制使用CPU的模型将始终在CPU上运行。
+            </Body1>
+            <div className={styles.modelDeviceList}>
+              <div className={styles.modelDeviceItem}>
+                <div className={styles.modelDeviceItemLeft}>
+                  <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase300 }}>
+                    ControlNet
+                  </Text>
+                  <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                    控制网络模型
+                  </Body1>
+                  {controlNetCpu && (
+                    <div className={styles.modelDeviceInfo}>
+                      <Text style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorPaletteBlueForeground2 }}>
+                        ⚠️ 强制使用CPU，将始终在CPU上运行
+                      </Text>
+                    </div>
+                  )}
+                  {!controlNetCpu && offloadToCpu && (
+                    <div className={styles.modelDeviceInfo}>
+                      <Text style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                        💾 未使用时将卸载到CPU（RAM）
+                      </Text>
+                    </div>
+                  )}
+                </div>
+                <div className={styles.modelDeviceItemRight}>
+                  <Dropdown
+                    className={styles.modelDeviceSelector}
+                    value={controlNetCpu ? 'CPU' : getDeviceLabel(deviceType)}
+                    selectedOptions={[controlNetCpu ? 'force-cpu' : 'main-device']}
+                    onOptionSelect={(_, data) => {
+                      if (data.optionValue) {
+                        setControlNetCpu(data.optionValue === 'force-cpu');
+                      }
+                    }}
+                  >
+                    <Option value="force-cpu">CPU</Option>
+                    <Option value="main-device">{getDeviceLabel(deviceType)}</Option>
+                  </Dropdown>
+                </div>
+              </div>
+              <div className={styles.modelDeviceItem}>
+                <div className={styles.modelDeviceItemLeft}>
+                  <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase300 }}>
+                    CLIP
+                  </Text>
+                  <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                    文本编码器模型
+                  </Body1>
+                  {clipOnCpu && (
+                    <div className={styles.modelDeviceInfo}>
+                      <Text style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorPaletteBlueForeground2 }}>
+                        ⚠️ 强制使用CPU，将始终在CPU上运行
+                      </Text>
+                    </div>
+                  )}
+                  {!clipOnCpu && offloadToCpu && (
+                    <div className={styles.modelDeviceInfo}>
+                      <Text style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                        💾 未使用时将卸载到CPU（RAM）
+                      </Text>
+                    </div>
+                  )}
+                </div>
+                <div className={styles.modelDeviceItemRight}>
+                  <Dropdown
+                    className={styles.modelDeviceSelector}
+                    value={clipOnCpu ? 'CPU' : getDeviceLabel(deviceType)}
+                    selectedOptions={[clipOnCpu ? 'force-cpu' : 'main-device']}
+                    onOptionSelect={(_, data) => {
+                      if (data.optionValue) {
+                        setClipOnCpu(data.optionValue === 'force-cpu');
+                      }
+                    }}
+                  >
+                    <Option value="force-cpu">CPU</Option>
+                    <Option value="main-device">{getDeviceLabel(deviceType)}</Option>
+                  </Dropdown>
+                </div>
+              </div>
+              <div className={styles.modelDeviceItem}>
+                <div className={styles.modelDeviceItemLeft}>
+                  <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase300 }}>
+                    VAE
+                  </Text>
+                  <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                    变分自编码器模型
+                  </Body1>
+                  {vaeOnCpu && (
+                    <div className={styles.modelDeviceInfo}>
+                      <Text style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorPaletteBlueForeground2 }}>
+                        ⚠️ 强制使用CPU，将始终在CPU上运行
+                      </Text>
+                    </div>
+                  )}
+                  {!vaeOnCpu && offloadToCpu && (
+                    <div className={styles.modelDeviceInfo}>
+                      <Text style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                        💾 未使用时将卸载到CPU（RAM）
+                      </Text>
+                    </div>
+                  )}
+                </div>
+                <div className={styles.modelDeviceItemRight}>
+                  <Dropdown
+                    className={styles.modelDeviceSelector}
+                    value={vaeOnCpu ? 'CPU' : getDeviceLabel(deviceType)}
+                    selectedOptions={[vaeOnCpu ? 'force-cpu' : 'main-device']}
+                    onOptionSelect={(_, data) => {
+                      if (data.optionValue) {
+                        setVaeOnCpu(data.optionValue === 'force-cpu');
+                      }
+                    }}
+                  >
+                    <Option value="force-cpu">CPU</Option>
+                    <Option value="main-device">{getDeviceLabel(deviceType)}</Option>
+                  </Dropdown>
+                </div>
+              </div>
+            </div>
+            <div className={styles.offloadToCpuSection}>
+              <Field label="卸载到CPU" hint="启用后，未强制使用CPU的模型在未使用时将卸载到RAM，需要时自动加载到VRAM。强制使用CPU的模型不受此选项影响。">
+                <Checkbox
+                  checked={offloadToCpu}
+                  onChange={(_, data) => setOffloadToCpu(data.checked === true)}
+                />
+              </Field>
+            </div>
+          </div>
 
           {/* 高级参数 */}
           <Title2 style={{ fontSize: tokens.fontSizeBase400, marginTop: tokens.spacingVerticalM }}>
@@ -1037,10 +1247,28 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
                   onChange={(_, data) => setColor(data.checked === true)}
                 />
               </Field>
-              <Field label="卸载到CPU" hint="将权重放在RAM中以节省VRAM，需要时自动加载到VRAM">
+              <Field label="启用 Flash Attention" hint="启用 Flash Attention（推荐启用，可提升性能）">
                 <Checkbox
-                  checked={offloadToCpu}
-                  onChange={(_, data) => setOffloadToCpu(data.checked === true)}
+                  checked={diffusionFa}
+                  onChange={(_, data) => setDiffusionFa(data.checked === true)}
+                />
+              </Field>
+              <Field label="Diffusion Conv Direct" hint="在扩散模型中使用ggml_conv2d_direct">
+                <Checkbox
+                  checked={diffusionConvDirect}
+                  onChange={(_, data) => setDiffusionConvDirect(data.checked === true)}
+                />
+              </Field>
+              <Field label="VAE Conv Direct" hint="在VAE模型中使用ggml_conv2d_direct">
+                <Checkbox
+                  checked={vaeConvDirect}
+                  onChange={(_, data) => setVaeConvDirect(data.checked === true)}
+                />
+              </Field>
+              <Field label="VAE Tiling" hint="分块处理VAE以减少内存使用">
+                <Checkbox
+                  checked={vaeTiling}
+                  onChange={(_, data) => setVaeTiling(data.checked === true)}
                 />
               </Field>
             </div>

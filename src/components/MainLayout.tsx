@@ -42,6 +42,25 @@ const useStyles = makeStyles({
     height: '40px',
     paddingLeft: tokens.spacingHorizontalM,
   },
+  navGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    padding: tokens.spacingVerticalS,
+    marginBottom: tokens.spacingVerticalM,
+    backgroundColor: tokens.colorNeutralBackground3,
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  navGroupTitle: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground3,
+    padding: `0 ${tokens.spacingHorizontalS}`,
+    marginBottom: tokens.spacingVerticalXS,
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
   content: {
     flex: 1,
     display: 'flex',
@@ -116,7 +135,42 @@ export const MainLayout = ({ currentPage, onPageChange, children, navigationDisa
             HelloUI
           </h2>
         </div>
-        {navItems.map((item) => (
+        
+        {/* 主页按钮 */}
+        {navItems.filter(item => item.id === 'home').map((item) => (
+          <Button
+            key={item.id}
+            appearance={currentPage === item.id ? 'primary' : 'subtle'}
+            icon={item.icon}
+            className={styles.navButton}
+            onClick={() => onPageChange(item.id)}
+            disabled={navigationDisabled && currentPage !== item.id}
+            title={navigationDisabled && currentPage !== item.id ? (navigationDisabledReason || '操作进行中，请稍候...') : undefined}
+          >
+            {item.label}
+          </Button>
+        ))}
+
+        {/* 功能页面组 */}
+        <div className={styles.navGroup}>
+          <div className={styles.navGroupTitle}>SDcpp功能</div>
+          {navItems.filter(item => ['weights', 'sdcpp', 'generate', 'images'].includes(item.id)).map((item) => (
+            <Button
+              key={item.id}
+              appearance={currentPage === item.id ? 'primary' : 'subtle'}
+              icon={item.icon}
+              className={styles.navButton}
+              onClick={() => onPageChange(item.id)}
+              disabled={navigationDisabled && currentPage !== item.id}
+              title={navigationDisabled && currentPage !== item.id ? (navigationDisabledReason || '操作进行中，请稍候...') : undefined}
+            >
+              {item.label}
+            </Button>
+          ))}
+        </div>
+
+        {/* 其他页面按钮 */}
+        {navItems.filter(item => !['home', 'weights', 'sdcpp', 'generate', 'images'].includes(item.id)).map((item) => (
           <Button
             key={item.id}
             appearance={currentPage === item.id ? 'primary' : 'subtle'}
