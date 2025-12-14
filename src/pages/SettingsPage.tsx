@@ -7,9 +7,12 @@ import {
   Button,
   makeStyles,
   tokens,
+  RadioGroup,
+  Radio,
 } from '@fluentui/react-components';
 import { CodeRegular } from '@fluentui/react-icons';
 import { useState, useEffect } from 'react';
+import type { ThemeMode } from '../App';
 
 const useStyles = makeStyles({
   container: {
@@ -27,7 +30,12 @@ const useStyles = makeStyles({
   },
 });
 
-export const SettingsPage = () => {
+interface SettingsPageProps {
+  themeMode: ThemeMode;
+  onThemeChange: (mode: ThemeMode) => void;
+}
+
+export const SettingsPage = ({ themeMode, onThemeChange }: SettingsPageProps) => {
   const styles = useStyles();
   const [notifications, setNotifications] = useState(true);
   const [autoSave, setAutoSave] = useState(false);
@@ -80,6 +88,26 @@ export const SettingsPage = () => {
               checked={autoSave}
               onChange={(_, data) => setAutoSave(data.checked || false)}
             />
+          </div>
+        </div>
+      </Card>
+
+      <Card className={styles.section}>
+        <Title2>外观设置</Title2>
+        <div className={styles.section}>
+          <div>
+            <Body1 style={{ marginBottom: tokens.spacingVerticalS }}>颜色主题</Body1>
+            <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginBottom: tokens.spacingVerticalM }}>
+              选择应用的颜色主题
+            </Body1>
+            <RadioGroup
+              value={themeMode}
+              onChange={(_, data) => onThemeChange(data.value as ThemeMode)}
+            >
+              <Radio label="浅色" value="light" />
+              <Radio label="深色" value="dark" />
+              <Radio label="跟随系统" value="system" />
+            </RadioGroup>
           </div>
         </div>
       </Card>

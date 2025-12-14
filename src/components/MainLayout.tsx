@@ -12,6 +12,9 @@ import {
   CodeRegular,
   ImageAddRegular,
   ImageRegular,
+  EditRegular,
+  LayerRegular,
+  VideoClipRegular,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -31,15 +34,19 @@ const useStyles = makeStyles({
     padding: tokens.spacingVerticalM,
     gap: tokens.spacingVerticalXS,
     overflowY: 'auto',
+    flexShrink: 0,
   },
   sidebarHeader: {
     padding: tokens.spacingVerticalM,
     marginBottom: tokens.spacingVerticalS,
+    flexShrink: 0,
   },
   navButton: {
     justifyContent: 'flex-start',
     width: '100%',
     height: '40px',
+    minHeight: '40px',
+    flexShrink: 0,
     paddingLeft: tokens.spacingHorizontalM,
   },
   navGroup: {
@@ -51,6 +58,7 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground3,
     borderRadius: tokens.borderRadiusMedium,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
+    flexShrink: 0,
   },
   navGroupTitle: {
     fontSize: tokens.fontSizeBase200,
@@ -60,6 +68,7 @@ const useStyles = makeStyles({
     marginBottom: tokens.spacingVerticalXS,
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
+    flexShrink: 0,
   },
   content: {
     flex: 1,
@@ -75,7 +84,7 @@ const useStyles = makeStyles({
   },
 });
 
-export type PageType = 'home' | 'components' | 'settings' | 'weights' | 'sdcpp' | 'generate' | 'images';
+export type PageType = 'home' | 'components' | 'settings' | 'weights' | 'sdcpp' | 'generate' | 'edit-image' | 'images' | 'material-decompose' | 'materials' | 'video-generate';
 
 interface MainLayoutProps {
   currentPage: PageType;
@@ -110,9 +119,29 @@ export const MainLayout = ({ currentPage, onPageChange, children, navigationDisa
       icon: <ImageAddRegular />,
     },
     {
+      id: 'edit-image' as PageType,
+      label: '图片编辑',
+      icon: <EditRegular />,
+    },
+    {
       id: 'images' as PageType,
       label: '已生成图片',
       icon: <ImageRegular />,
+    },
+    {
+      id: 'video-generate' as PageType,
+      label: '视频生成',
+      icon: <VideoClipRegular />,
+    },
+    {
+      id: 'material-decompose' as PageType,
+      label: '材质分解',
+      icon: <LayerRegular />,
+    },
+    {
+      id: 'materials' as PageType,
+      label: '已生成材质',
+      icon: <LayerRegular />,
     },
     {
       id: 'components' as PageType,
@@ -151,10 +180,28 @@ export const MainLayout = ({ currentPage, onPageChange, children, navigationDisa
           </Button>
         ))}
 
-        {/* 功能页面组 */}
+        {/* SD.cpp引擎功能页面组 */}
         <div className={styles.navGroup}>
-          <div className={styles.navGroupTitle}>SDcpp功能</div>
-          {navItems.filter(item => ['weights', 'sdcpp', 'generate', 'images'].includes(item.id)).map((item) => (
+          <div className={styles.navGroupTitle}>SD.cpp引擎</div>
+          {navItems.filter(item => ['weights', 'sdcpp', 'generate', 'edit-image', 'images', 'video-generate'].includes(item.id)).map((item) => (
+            <Button
+              key={item.id}
+              appearance={currentPage === item.id ? 'primary' : 'subtle'}
+              icon={item.icon}
+              className={styles.navButton}
+              onClick={() => onPageChange(item.id)}
+              disabled={navigationDisabled && currentPage !== item.id}
+              title={navigationDisabled && currentPage !== item.id ? (navigationDisabledReason || '操作进行中，请稍候...') : undefined}
+            >
+              {item.label}
+            </Button>
+          ))}
+        </div>
+
+        {/* laforge-chord 功能页面组 */}
+        <div className={styles.navGroup}>
+          <div className={styles.navGroupTitle}>laforge-chord</div>
+          {navItems.filter(item => ['material-decompose', 'materials'].includes(item.id)).map((item) => (
             <Button
               key={item.id}
               appearance={currentPage === item.id ? 'primary' : 'subtle'}
@@ -170,7 +217,7 @@ export const MainLayout = ({ currentPage, onPageChange, children, navigationDisa
         </div>
 
         {/* 其他页面按钮 */}
-        {navItems.filter(item => !['home', 'weights', 'sdcpp', 'generate', 'images'].includes(item.id)).map((item) => (
+        {navItems.filter(item => !['home', 'weights', 'sdcpp', 'generate', 'edit-image', 'images', 'video-generate', 'material-decompose', 'materials'].includes(item.id)).map((item) => (
           <Button
             key={item.id}
             appearance={currentPage === item.id ? 'primary' : 'subtle'}
