@@ -13,7 +13,6 @@ import {
   ImageAddRegular,
   ImageRegular,
   EditRegular,
-  LayerRegular,
   VideoClipRegular,
 } from '@fluentui/react-icons';
 
@@ -84,7 +83,7 @@ const useStyles = makeStyles({
   },
 });
 
-export type PageType = 'home' | 'components' | 'settings' | 'weights' | 'sdcpp' | 'generate' | 'edit-image' | 'images' | 'material-decompose' | 'materials' | 'video-generate';
+export type PageType = 'home' | 'components' | 'settings' | 'weights' | 'sdcpp' | 'generate' | 'edit-image' | 'images' | 'video-generate';
 
 interface MainLayoutProps {
   currentPage: PageType;
@@ -125,23 +124,13 @@ export const MainLayout = ({ currentPage, onPageChange, children, navigationDisa
     },
     {
       id: 'images' as PageType,
-      label: '已生成图片',
+      label: '生成结果',
       icon: <ImageRegular />,
     },
     {
       id: 'video-generate' as PageType,
       label: '视频生成',
       icon: <VideoClipRegular />,
-    },
-    {
-      id: 'material-decompose' as PageType,
-      label: '材质分解',
-      icon: <LayerRegular />,
-    },
-    {
-      id: 'materials' as PageType,
-      label: '已生成材质',
-      icon: <LayerRegular />,
     },
     {
       id: 'components' as PageType,
@@ -198,26 +187,8 @@ export const MainLayout = ({ currentPage, onPageChange, children, navigationDisa
           ))}
         </div>
 
-        {/* laforge-chord 功能页面组 */}
-        <div className={styles.navGroup}>
-          <div className={styles.navGroupTitle}>laforge-chord</div>
-          {navItems.filter(item => ['material-decompose', 'materials'].includes(item.id)).map((item) => (
-            <Button
-              key={item.id}
-              appearance={currentPage === item.id ? 'primary' : 'subtle'}
-              icon={item.icon}
-              className={styles.navButton}
-              onClick={() => onPageChange(item.id)}
-              disabled={navigationDisabled && currentPage !== item.id}
-              title={navigationDisabled && currentPage !== item.id ? (navigationDisabledReason || '操作进行中，请稍候...') : undefined}
-            >
-              {item.label}
-            </Button>
-          ))}
-        </div>
-
         {/* 其他页面按钮 */}
-        {navItems.filter(item => !['home', 'weights', 'sdcpp', 'generate', 'edit-image', 'images', 'video-generate', 'material-decompose', 'materials'].includes(item.id)).map((item) => (
+        {navItems.filter(item => !['home', 'weights', 'sdcpp', 'generate', 'edit-image', 'images', 'video-generate'].includes(item.id)).map((item) => (
           <Button
             key={item.id}
             appearance={currentPage === item.id ? 'primary' : 'subtle'}

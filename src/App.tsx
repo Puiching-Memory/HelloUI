@@ -10,8 +10,6 @@ import { SDCppPage } from './pages/SDCppPage';
 import { GeneratePage } from './pages/GeneratePage';
 import { EditImagePage } from './pages/EditImagePage';
 import { GeneratedImagesPage } from './pages/GeneratedImagesPage';
-import { MaterialDecomposePage } from './pages/MaterialDecomposePage';
-import { MaterialMaterialsPage } from './pages/MaterialMaterialsPage';
 import { VideoGeneratePage } from './pages/VideoGeneratePage';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -24,7 +22,6 @@ function App() {
   const [currentPage, setCurrentPage] = useState<PageType>('home');
   const [isUploading, setIsUploading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
 
   // 从 localStorage 加载保存的主题设置
   useEffect(() => {
@@ -67,8 +64,8 @@ function App() {
   };
 
   const handlePageChange = (page: PageType) => {
-    // 如果正在上传、正在生成或正在处理，禁止切换页面
-    if (isUploading || isGenerating || isProcessing) {
+    // 如果正在上传或正在生成，禁止切换页面
+    if (isUploading || isGenerating) {
       return;
     }
     setCurrentPage(page);
@@ -80,8 +77,8 @@ function App() {
         <MainLayout 
           currentPage={currentPage} 
           onPageChange={handlePageChange}
-          navigationDisabled={isUploading || isGenerating || isProcessing}
-          navigationDisabledReason={isGenerating ? '正在生成图片，请稍候...' : isProcessing ? '正在处理图片，请稍候...' : isUploading ? '正在上传文件，请稍候...' : undefined}
+          navigationDisabled={isUploading || isGenerating}
+          navigationDisabledReason={isGenerating ? '正在生成图片，请稍候...' : isUploading ? '正在上传文件，请稍候...' : undefined}
         >
           {currentPage === 'weights' ? (
             <ModelWeightsPage onUploadStateChange={setIsUploading} />
@@ -95,10 +92,6 @@ function App() {
             <GeneratedImagesPage />
           ) : currentPage === 'video-generate' ? (
             <VideoGeneratePage />
-          ) : currentPage === 'material-decompose' ? (
-            <MaterialDecomposePage onProcessingStateChange={setIsProcessing} />
-          ) : currentPage === 'materials' ? (
-            <MaterialMaterialsPage />
           ) : (
             renderPage()
           )}

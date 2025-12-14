@@ -27,6 +27,9 @@ import {
   CopyRegular,
   CheckmarkRegular,
   SplitHorizontalRegular,
+  VideoClipRegular,
+  EditRegular,
+  ImageAddRegular,
 } from '@fluentui/react-icons';
 import { PhotoView } from 'react-photo-view';
 import { useState, useEffect } from 'react';
@@ -565,14 +568,50 @@ export const GeneratedImagesPage = () => {
     setCompareDialogOpen(true);
   };
 
+  // 获取类型标签和图标
+  const getTypeInfo = (image: GeneratedImage) => {
+    const type = image.type || 'generate'
+    const mediaType = image.mediaType || 'image'
+    
+    if (mediaType === 'video') {
+      return {
+        label: '视频生成',
+        icon: <VideoClipRegular />,
+        color: 'brand' as const,
+      }
+    }
+    
+    switch (type) {
+      case 'edit':
+        return {
+          label: '图片编辑',
+          icon: <EditRegular />,
+          color: 'success' as const,
+        }
+      case 'video':
+        return {
+          label: '视频生成',
+          icon: <VideoClipRegular />,
+          color: 'brand' as const,
+        }
+      case 'generate':
+      default:
+        return {
+          label: '图片生成',
+          icon: <ImageAddRegular />,
+          color: 'brand' as const,
+        }
+    }
+  }
+
   return (
     <div className={styles.container}>
-      <Title1>已生成图片管理</Title1>
+      <Title1>生成结果管理</Title1>
 
       <Card className={styles.section}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalM }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalM }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM }}>
-            <Title2 style={{ margin: 0 }}>图片列表</Title2>
+            <Title2 style={{ margin: 0 }}>结果列表</Title2>
             {images.length > 0 && (
               <Badge appearance="filled" color="brand">
                 {images.length}
@@ -631,11 +670,11 @@ export const GeneratedImagesPage = () => {
         ) : images.length === 0 ? (
           <div className={styles.emptyState}>
             <ImageRegular className={styles.emptyStateIcon} />
-            <Title2 className={styles.emptyStateTitle}>暂无已生成的图片</Title2>
+            <Title2 className={styles.emptyStateTitle}>暂无生成结果</Title2>
             <Body1 className={styles.emptyStateDescription}>
-              生成的图片将保存在运行路径下的 outputs 目录中
+              所有生成结果（图片生成、图片编辑、视频生成）将保存在运行路径下的 outputs 目录中
               <br />
-              请在"图片生成"页面生成图片后，它们将显示在这里
+              请在相应的页面生成内容后，它们将统一显示在这里
             </Body1>
           </div>
         ) : (
@@ -655,15 +694,17 @@ export const GeneratedImagesPage = () => {
               />
             </div>
             
-            {/* 图片网格 */}
+            {/* 结果网格 */}
             <div className={styles.gridContainer}>
               {images.map((image) => {
                 const isSelected = selectedImages.has(image.path);
+                const typeInfo = getTypeInfo(image);
+                const isVideo = image.mediaType === 'video';
                 // 只使用previewImage，不使用本地文件路径（浏览器无法加载本地路径）
                 const imageSrc = image.previewImage 
                   ? `data:${getImageMimeType(image.name)};base64,${image.previewImage}`
                   : null;
-                const hasImage = !!image.previewImage;
+                const hasImage = !!image.previewImage && !isVideo;
                 
                 return (
                   <div
@@ -688,9 +729,25 @@ export const GeneratedImagesPage = () => {
                       />
                     </div>
 
-                    {/* 图片预览 */}
+                    {/* 类型标签 */}
+                    <div style={{ 
+                      position: 'absolute', 
+                      top: tokens.spacingVerticalS, 
+                      right: tokens.spacingHorizontalS,
+                      zIndex: 10,
+                    }}>
+                      <Badge appearance="filled" color={typeInfo.color} icon={typeInfo.icon}>
+                        {typeInfo.label}
+                      </Badge>
+                    </div>
+
+                    {/* 预览区域 */}
                     <div className={styles.imagePreviewContainer}>
-                      {hasImage && imageSrc ? (
+                      {isVideo ? (
+                        <div className={styles.imagePlaceholder}>
+                          <VideoClipRegular style={{ fontSize: '64px' }} />
+                        </div>
+                      ) : hasImage && imageSrc ? (
                         <>
                           <PhotoView src={imageSrc}>
                             <img
@@ -739,7 +796,7 @@ export const GeneratedImagesPage = () => {
                       <div className={styles.imageCardMeta}>
                         {/* 第一行：基本信息和分辨率 */}
                         <div className={styles.imageCardMetaRow}>
-                          {image.width && image.height && (
+                          {!isVideo && image.width && image.height && (
                             <div className={styles.imageCardMetaItem}>
                               <DocumentRegular style={{ fontSize: '14px' }} />
                               <span>{image.width} × {image.height}</span>
@@ -760,8 +817,8 @@ export const GeneratedImagesPage = () => {
                           )}
                         </div>
                         
-                        {/* 第二行：生成参数 */}
-                        {(image.steps || image.cfgScale || image.samplingMethod || image.scheduler) && (
+                        {/* 第二行：生成参数（仅图片生成和编辑显示） */}
+                        {!isVideo && (image.steps || image.cfgScale || image.samplingMethod || image.scheduler) && (
                           <div className={styles.imageCardMetaRow}>
                             {image.steps && (
                               <div className={styles.imageCardMetaItem}>
@@ -786,8 +843,8 @@ export const GeneratedImagesPage = () => {
                           </div>
                         )}
                         
-                        {/* 第三行：种子和批次 */}
-                        {(image.seed !== null && image.seed !== undefined) || image.batchCount ? (
+                        {/* 第三行：种子和批次（仅图片生成和编辑显示） */}
+                        {!isVideo && ((image.seed !== null && image.seed !== undefined) || image.batchCount) ? (
                           <div className={styles.imageCardMetaRow}>
                             {image.seed !== null && image.seed !== undefined && (
                               <div className={styles.imageCardMetaItem}>

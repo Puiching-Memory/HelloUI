@@ -47,15 +47,7 @@ export type IPCChannel =
   | 'generated-images:download'
   | 'generated-images:delete'
   | 'generated-images:get-preview'
-  | 'generated-images:batch-download'
-  // 材质分解
-  | 'material-decompose:select-file'
-  | 'material-decompose:start'
-  | 'material-decompose:cancel'
-  | 'material-decompose:read-image'
-  // 材质管理
-  | 'materials:list'
-  | 'materials:download';
+  | 'generated-images:batch-download';
 
 /**
  * IPC 请求/响应类型映射
@@ -89,12 +81,6 @@ export interface IPCRequestMap {
   'generated-images:delete': { request: string; response: boolean };
   'generated-images:get-preview': { request: string; response: string };
   'generated-images:batch-download': { request: string[]; response: { success: boolean; zipPath?: string; size?: number; canceled?: boolean } };
-  'material-decompose:select-file': { request: void; response: string | null };
-  'material-decompose:start': { request: { inputImagePath: string }; response: { success: boolean; basecolor?: string; metalness?: string; normal?: string; roughness?: string; error?: string } };
-  'material-decompose:cancel': { request: void; response: { success: boolean; message?: string } };
-  'material-decompose:read-image': { request: string; response: string };
-  'materials:list': { request: void; response: Array<{ id: string; folderPath: string; timestamp: number; basecolor?: string; metalness?: string; normal?: string; roughness?: string }> };
-  'materials:download': { request: string; response: { success: boolean; zipPath?: string; size?: number; canceled?: boolean } };
 }
 
 /**

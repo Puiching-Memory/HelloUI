@@ -88,10 +88,6 @@ let currentUpload: UploadState | null = null
 let currentGenerateProcess: ReturnType<typeof spawn> | null = null
 let currentGenerateKill: (() => void) | null = null
 
-// 存储当前正在运行的材质分解进程，用于取消分解
-let currentMaterialDecomposeProcess: ReturnType<typeof spawn> | null = null
-let currentMaterialDecomposeKill: (() => void) | null = null
-
 // 获取运行位置目录（可执行文件所在目录）
 function getRunPath(): string {
   return app.isPackaged ? dirname(process.execPath) : join(__dirname, '..')
@@ -255,745 +251,6 @@ ipcMain.handle('edit-image:select-file', async () => {
   return null
 })
 
-// IPC 处理程序：选择材质分解输入图片
-ipcMain.handle('material-decompose:select-file', async () => {
-  const window = win || BrowserWindow.getFocusedWindow()
-  if (!window) {
-    throw new Error('没有可用的窗口')
-  }
-  
-  const result = await dialog.showOpenDialog(window, {
-    properties: ['openFile'],
-    title: '选择要分解的材质图片',
-    filters: [
-      { name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'bmp', 'webp'] },
-      { name: '所有文件', extensions: ['*'] },
-    ],
-  })
-  
-  if (!result.canceled && result.filePaths.length > 0) {
-    return result.filePaths[0]
-  }
-  return null
-})
-
-// 获取 laforge-chord 可执行文件路径
-function getLaforgeChordExecutablePath(): string {
-  const runPath = getRunPath()
-  const engineFolder = join(runPath, 'engines', 'laforge-chord')
-  const executableName = 'chord_cli.exe'
-  return join(engineFolder, executableName)
-}
-
-// IPC 处理程序：取消材质分解
-ipcMain.handle('material-decompose:cancel', async () => {
-  if (currentMaterialDecomposeProcess && currentMaterialDecomposeKill) {
-    currentMaterialDecomposeKill()
-    return { success: true }
-  }
-  return { success: false, message: '没有正在进行的材质分解任务' }
-})
-
-// ========== 材质管理相关 IPC 处理程序 ==========
-
-// 查找所有材质输出目录
-async function findAllMaterialOutputs(): Promise<Array<{
-  id: string
-  folderPath: string
-  timestamp: number
-  basecolor?: string
-  metalness?: string
-  normal?: string
-  roughness?: string
-}>> {
-  const outputsFolder = getDefaultOutputsFolder()
-  
-  if (!existsSync(outputsFolder)) {
-    return []
-  }
-
-  const materials: Array<{
-    id: string
-    folderPath: string
-    timestamp: number
-    basecolor?: string
-    metalness?: string
-    normal?: string
-    roughness?: string
-  }> = []
-
-  const entries = await fs.readdir(outputsFolder, { withFileTypes: true })
-
-  for (const entry of entries) {
-    // 只处理 material_output_* 目录
-    if (entry.isDirectory() && entry.name.startsWith('material_output_')) {
-      const materialDir = join(outputsFolder, entry.name)
-      
-      // 递归查找所有图片文件
-      const findAllImageFiles = async (dir: string): Promise<string[]> => {
-        const files: string[] = []
-        const dirEntries = await fs.readdir(dir, { withFileTypes: true })
-        
-        for (const dirEntry of dirEntries) {
-          const fullPath = join(dir, dirEntry.name)
-          if (dirEntry.isDirectory()) {
-            const subFiles = await findAllImageFiles(fullPath)
-            files.push(...subFiles)
-          } else if (dirEntry.isFile()) {
-            const ext = extname(dirEntry.name).toLowerCase()
-            if (['.png', '.jpg', '.jpeg', '.bmp', '.webp'].includes(ext)) {
-              files.push(fullPath)
-            }
-          }
-        }
-        
-        return files
-      }
-
-      const allFiles = await findAllImageFiles(materialDir)
-
-      // 查找材质贴图文件
-      const basecolorFile = allFiles.find(f => basename(f).toLowerCase() === 'basecolor.png')
-      const metalnessFile = allFiles.find(f => basename(f).toLowerCase() === 'metalness.png')
-      const normalFile = allFiles.find(f => basename(f).toLowerCase() === 'normal.png')
-      const roughnessFile = allFiles.find(f => basename(f).toLowerCase() === 'roughness.png')
-
-      // 提取时间戳
-      const timestampMatch = entry.name.match(/material_output_(\d+)/)
-      const timestamp = timestampMatch ? parseInt(timestampMatch[1]) : Date.now()
-
-      // 转换为 base64 数据 URI
-      const getMimeType = (filePath: string): string => {
-        const ext = extname(filePath).toLowerCase()
-        switch (ext) {
-          case '.png':
-            return 'image/png'
-          case '.jpg':
-          case '.jpeg':
-            return 'image/jpeg'
-          case '.bmp':
-            return 'image/bmp'
-          case '.webp':
-            return 'image/webp'
-          default:
-            return 'image/png'
-        }
-      }
-
-      const material: {
-        id: string
-        folderPath: string
-        timestamp: number
-        basecolor?: string
-        metalness?: string
-        normal?: string
-        roughness?: string
-      } = {
-        id: entry.name,
-        folderPath: materialDir,
-        timestamp,
-      }
-
-      if (basecolorFile && existsSync(basecolorFile)) {
-        try {
-          const imageBuffer = await fs.readFile(basecolorFile)
-          const mimeType = getMimeType(basecolorFile)
-          material.basecolor = `data:${mimeType};base64,${imageBuffer.toString('base64')}`
-        } catch (error) {
-          console.error(`[Materials] Failed to read basecolor: ${error}`)
-        }
-      }
-
-      if (metalnessFile && existsSync(metalnessFile)) {
-        try {
-          const imageBuffer = await fs.readFile(metalnessFile)
-          const mimeType = getMimeType(metalnessFile)
-          material.metalness = `data:${mimeType};base64,${imageBuffer.toString('base64')}`
-        } catch (error) {
-          console.error(`[Materials] Failed to read metalness: ${error}`)
-        }
-      }
-
-      if (normalFile && existsSync(normalFile)) {
-        try {
-          const imageBuffer = await fs.readFile(normalFile)
-          const mimeType = getMimeType(normalFile)
-          material.normal = `data:${mimeType};base64,${imageBuffer.toString('base64')}`
-        } catch (error) {
-          console.error(`[Materials] Failed to read normal: ${error}`)
-        }
-      }
-
-      if (roughnessFile && existsSync(roughnessFile)) {
-        try {
-          const imageBuffer = await fs.readFile(roughnessFile)
-          const mimeType = getMimeType(roughnessFile)
-          material.roughness = `data:${mimeType};base64,${imageBuffer.toString('base64')}`
-        } catch (error) {
-          console.error(`[Materials] Failed to read roughness: ${error}`)
-        }
-      }
-
-      // 只添加至少有 basecolor 的材质
-      if (material.basecolor) {
-        materials.push(material)
-      }
-    }
-  }
-
-  // 按时间戳降序排序（最新的在前）
-  materials.sort((a, b) => b.timestamp - a.timestamp)
-
-  return materials
-}
-
-// IPC 处理程序：列出所有材质
-ipcMain.handle('materials:list', async () => {
-  try {
-    return await findAllMaterialOutputs()
-  } catch (error) {
-    console.error('[Materials] Failed to list materials:', error)
-    return []
-  }
-})
-
-// IPC 处理程序：下载材质（打包为 ZIP）
-ipcMain.handle('materials:download', async (_, materialId: string) => {
-  const window = win || BrowserWindow.getFocusedWindow()
-  if (!window) {
-    throw new Error('没有可用的窗口')
-  }
-
-  try {
-    const materials = await findAllMaterialOutputs()
-    const material = materials.find(m => m.id === materialId)
-
-    if (!material) {
-      throw new Error(`材质不存在: ${materialId}`)
-    }
-
-    // 查找材质文件夹中的所有图片文件
-    const findAllImageFiles = async (dir: string): Promise<string[]> => {
-      const files: string[] = []
-      const entries = await fs.readdir(dir, { withFileTypes: true })
-      
-      for (const entry of entries) {
-        const fullPath = join(dir, entry.name)
-        if (entry.isDirectory()) {
-          const subFiles = await findAllImageFiles(fullPath)
-          files.push(...subFiles)
-        } else if (entry.isFile()) {
-          const ext = extname(entry.name).toLowerCase()
-          if (['.png', '.jpg', '.jpeg', '.bmp', '.webp'].includes(ext)) {
-            files.push(fullPath)
-          }
-        }
-      }
-      
-      return files
-    }
-
-    const allFiles = await findAllImageFiles(material.folderPath)
-    
-    if (allFiles.length === 0) {
-      throw new Error('材质文件夹中没有找到图片文件')
-    }
-
-    // 显示保存对话框
-    const timestamp = new Date(material.timestamp).toISOString().replace(/[:.]/g, '-').slice(0, -5)
-    const defaultZipName = `material-${materialId.split('_').pop()}-${timestamp}.zip`
-    
-    const result = await dialog.showSaveDialog(window, {
-      title: '保存材质压缩包',
-      defaultPath: defaultZipName,
-      filters: [
-        { name: 'ZIP 文件', extensions: ['zip'] },
-        { name: '所有文件', extensions: ['*'] },
-      ],
-    })
-
-    if (result.canceled || !result.filePath) {
-      return { success: false, canceled: true }
-    }
-
-    const zipPath = result.filePath
-
-    return new Promise((resolve, reject) => {
-      const output = createWriteStream(zipPath)
-      const archive = archiver('zip', {
-        zlib: { level: 9 }
-      })
-
-      let isResolved = false
-
-      const safeResolve = (value: any) => {
-        if (!isResolved) {
-          isResolved = true
-          resolve(value)
-        }
-      }
-
-      const safeReject = (error: any) => {
-        if (!isResolved) {
-          isResolved = true
-          output.destroy()
-          archive.abort()
-          reject(error)
-        }
-      }
-
-      output.on('error', (err) => {
-        console.error('Output stream error:', err)
-        safeReject(new Error(`写入ZIP文件失败: ${err.message}`))
-      })
-
-      output.on('close', () => {
-        if (!isResolved) {
-          console.log(`[Materials] ZIP file created: ${zipPath} (${archive.pointer()} bytes)`)
-          safeResolve({ success: true, zipPath, size: archive.pointer() })
-        }
-      })
-
-      archive.on('warning', (err) => {
-        if (err.code === 'ENOENT') {
-          console.warn('[Materials] Archive warning:', err)
-        } else {
-          safeReject(err)
-        }
-      })
-
-      archive.on('error', (err) => {
-        console.error('[Materials] Archive error:', err)
-        safeReject(err)
-      })
-
-      archive.pipe(output)
-
-      // 添加所有图片文件到 ZIP，保持相对路径结构
-      for (const filePath of allFiles) {
-        const relativePath = filePath.replace(material.folderPath + sep, '')
-        archive.file(filePath, { name: relativePath })
-      }
-
-      archive.finalize()
-    })
-  } catch (error) {
-    console.error('[Materials] Failed to download material:', error)
-    throw error
-  }
-})
-
-// IPC 处理程序：读取图片文件并转换为 base64
-ipcMain.handle('material-decompose:read-image', async (_, filePath: string) => {
-  try {
-    if (!existsSync(filePath)) {
-      throw new Error(`图片文件不存在: ${filePath}`)
-    }
-
-    const imageBuffer = await fs.readFile(filePath)
-    const mimeType = (() => {
-      const ext = extname(filePath).toLowerCase()
-      switch (ext) {
-        case '.png':
-          return 'image/png'
-        case '.jpg':
-        case '.jpeg':
-          return 'image/jpeg'
-        case '.bmp':
-          return 'image/bmp'
-        case '.webp':
-          return 'image/webp'
-        case '.gif':
-          return 'image/gif'
-        default:
-          return 'image/png'
-      }
-    })()
-
-    return `data:${mimeType};base64,${imageBuffer.toString('base64')}`
-  } catch (error) {
-    console.error('[MaterialDecompose] Failed to read image:', error)
-    throw error
-  }
-})
-
-// IPC 处理程序：开始材质分解
-ipcMain.handle('material-decompose:start', async (event, params: { inputImagePath: string }) => {
-  const startTime = Date.now()
-  
-  let tempInputDir: string | null = null
-  
-  try {
-    const { inputImagePath } = params
-
-    // 检查输入图片是否存在
-    if (!existsSync(inputImagePath)) {
-      throw new Error(`输入图片文件不存在: ${inputImagePath}`)
-    }
-
-    // 获取 chord_cli.exe 可执行文件路径
-    const chordExePath = getLaforgeChordExecutablePath()
-    if (!existsSync(chordExePath)) {
-      throw new Error(`chord_cli.exe 引擎文件不存在: ${chordExePath}\n请确保已正确安装 laforge-chord 引擎`)
-    }
-
-    // 创建临时输入目录（因为 chord_cli.exe 需要输入目录）
-    const outputsDir = getDefaultOutputsFolder()
-    if (!existsSync(outputsDir)) {
-      await fs.mkdir(outputsDir, { recursive: true })
-    }
-
-    const timestamp = Date.now()
-    tempInputDir = join(outputsDir, `temp_input_${timestamp}`)
-    await fs.mkdir(tempInputDir, { recursive: true })
-
-    // 复制输入图片到临时目录
-    const inputFileName = basename(inputImagePath)
-    const tempInputFile = join(tempInputDir, inputFileName)
-    await fs.copyFile(inputImagePath, tempInputFile)
-
-    // 创建输出目录
-    const outputDir = join(outputsDir, `material_output_${timestamp}`)
-    await fs.mkdir(outputDir, { recursive: true })
-
-    // 构建命令行参数
-    // chord_cli.exe 使用 --input-dir 和 --output-dir 参数
-    const args: string[] = [
-      '--input-dir', tempInputDir,
-      '--output-dir', outputDir,
-    ]
-
-    // 使用 Promise 包装进程执行
-    return new Promise<{
-      success: boolean
-      basecolor?: string
-      metalness?: string
-      normal?: string
-      roughness?: string
-      error?: string
-    }>((resolvePromise, reject) => {
-      const escapeShellArg = (arg: string): string => {
-        // Windows CMD/PowerShell 转义规则：将引号加倍，然后用引号包裹整个参数
-        return `"${arg.replace(/"/g, '""')}"`
-      }
-
-      // 在 Windows 上使用 shell: true 以正确处理中文路径
-      const spawnOptions: Parameters<typeof spawn>[2] = {
-        cwd: dirname(chordExePath),
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }
-
-      // Windows: 使用 shell: true 并转义所有参数以正确处理中文路径
-      // 使用 chcp 65001 设置代码页为 UTF-8，确保正确处理中文字符
-      const escapedExePath = escapeShellArg(chordExePath)
-      const escapedArgs = args.map(escapeShellArg)
-      const command = `chcp 65001 >nul && ${escapedExePath} ${escapedArgs.join(' ')}`
-      spawnOptions.shell = true
-      const childProcess = spawn(command, [], spawnOptions)
-
-      let stdout = ''
-      let stderr = ''
-      let isResolved = false
-
-      // 使用资源管理器和异步操作保护器
-      const resourceManager = new ResourceManager()
-      const operationGuard = new AsyncOperationGuard()
-
-      // 存储强制终止超时
-      let killTimeout: NodeJS.Timeout | null = null
-
-      // 存储当前材质分解进程引用
-      currentMaterialDecomposeProcess = childProcess
-
-      const killProcess = () => {
-        if (childProcess && !childProcess.killed && childProcess.pid) {
-          if (killTimeout) {
-            clearTimeout(killTimeout)
-            killTimeout = null
-          }
-
-          const pid = childProcess.pid
-          console.log(`[MaterialDecompose] Attempting to kill process tree (PID: ${pid})`)
-
-          if (process.platform === 'win32') {
-            exec(`taskkill /F /T /PID ${pid}`, (error) => {
-              if (error) {
-                console.warn(`[MaterialDecompose] Failed to kill process tree by PID: ${error.message}`)
-                const exeName = basename(chordExePath)
-                console.log(`[MaterialDecompose] Attempting to kill process by name: ${exeName}`)
-                exec(`taskkill /F /T /IM ${exeName}`, (nameError) => {
-                  if (nameError) {
-                    console.warn(`[MaterialDecompose] Failed to kill process by name: ${nameError.message}`)
-                  } else {
-                    console.log(`[MaterialDecompose] Successfully killed process by name: ${exeName}`)
-                  }
-                  try {
-                    childProcess.kill('SIGTERM')
-                  } catch (e) {
-                    console.warn(`[MaterialDecompose] Failed to send SIGTERM: ${e}`)
-                  }
-                })
-              } else {
-                console.log(`[MaterialDecompose] Successfully killed process tree (PID: ${pid})`)
-              }
-            })
-          } else {
-            childProcess.kill('SIGTERM')
-            killTimeout = setTimeout(() => {
-              if (childProcess && !childProcess.killed && childProcess.pid) {
-                childProcess.kill('SIGKILL')
-              }
-              killTimeout = null
-            }, 3000)
-          }
-        }
-      }
-
-      currentMaterialDecomposeKill = killProcess
-
-      const cleanup = () => {
-        operationGuard.invalidate()
-        if (killTimeout) {
-          clearTimeout(killTimeout)
-          killTimeout = null
-        }
-        resourceManager.cleanupAll()
-        if (currentMaterialDecomposeProcess === childProcess) {
-          currentMaterialDecomposeProcess = null
-          currentMaterialDecomposeKill = null
-        }
-      }
-
-      const cleanupExceptKillTimeout = () => {
-        operationGuard.invalidate()
-        resourceManager.cleanupAll()
-      }
-
-      const safeReject = (error: Error) => {
-        if (!isResolved) {
-          isResolved = true
-          killProcess()
-          cleanupExceptKillTimeout()
-          reject(error)
-        }
-      }
-
-      const safeResolve = (value: any) => {
-        if (!isResolved) {
-          isResolved = true
-          cleanup()
-          resolvePromise(value)
-        }
-      }
-
-      childProcess.stdout?.on('data', (data: Buffer) => {
-        const text = data.toString()
-        stdout += text
-        console.log(`[chord_cli stdout] ${text}`)
-      })
-
-      childProcess.stderr?.on('data', (data: Buffer) => {
-        const text = data.toString()
-        stderr += text
-        console.error(`[chord_cli stderr] ${text}`)
-      })
-
-      childProcess.on('error', (error) => {
-        console.error('[MaterialDecompose] Failed to start process:', error)
-        safeReject(new Error(`无法启动 chord_cli.exe 引擎: ${error.message}`))
-      })
-
-      childProcess.on('exit', async (code, signal) => {
-        cleanup()
-
-        if (isResolved) return
-
-        if (code === 0) {
-          // 分解成功，检查输出文件
-          try {
-            const results: {
-              success: boolean
-              basecolor?: string
-              metalness?: string
-              normal?: string
-              roughness?: string
-              error?: string
-            } = {
-              success: true,
-            }
-
-            // 查找输出目录中的文件
-            // chord_cli.exe 通常会在输出目录中生成以下文件：
-            // - basecolor.png 或 basecolor_*.png 或 <inputname>_basecolor.png
-            // - metalness.png 或 metalness_*.png (或 metallic.png)
-            // - normal.png 或 normal_*.png
-            // - roughness.png 或 roughness_*.png
-            // 文件可能在子目录中（如 <inputname>/basecolor.png）
-            if (existsSync(outputDir)) {
-              // 递归查找所有图片文件
-              const findAllImageFiles = async (dir: string): Promise<string[]> => {
-                const files: string[] = []
-                const entries = await fs.readdir(dir, { withFileTypes: true })
-                
-                for (const entry of entries) {
-                  const fullPath = join(dir, entry.name)
-                  if (entry.isDirectory()) {
-                    // 递归查找子目录
-                    const subFiles = await findAllImageFiles(fullPath)
-                    files.push(...subFiles)
-                  } else if (entry.isFile()) {
-                    // 只包含图片文件
-                    const ext = extname(entry.name).toLowerCase()
-                    if (['.png', '.jpg', '.jpeg', '.bmp', '.webp'].includes(ext)) {
-                      files.push(fullPath)
-                    }
-                  }
-                }
-                
-                return files
-              }
-              
-              const allFiles = await findAllImageFiles(outputDir)
-              
-              console.log(`[MaterialDecompose] Found ${allFiles.length} image files in output directory:`)
-              allFiles.forEach(f => console.log(`  - ${f}`))
-
-              // 获取文件扩展名以确定 MIME 类型
-              const getMimeType = (filePath: string): string => {
-                const ext = extname(filePath).toLowerCase()
-                switch (ext) {
-                  case '.png':
-                    return 'image/png'
-                  case '.jpg':
-                  case '.jpeg':
-                    return 'image/jpeg'
-                  case '.bmp':
-                    return 'image/bmp'
-                  case '.webp':
-                    return 'image/webp'
-                  default:
-                    return 'image/png'
-                }
-              }
-
-              // 直接按文件名查找（文件名格式：basecolor.png, metalness.png, normal.png, roughness.png）
-              const basecolorFile = allFiles.find(f => {
-                const name = basename(f).toLowerCase()
-                return name === 'basecolor.png'
-              })
-              if (basecolorFile && existsSync(basecolorFile)) {
-                console.log(`[MaterialDecompose] Found basecolor file: ${basecolorFile}`)
-                const imageBuffer = await fs.readFile(basecolorFile)
-                const mimeType = getMimeType(basecolorFile)
-                results.basecolor = `data:${mimeType};base64,${imageBuffer.toString('base64')}`
-              }
-
-              const metalnessFile = allFiles.find(f => {
-                const name = basename(f).toLowerCase()
-                return name === 'metalness.png'
-              })
-              if (metalnessFile && existsSync(metalnessFile)) {
-                console.log(`[MaterialDecompose] Found metalness file: ${metalnessFile}`)
-                const imageBuffer = await fs.readFile(metalnessFile)
-                const mimeType = getMimeType(metalnessFile)
-                results.metalness = `data:${mimeType};base64,${imageBuffer.toString('base64')}`
-              }
-
-              const normalFile = allFiles.find(f => {
-                const name = basename(f).toLowerCase()
-                return name === 'normal.png'
-              })
-              if (normalFile && existsSync(normalFile)) {
-                console.log(`[MaterialDecompose] Found normal file: ${normalFile}`)
-                const imageBuffer = await fs.readFile(normalFile)
-                const mimeType = getMimeType(normalFile)
-                results.normal = `data:${mimeType};base64,${imageBuffer.toString('base64')}`
-              }
-
-              const roughnessFile = allFiles.find(f => {
-                const name = basename(f).toLowerCase()
-                return name === 'roughness.png'
-              })
-              if (roughnessFile && existsSync(roughnessFile)) {
-                console.log(`[MaterialDecompose] Found roughness file: ${roughnessFile}`)
-                const imageBuffer = await fs.readFile(roughnessFile)
-                const mimeType = getMimeType(roughnessFile)
-                results.roughness = `data:${mimeType};base64,${imageBuffer.toString('base64')}`
-              }
-
-              console.log(`[MaterialDecompose] Final results: basecolor=${!!results.basecolor}, metalness=${!!results.metalness}, normal=${!!results.normal}, roughness=${!!results.roughness}`)
-            }
-
-            const endTime = Date.now()
-            const duration = endTime - startTime
-            const durationSeconds = (duration / 1000).toFixed(2)
-            console.log(`[MaterialDecompose] Material decomposition completed in ${durationSeconds}s (${duration}ms)`)
-
-            // 清理临时输入目录
-            if (tempInputDir && existsSync(tempInputDir)) {
-              try {
-                await fs.rm(tempInputDir, { recursive: true, force: true })
-              } catch (cleanupError) {
-                console.warn(`[MaterialDecompose] Failed to cleanup temp input dir: ${cleanupError}`)
-              }
-            }
-
-            safeResolve(results)
-          } catch (error) {
-            console.error('[MaterialDecompose] Failed to read output images:', error)
-            
-            // 清理临时输入目录
-            if (tempInputDir && existsSync(tempInputDir)) {
-              try {
-                await fs.rm(tempInputDir, { recursive: true, force: true })
-              } catch (cleanupError) {
-                console.warn(`[MaterialDecompose] Failed to cleanup temp input dir: ${cleanupError}`)
-              }
-            }
-            
-            safeReject(new Error(`读取输出图片失败: ${error instanceof Error ? error.message : String(error)}`))
-          }
-        } else {
-          const wasCancelled = signal === 'SIGTERM' || signal === 'SIGKILL'
-          const endTime = Date.now()
-          const duration = endTime - startTime
-          const durationSeconds = (duration / 1000).toFixed(2)
-
-          // 清理临时输入目录
-          if (tempInputDir && existsSync(tempInputDir)) {
-            try {
-              await fs.rm(tempInputDir, { recursive: true, force: true })
-            } catch (cleanupError) {
-              console.warn(`[MaterialDecompose] Failed to cleanup temp input dir: ${cleanupError}`)
-            }
-          }
-
-          if (wasCancelled) {
-            console.log(`[MaterialDecompose] Material decomposition cancelled after ${durationSeconds}s`)
-            safeReject(new Error('材质分解已取消'))
-          } else {
-            const errorMsg = stderr || stdout || `进程退出，代码: ${code}, 信号: ${signal}`
-            console.log(`[MaterialDecompose] Material decomposition failed after ${durationSeconds}s`)
-            safeReject(new Error(`材质分解失败: ${errorMsg}`))
-          }
-        }
-      })
-    })
-  } catch (error) {
-    // 清理临时输入目录（如果创建失败或发生其他错误）
-    if (tempInputDir && existsSync(tempInputDir)) {
-      try {
-        await fs.rm(tempInputDir, { recursive: true, force: true })
-      } catch (cleanupError) {
-        console.warn(`[MaterialDecompose] Failed to cleanup temp input dir: ${cleanupError}`)
-      }
-    }
-    
-    console.error('[MaterialDecompose] Failed to start material decomposition:', error)
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    throw new Error(`材质分解失败: ${errorMessage}`)
-  }
-})
 
 // 计算文件的快速采样哈希（智能多点采样）
 // 使用单个文件描述符读取所有采样点，减少系统调用
@@ -1412,7 +669,7 @@ function getSDCppExecutablePath(deviceType: DeviceType): string {
   const deviceFolder = join(engineFolder, deviceType)
   // 目前仅支持 Windows 平台
   // TODO: 未来如需支持其他平台，可在此处添加平台检测逻辑
-  const executableName = 'sd.exe'
+  const executableName = 'sd-cli.exe'
   return join(deviceFolder, executableName)
 }
 
@@ -1506,7 +763,7 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
     const previewImagePath = join(outputsDir, `preview_${timestamp}.png`)
 
     // 构建命令行参数
-    // 根据 sd.exe 的参数要求：
+    // 根据 sd-cli.exe 的参数要求：
     // 必需参数：model_path/diffusion_model (位置参数) 或 --diffusion-model <string>
     // 使用 --diffusion-model 参数指定扩散模型路径
     const args: string[] = [
@@ -1533,7 +790,7 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
           args.push('--llm', llmModelPath)
         }
       }
-      // 注意：根据 sd.exe 的帮助，还可能需要 clip_l, clip_g, clip_vision, t5xxl 等
+      // 注意：根据 sd-cli.exe 的帮助，还可能需要 clip_l, clip_g, clip_vision, t5xxl 等
       // 可以根据具体模型类型进一步扩展
     }
 
@@ -2035,21 +1292,68 @@ async function findAllGeneratedImages(): Promise<GeneratedImageInfo[]> {
 
   // 支持的图片格式
   const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']
+  // 支持的视频格式
+  const videoExtensions = ['.mp4', '.webm', '.avi', '.mov', '.mkv', '.flv', '.wmv']
   
   const entries = await fs.readdir(outputsFolder, { withFileTypes: true })
   
   for (const entry of entries) {
     if (entry.isFile()) {
       const ext = extname(entry.name).toLowerCase()
-      if (imageExtensions.includes(ext)) {
+      const fileName = entry.name.toLowerCase()
+      
+      // 判断是否为图片或视频
+      const isImage = imageExtensions.includes(ext)
+      const isVideo = videoExtensions.includes(ext)
+      
+      if (isImage || isVideo) {
         const filePath = join(outputsFolder, entry.name)
         const stats = await fs.stat(filePath)
-        const metadataPath = filePath.replace(/\.(png|jpg|jpeg|gif|bmp|webp)$/i, '.json')
-        let metadata: any = {}
         
-        if (existsSync(metadataPath)) {
-          const metadataContent = await fs.readFile(metadataPath, 'utf-8')
-          metadata = JSON.parse(metadataContent)
+        // 根据文件名判断生成类型
+        let generationType: 'generate' | 'edit' | 'video' | undefined = undefined
+        if (fileName.startsWith('generated_')) {
+          generationType = 'generate'
+        } else if (fileName.startsWith('edited_') || fileName.startsWith('edit_')) {
+          generationType = 'edit'
+        } else if (fileName.startsWith('video_')) {
+          generationType = 'video'
+        }
+        
+        // 如果没有从文件名判断出类型，根据媒体类型推断
+        if (!generationType) {
+          if (isVideo) {
+            generationType = 'video'
+          } else {
+            generationType = 'generate'  // 默认为图片生成
+          }
+        }
+        
+        // 确定媒体类型
+        const mediaType: 'image' | 'video' = isVideo ? 'video' : 'image'
+        
+        // 查找元数据文件
+        let metadata: any = {}
+        if (isImage) {
+          const metadataPath = filePath.replace(/\.(png|jpg|jpeg|gif|bmp|webp)$/i, '.json')
+          if (existsSync(metadataPath)) {
+            try {
+              const metadataContent = await fs.readFile(metadataPath, 'utf-8')
+              metadata = JSON.parse(metadataContent)
+            } catch (error) {
+              console.error(`Failed to parse metadata for ${entry.name}:`, error)
+            }
+          }
+        } else if (isVideo) {
+          const metadataPath = filePath.replace(/\.(mp4|webm|avi|mov|mkv|flv|wmv)$/i, '.json')
+          if (existsSync(metadataPath)) {
+            try {
+              const metadataContent = await fs.readFile(metadataPath, 'utf-8')
+              metadata = JSON.parse(metadataContent)
+            } catch (error) {
+              console.error(`Failed to parse metadata for ${entry.name}:`, error)
+            }
+          }
         }
         
         images.push({
@@ -2057,6 +1361,8 @@ async function findAllGeneratedImages(): Promise<GeneratedImageInfo[]> {
           path: filePath,
           size: stats.size,
           modified: stats.mtimeMs,
+          type: generationType,
+          mediaType: mediaType,
           ...metadata,
         })
       }
@@ -2069,55 +1375,74 @@ async function findAllGeneratedImages(): Promise<GeneratedImageInfo[]> {
   return images
 }
 
-// IPC 处理程序：列出所有已生成的图片
+// IPC 处理程序：列出所有已生成的图片和视频
 ipcMain.handle('generated-images:list', async () => {
   const images = await findAllGeneratedImages()
   const imagesWithPreview = await Promise.all(
     images.map(async (image) => {
+      // 只对图片生成预览，视频不生成预览
+      if (image.mediaType === 'video') {
+        return image
+      }
+      
       const stats = await fs.stat(image.path)
       if (stats.size > 5 * 1024 * 1024) {
         return image
       }
       
-      const imageBuffer = await fs.readFile(image.path)
-      return {
-        ...image,
-        previewImage: imageBuffer.toString('base64'),
+      try {
+        const imageBuffer = await fs.readFile(image.path)
+        return {
+          ...image,
+          previewImage: imageBuffer.toString('base64'),
+        }
+      } catch (error) {
+        console.error(`Failed to read preview for ${image.name}:`, error)
+        return image
       }
     })
   )
   return imagesWithPreview
 })
 
-// IPC 处理程序：下载图片
-ipcMain.handle('generated-images:download', async (_, imagePath: string) => {
+// IPC 处理程序：下载图片或视频
+ipcMain.handle('generated-images:download', async (_, filePath: string) => {
   const window = win || BrowserWindow.getFocusedWindow()
   if (!window) {
     throw new Error('没有可用的窗口')
   }
   
-  const fileName = basename(imagePath)
+  const fileName = basename(filePath)
+  const ext = extname(filePath).toLowerCase()
+  const isVideo = ['.mp4', '.webm', '.avi', '.mov', '.mkv', '.flv', '.wmv'].includes(ext)
+  
   const result = await dialog.showSaveDialog(window, {
-    title: '保存图片',
+    title: isVideo ? '保存视频' : '保存图片',
     defaultPath: fileName,
-    filters: [
-      { name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'] },
-      { name: '所有文件', extensions: ['*'] },
-    ],
+    filters: isVideo
+      ? [
+          { name: '视频文件', extensions: ['mp4', 'webm', 'avi', 'mov', 'mkv', 'flv', 'wmv'] },
+          { name: '所有文件', extensions: ['*'] },
+        ]
+      : [
+          { name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'] },
+          { name: '所有文件', extensions: ['*'] },
+        ],
   })
   
   if (!result.canceled && result.filePath) {
-    await fs.copyFile(imagePath, result.filePath)
+    await fs.copyFile(filePath, result.filePath)
     return true
   }
   return false
 })
 
-// IPC 处理程序：删除图片
-ipcMain.handle('generated-images:delete', async (_, imagePath: string) => {
-  await fs.unlink(imagePath)
+// IPC 处理程序：删除图片或视频
+ipcMain.handle('generated-images:delete', async (_, filePath: string) => {
+  await fs.unlink(filePath)
   
-  const metadataPath = imagePath.replace(/\.(png|jpg|jpeg|gif|bmp|webp)$/i, '.json')
+  // 删除对应的元数据文件
+  const metadataPath = filePath.replace(/\.(png|jpg|jpeg|gif|bmp|webp|mp4|webm|avi|mov|mkv|flv|wmv)$/i, '.json')
   if (existsSync(metadataPath)) {
     await fs.unlink(metadataPath)
   }
@@ -2132,18 +1457,18 @@ ipcMain.handle('generated-images:get-preview', async (_, imagePath: string) => {
 })
 
 // IPC 处理程序：批量下载并打包为 ZIP
-ipcMain.handle('generated-images:batch-download', async (_, imagePaths: string[]) => {
+ipcMain.handle('generated-images:batch-download', async (_, filePaths: string[]) => {
   const window = win || BrowserWindow.getFocusedWindow()
   if (!window) {
     throw new Error('没有可用的窗口')
   }
   
-  if (!imagePaths || imagePaths.length === 0) {
-    throw new Error('没有选择要下载的图片')
+  if (!filePaths || filePaths.length === 0) {
+    throw new Error('没有选择要下载的文件')
   }
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5)
-  const defaultZipName = `generated-images-${timestamp}.zip`
+  const defaultZipName = `generated-files-${timestamp}.zip`
   
   const result = await dialog.showSaveDialog(window, {
     title: '保存压缩包',
@@ -2217,10 +1542,10 @@ ipcMain.handle('generated-images:batch-download', async (_, imagePaths: string[]
       // 将输出流管道连接到归档
       archive.pipe(output)
 
-      // 添加所有图片文件到 ZIP
-      for (const imagePath of imagePaths) {
-        const fileName = basename(imagePath)
-        archive.file(imagePath, { name: fileName })
+      // 添加所有文件到 ZIP
+      for (const filePath of filePaths) {
+        const fileName = basename(filePath)
+        archive.file(filePath, { name: fileName })
       }
 
       archive.finalize()

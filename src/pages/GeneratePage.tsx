@@ -403,7 +403,12 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
       }
       setLoading(true);
       const groups = await window.ipcRenderer.invoke('model-groups:list');
-      setModelGroups(groups || []);
+      // 过滤模型组：只显示 taskType 为 'generate' 或 'all' 的模型组
+      const filteredGroups = (groups || []).filter((group: any) => {
+        const taskType = group.taskType || 'all';
+        return taskType === 'generate' || taskType === 'all';
+      });
+      setModelGroups(filteredGroups);
     } catch (error) {
       console.error('Failed to load model groups:', error);
       setModelGroups([]);
