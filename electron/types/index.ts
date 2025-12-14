@@ -18,11 +18,17 @@ export interface WeightFile {
 }
 
 /**
+ * 任务类型
+ */
+export type TaskType = 'generate' | 'edit' | 'video' | 'all';
+
+/**
  * 模型组接口
  */
 export interface ModelGroup {
   id: string;
   name: string;
+  taskType?: TaskType;  // 任务类型：generate（图片生成）、edit（图片编辑）、video（视频生成）、all（所有任务）
   sdModel?: string;  // SD模型路径
   vaeModel?: string;  // VAE模型路径
   llmModel?: string;  // LLM/CLIP模型路径
@@ -70,6 +76,16 @@ export interface GenerateImageParams {
 }
 
 /**
+ * 生成类型
+ */
+export type GenerationType = 'generate' | 'edit' | 'video';
+
+/**
+ * 媒体类型
+ */
+export type MediaType = 'image' | 'video';
+
+/**
  * 已生成图片信息
  */
 export interface GeneratedImageInfo {
@@ -79,6 +95,8 @@ export interface GeneratedImageInfo {
   modified: number;
   width?: number;
   height?: number;
+  type?: GenerationType;  // 生成类型：generate（图片生成）、edit（图片编辑）、video（视频生成）
+  mediaType?: MediaType;  // 媒体类型：image（图片）、video（视频）
   prompt?: string;
   negativePrompt?: string;
   steps?: number;

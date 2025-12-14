@@ -9,6 +9,16 @@
 export type PreviewMethod = 'proj' | 'tae' | 'vae' | 'none';
 
 /**
+ * 生成类型
+ */
+export type GenerationType = 'generate' | 'edit' | 'video';
+
+/**
+ * 媒体类型
+ */
+export type MediaType = 'image' | 'video';
+
+/**
  * 生成的图片元数据
  */
 export interface GeneratedImageMetadata {
@@ -19,6 +29,10 @@ export interface GeneratedImageMetadata {
   modified: number;
   width?: number;
   height?: number;
+  
+  // 类型信息
+  type?: GenerationType;  // 生成类型：generate（图片生成）、edit（图片编辑）、video（视频生成）
+  mediaType?: MediaType;  // 媒体类型：image（图片）、video（视频）
   
   // 提示词
   prompt?: string;

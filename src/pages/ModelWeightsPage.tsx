@@ -102,9 +102,12 @@ interface WeightFile {
   modified: number;
 }
 
+type TaskType = 'generate' | 'edit' | 'video' | 'all';
+
 interface ModelGroup {
   id: string;
   name: string;
+  taskType?: TaskType;  // 任务类型：generate（图片生成）、edit（图片编辑）、video（视频生成）、all（所有任务）
   sdModel?: string;
   vaeModel?: string;
   llmModel?: string;
@@ -151,6 +154,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
   const [groupDefaultSamplingMethod, setGroupDefaultSamplingMethod] = useState<string>('euler_a');
   const [groupDefaultScheduler, setGroupDefaultScheduler] = useState<string>('discrete');
   const [groupDefaultSeed, setGroupDefaultSeed] = useState<string>('');
+  const [groupTaskType, setGroupTaskType] = useState<TaskType>('all');
 
   // 加载权重文件夹路径
   useEffect(() => {
@@ -344,6 +348,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     setGroupDefaultSamplingMethod('euler_a');
     setGroupDefaultScheduler('discrete');
     setGroupDefaultSeed('');
+    setGroupTaskType('all');
     setGroupDialogOpen(true);
   };
 
@@ -360,6 +365,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     setGroupDefaultSamplingMethod(group.defaultSamplingMethod || 'euler_a');
     setGroupDefaultScheduler(group.defaultScheduler || 'discrete');
     setGroupDefaultSeed(group.defaultSeed !== undefined && group.defaultSeed >= 0 ? group.defaultSeed.toString() : '');
+    setGroupTaskType(group.taskType || 'all');
     setGroupDialogOpen(true);
   };
 
@@ -390,6 +396,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
       if (editingGroup) {
         await window.ipcRenderer.invoke('model-groups:update', editingGroup.id, {
           name: groupName.trim(),
+          taskType: groupTaskType,
           sdModel: groupSdModel || undefined,
           vaeModel: groupVaeModel || undefined,
           llmModel: groupLlmModel || undefined,
@@ -405,6 +412,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
         // 创建新组
         await window.ipcRenderer.invoke('model-groups:create', {
           name: groupName.trim(),
+          taskType: groupTaskType,
           sdModel: groupSdModel || undefined,
           vaeModel: groupVaeModel || undefined,
           llmModel: groupLlmModel || undefined,
@@ -564,6 +572,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
               <TableHeader>
                 <TableRow>
                   <TableHeaderCell>组名称</TableHeaderCell>
+                  <TableHeaderCell>任务类型</TableHeaderCell>
                   <TableHeaderCell>SD模型</TableHeaderCell>
                   <TableHeaderCell>VAE模型</TableHeaderCell>
                   <TableHeaderCell>LLM模型</TableHeaderCell>
@@ -571,10 +580,28 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {modelGroups.map((group) => (
+                {modelGroups.map((group) => {
+                  const getTaskTypeLabel = (taskType?: TaskType) => {
+                    switch (taskType) {
+                      case 'generate':
+                        return '图片生成';
+                      case 'edit':
+                        return '图片编辑';
+                      case 'video':
+                        return '视频生成';
+                      case 'all':
+                      default:
+                        return '所有任务';
+                    }
+                  };
+                  
+                  return (
                   <TableRow key={group.id}>
                     <TableCell>
                       <Body1>{group.name}</Body1>
+                    </TableCell>
+                    <TableCell>
+                      <Body1>{getTaskTypeLabel(group.taskType)}</Body1>
                     </TableCell>
                     <TableCell>
                       <Tooltip content={getModelFileName(group.sdModel)} relationship="label">
@@ -619,7 +646,8 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
@@ -734,6 +762,22 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                     onChange={(_, data) => setGroupName(data.value)}
                     placeholder="请输入模型组名称"
                   />
+                </Field>
+                <Field label="任务类型" hint="选择此模型组可用于哪些任务">
+                  <Dropdown
+                    value={groupTaskType === 'all' ? '所有任务' : groupTaskType === 'generate' ? '图片生成' : groupTaskType === 'edit' ? '图片编辑' : '视频生成'}
+                    selectedOptions={[groupTaskType]}
+                    onOptionSelect={(_, data) => {
+                      if (data.optionValue) {
+                        setGroupTaskType(data.optionValue as TaskType);
+                      }
+                    }}
+                  >
+                    <Option value="all">所有任务</Option>
+                    <Option value="generate">图片生成</Option>
+                    <Option value="edit">图片编辑</Option>
+                    <Option value="video">视频生成</Option>
+                  </Dropdown>
                 </Field>
                 <Field label="SD模型（必选）">
                   <Dropdown
