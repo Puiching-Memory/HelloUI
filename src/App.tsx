@@ -11,6 +11,7 @@ import { GeneratePage } from './pages/GeneratePage';
 import { EditImagePage } from './pages/EditImagePage';
 import { GeneratedImagesPage } from './pages/GeneratedImagesPage';
 import { VideoGeneratePage } from './pages/VideoGeneratePage';
+import { ImageUpscalePage } from './pages/ImageUpscalePage';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -92,6 +93,8 @@ function App() {
             <GeneratedImagesPage />
           ) : currentPage === 'video-generate' ? (
             <VideoGeneratePage />
+          ) : currentPage === 'image-upscale' ? (
+            <ImageUpscalePage />
           ) : (
             renderPage()
           )}
