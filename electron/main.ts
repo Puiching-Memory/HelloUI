@@ -711,7 +711,8 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
       vaeOnCpu = false,
       diffusionConvDirect = false,
       vaeConvDirect = false,
-      vaeTiling = false
+      vaeTiling = false,
+      inputImage
     } = params
 
     // 确定使用的模型路径
@@ -796,6 +797,17 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
 
     if (negativePrompt) {
       args.push('--negative-prompt', negativePrompt)
+    }
+
+    // 添加输入图片（用于图片编辑和上采样）
+    if (inputImage) {
+      const inputImagePath = resolve(inputImage)
+      if (existsSync(inputImagePath)) {
+        args.push('--input-image', inputImagePath)
+        console.log(`[Generate] Input image: ${inputImagePath}`)
+      } else {
+        throw new Error(`输入图片文件不存在: ${inputImagePath}`)
+      }
     }
 
     args.push('--output', outputImagePath)
@@ -1276,6 +1288,488 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
     // 注意：如果进程已经在 Promise 中启动，它会在 Promise 的 reject 处理中被终止
     // 但如果错误发生在 spawn 之前，则不需要终止进程
     throw new Error(`生成图片失败: ${errorMessage}`)
+  }
+})
+
+// ========== 视频生成相关 IPC 处理程序 ==========
+
+// IPC 处理程序：取消视频生成
+ipcMain.handle('generate-video:cancel', async () => {
+  if (currentGenerateProcess && !currentGenerateProcess.killed) {
+    if (currentGenerateKill) {
+      currentGenerateKill()
+    }
+    return true
+  }
+  return false
+})
+
+// IPC 处理程序：开始视频生成
+ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams & { frames?: number; fps?: number }) => {
+  try {
+    const { 
+      groupId, 
+      modelPath, 
+      deviceType, 
+      prompt, 
+      negativePrompt = '',
+      steps = 20,
+      width = 512,
+      height = 512,
+      cfgScale = 7.0,
+      samplingMethod,
+      scheduler,
+      seed,
+      batchCount = 1,
+      threads,
+      preview,
+      previewInterval = 1,
+      verbose = false,
+      color = false,
+      offloadToCpu = false,
+      diffusionFa = false,
+      controlNetCpu = false,
+      clipOnCpu = false,
+      vaeOnCpu = false,
+      diffusionConvDirect = false,
+      vaeConvDirect = false,
+      vaeTiling = false,
+      frames = 16, // 视频帧数
+      fps = 8 // 帧率
+    } = params
+
+    // 确定使用的模型路径
+    let sdModelPath: string | undefined
+
+    if (groupId) {
+      const groups = await loadModelGroups()
+      const group = groups.find(g => g.id === groupId)
+      if (!group) {
+        throw new Error(`模型组不存在: ${groupId}`)
+      }
+      if (!group.sdModel) {
+        throw new Error('模型组中未配置SD模型')
+      }
+      sdModelPath = resolveModelPath(group.sdModel)
+      
+      if (!existsSync(sdModelPath)) {
+        throw new Error(`SD模型文件不存在: ${sdModelPath}`)
+      }
+    } else if (modelPath) {
+      sdModelPath = resolveModelPath(modelPath)
+      if (!existsSync(sdModelPath)) {
+        throw new Error(`模型文件不存在: ${sdModelPath}`)
+      }
+    } else {
+      throw new Error('必须提供模型组ID或模型路径')
+    }
+
+    // 获取 SD.cpp 可执行文件路径
+    const sdExePath = getSDCppExecutablePath(deviceType)
+    if (!existsSync(sdExePath)) {
+      throw new Error(`SD.cpp 引擎文件不存在: ${sdExePath}\n请确保已正确安装 ${deviceType.toUpperCase()} 版本的 SD.cpp 引擎`)
+    }
+
+    // 生成输出视频路径（保存在运行路径下的 outputs 目录）
+    const outputsDir = getDefaultOutputsFolder()
+    if (!existsSync(outputsDir)) {
+      await fs.mkdir(outputsDir, { recursive: true })
+    }
+
+    const timestamp = Date.now()
+    const outputVideoPath = join(outputsDir, `video_${timestamp}.mp4`)
+    const outputMetadataPath = join(outputsDir, `video_${timestamp}.json`)
+
+    // 构建命令行参数
+    // 注意：sdcpp 主要是图像生成，这里创建一个框架
+    // 实际视频生成可能需要其他工具或扩展的 sdcpp 功能
+    const args: string[] = [
+      '--diffusion-model', sdModelPath,
+      '--prompt', prompt,
+    ]
+    
+    // 添加 VAE 和 LLM 模型支持
+    if (groupId) {
+      const groups = await loadModelGroups()
+      const group = groups.find(g => g.id === groupId)
+      if (group?.vaeModel) {
+        const vaeModelPath = resolveModelPath(group.vaeModel)
+        if (existsSync(vaeModelPath)) {
+          args.push('--vae', vaeModelPath)
+        }
+      }
+      if (group?.llmModel) {
+        const llmModelPath = resolveModelPath(group.llmModel)
+        if (existsSync(llmModelPath)) {
+          args.push('--llm', llmModelPath)
+        }
+      }
+    }
+
+    if (negativePrompt) {
+      args.push('--negative-prompt', negativePrompt)
+    }
+
+    // 注意：sdcpp 默认输出图片，视频生成需要额外的处理
+    // 这里先输出为图片序列，然后可以转换为视频
+    const outputImagePath = join(outputsDir, `video_${timestamp}_frame.png`)
+    args.push('--output', outputImagePath)
+
+    // 添加高级参数（与图片生成相同）
+    if (steps !== 20) {
+      args.push('--steps', steps.toString())
+    }
+    if (width !== 512) {
+      args.push('--width', width.toString())
+    }
+    if (height !== 512) {
+      args.push('--height', height.toString())
+    }
+    if (Math.abs(cfgScale - 7.0) > 0.0001) {
+      args.push('--cfg-scale', cfgScale.toString())
+    }
+
+    if (samplingMethod && typeof samplingMethod === 'string' && samplingMethod.trim() !== '') {
+      args.push('--sampling-method', samplingMethod.trim())
+    }
+
+    if (scheduler && typeof scheduler === 'string' && scheduler.trim() !== '') {
+      args.push('--schedule', scheduler.trim())
+    }
+
+    if (seed !== undefined && seed >= 0) {
+      args.push('--seed', seed.toString())
+    }
+
+    if (batchCount !== undefined && batchCount > 1) {
+      args.push('--batch-count', batchCount.toString())
+    }
+
+    if (threads !== undefined && threads > 0) {
+      args.push('--threads', threads.toString())
+    }
+
+    if (preview && preview !== 'none' && preview.trim() !== '') {
+      const previewImagePath = join(outputsDir, `preview_video_${timestamp}.png`)
+      args.push('--preview', preview.trim())
+      args.push('--preview-path', resolve(previewImagePath))
+      if (previewInterval !== undefined && previewInterval > 1) {
+        args.push('--preview-interval', previewInterval.toString())
+      }
+    }
+
+    if (verbose === true) {
+      args.push('--verbose')
+    }
+
+    if (color === true) {
+      args.push('--color')
+    }
+
+    if (offloadToCpu === true) {
+      args.push('--offload-to-cpu')
+    }
+
+    if (diffusionFa === true) {
+      args.push('--diffusion-fa')
+    }
+
+    if (controlNetCpu === true) {
+      args.push('--control-net-cpu')
+    }
+
+    if (clipOnCpu === true) {
+      args.push('--clip-on-cpu')
+    }
+
+    if (vaeOnCpu === true) {
+      args.push('--vae-on-cpu')
+    }
+
+    if (diffusionConvDirect === true) {
+      args.push('--diffusion-conv-direct')
+    }
+
+    if (vaeConvDirect === true) {
+      args.push('--vae-conv-direct')
+    }
+
+    if (vaeTiling === true) {
+      args.push('--vae-tiling')
+    }
+
+    console.log(`[Generate Video] Starting video generation: ${sdExePath}`)
+    console.log(`[Generate Video] Command line arguments: ${args.join(' ')}`)
+    console.log(`[Generate Video] Frames: ${frames}, FPS: ${fps}`)
+
+    const startTime = Date.now()
+
+    event.sender.send('generate-video:progress', { progress: '正在启动 SD.cpp 引擎...' })
+
+    return new Promise((resolvePromise, reject) => {
+      const escapeShellArg = (arg: string): string => {
+        return `"${arg.replace(/"/g, '""')}"`
+      }
+
+      const spawnOptions: Parameters<typeof spawn>[2] = {
+        cwd: dirname(sdExePath),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }
+
+      const escapedExePath = escapeShellArg(sdExePath)
+      const escapedArgs = args.map(escapeShellArg)
+      const command = `chcp 65001 >nul && ${escapedExePath} ${escapedArgs.join(' ')}`
+      spawnOptions.shell = true
+      const childProcess = spawn(command, [], spawnOptions)
+
+      let stdout = ''
+      let stderr = ''
+      let isResolved = false
+      
+      const resourceManager = new ResourceManager()
+      const operationGuard = new AsyncOperationGuard()
+
+      let killTimeout: NodeJS.Timeout | null = null
+
+      currentGenerateProcess = childProcess
+
+      const killProcess = () => {
+        if (childProcess && !childProcess.killed && childProcess.pid) {
+          if (killTimeout) {
+            clearTimeout(killTimeout)
+            killTimeout = null
+          }
+
+          const pid = childProcess.pid
+          console.log(`[Generate Video] Attempting to kill process tree (PID: ${pid})`)
+          
+          if (process.platform === 'win32') {
+            exec(`taskkill /F /T /PID ${pid}`, (error) => {
+              if (error) {
+                console.warn(`[Generate Video] Failed to kill process tree by PID: ${error.message}`)
+                const exeName = basename(sdExePath)
+                exec(`taskkill /F /T /IM ${exeName}`, (nameError) => {
+                  if (nameError) {
+                    console.warn(`[Generate Video] Failed to kill process by name: ${nameError.message}`)
+                  }
+                })
+              }
+            })
+          } else {
+            childProcess.kill('SIGTERM')
+            killTimeout = setTimeout(() => {
+              if (childProcess && !childProcess.killed && childProcess.pid) {
+                childProcess.kill('SIGKILL')
+              }
+              killTimeout = null
+            }, 3000)
+          }
+        }
+      }
+
+      currentGenerateKill = killProcess
+
+      const cleanup = () => {
+        operationGuard.invalidate()
+        if (killTimeout) {
+          clearTimeout(killTimeout)
+          killTimeout = null
+        }
+        resourceManager.cleanupAll()
+        if (currentGenerateProcess === childProcess) {
+          currentGenerateProcess = null
+          currentGenerateKill = null
+        }
+      }
+
+      const cleanupExceptKillTimeout = () => {
+        operationGuard.invalidate()
+        resourceManager.cleanupAll()
+      }
+
+      const safeReject = (error: Error) => {
+        if (!isResolved) {
+          isResolved = true
+          killProcess()
+          cleanupExceptKillTimeout()
+          reject(error)
+        }
+      }
+
+      const safeResolve = (value: any) => {
+        if (!isResolved) {
+          isResolved = true
+          cleanup()
+          resolvePromise(value)
+        }
+      }
+
+      childProcess.stdout?.on('data', (data: Buffer) => {
+        const text = data.toString()
+        stdout += text
+        console.log(`[SD.cpp stdout] ${text}`)
+        
+        if (!operationGuard.check() || event.sender.isDestroyed()) {
+          return
+        }
+        
+        event.sender.send('generate-video:cli-output', { type: 'stdout', text })
+        
+        const progressMatch = text.match(/progress[:\s]+(\d+)%/i)
+        if (progressMatch) {
+          event.sender.send('generate-video:progress', { progress: `生成中... ${progressMatch[1]}%` })
+        } else if (text.includes('Generating') || text.includes('generating')) {
+          event.sender.send('generate-video:progress', { progress: '正在生成视频...' })
+        } else if (text.includes('Loading') || text.includes('loading')) {
+          event.sender.send('generate-video:progress', { progress: '正在加载模型...' })
+        }
+      })
+
+      childProcess.stderr?.on('data', (data: Buffer) => {
+        const text = data.toString()
+        stderr += text
+        console.error(`[SD.cpp stderr] ${text}`)
+        
+        if (!operationGuard.check() || event.sender.isDestroyed()) {
+          return
+        }
+        
+        event.sender.send('generate-video:cli-output', { type: 'stderr', text })
+      })
+
+      childProcess.on('error', (error) => {
+        console.error('[Generate Video] Failed to start process:', error)
+        event.sender.send('generate-video:progress', { progress: `错误: ${error.message}` })
+        safeReject(new Error(`无法启动 SD.cpp 引擎: ${error.message}`))
+      })
+
+      childProcess.on('exit', async (code, signal) => {
+        cleanup()
+
+        if (isResolved) return
+
+        if (code === 0) {
+          // 生成成功
+          // 注意：sdcpp 主要生成图片，这里需要将图片序列转换为视频
+          // 目前先返回生成的图片，后续可以扩展为真正的视频生成
+          if (existsSync(outputImagePath)) {
+            try {
+              const endTime = Date.now()
+              const duration = endTime - startTime
+              
+              let groupName: string | undefined
+              let vaeModelPath: string | undefined
+              let llmModelPath: string | undefined
+              
+              if (groupId) {
+                const groups = await loadModelGroups()
+                const group = groups.find(g => g.id === groupId)
+                if (group) {
+                  groupName = group.name
+                  vaeModelPath = group.vaeModel
+                  llmModelPath = group.llmModel
+                }
+              }
+              
+              // 保存生成参数元数据
+              const metadata = {
+                prompt,
+                negativePrompt,
+                steps,
+                width,
+                height,
+                cfgScale,
+                deviceType,
+                groupId: groupId || null,
+                groupName: groupName || null,
+                modelPath: sdModelPath,
+                vaeModelPath: vaeModelPath || null,
+                llmModelPath: llmModelPath || null,
+                timestamp,
+                generatedAt: new Date().toISOString(),
+                samplingMethod: samplingMethod || null,
+                scheduler: scheduler || null,
+                seed: seed !== undefined ? seed : null,
+                batchCount,
+                threads: threads !== undefined ? threads : null,
+                preview: preview || null,
+                previewInterval: previewInterval || null,
+                verbose,
+                color,
+                offloadToCpu,
+                diffusionFa,
+                controlNetCpu,
+                clipOnCpu,
+                vaeOnCpu,
+                diffusionConvDirect,
+                vaeConvDirect,
+                vaeTiling,
+                frames,
+                fps,
+                commandLine: args.join(' '),
+                duration,
+                type: 'video' as const,
+                mediaType: 'video' as const,
+              }
+              
+              await fs.writeFile(outputMetadataPath, JSON.stringify(metadata, null, 2), 'utf-8')
+              
+              // 注意：目前 sdcpp 生成的是图片，需要转换为视频
+              // 这里先返回图片路径，后续可以扩展为真正的视频生成
+              // 暂时将图片复制为视频文件（实际应该使用 ffmpeg 等工具转换）
+              if (existsSync(outputImagePath)) {
+                // 暂时使用图片路径，后续可以扩展为视频转换
+                const videoBuffer = await fs.readFile(outputImagePath)
+                const base64Video = `data:image/png;base64,${videoBuffer.toString('base64')}`
+                
+                const durationSeconds = (duration / 1000).toFixed(2)
+                console.log(`[Generate Video] Video generation completed in ${durationSeconds}s (${duration}ms)`)
+                
+                event.sender.send('generate-video:progress', { 
+                  progress: `生成完成（耗时: ${durationSeconds}秒）`,
+                  video: base64Video 
+                })
+                
+                safeResolve({
+                  success: true,
+                  video: base64Video,
+                  videoPath: outputImagePath, // 暂时返回图片路径
+                  duration,
+                })
+              } else {
+                safeReject(new Error('生成完成但未找到输出文件'))
+              }
+            } catch (error) {
+              console.error('[Generate Video] Failed to read video:', error)
+              safeReject(new Error(`读取生成的视频失败: ${error instanceof Error ? error.message : String(error)}`))
+            }
+          } else {
+            safeReject(new Error('生成完成但未找到输出文件'))
+          }
+        } else {
+          const endTime = Date.now()
+          const duration = endTime - startTime
+          const durationSeconds = (duration / 1000).toFixed(2)
+          
+          const wasCancelled = signal === 'SIGTERM' || signal === 'SIGKILL'
+          
+          if (wasCancelled) {
+            console.log(`[Generate Video] Video generation cancelled after ${durationSeconds}s (${duration}ms)`)
+            event.sender.send('generate-video:progress', { progress: `生成已取消（耗时: ${durationSeconds}秒）` })
+            safeReject(new Error('生成已取消'))
+          } else {
+            const errorMsg = stderr || stdout || `进程退出，代码: ${code}, 信号: ${signal}`
+            console.log(`[Generate Video] Video generation failed after ${durationSeconds}s (${duration}ms)`)
+            event.sender.send('generate-video:progress', { progress: `生成失败: ${errorMsg}（耗时: ${durationSeconds}秒）` })
+            safeReject(new Error(`视频生成失败: ${errorMsg}`))
+          }
+        }
+      })
+    })
+  } catch (error) {
+    console.error('[Generate Video] Failed to generate video:', error)
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    throw new Error(`生成视频失败: ${errorMessage}`)
   }
 })
 

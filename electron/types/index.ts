@@ -73,6 +73,7 @@ export interface GenerateImageParams {
   diffusionConvDirect?: boolean;  // 在扩散模型中使用ggml_conv2d_direct
   vaeConvDirect?: boolean;  // 在VAE模型中使用ggml_conv2d_direct
   vaeTiling?: boolean;  // 分块处理VAE以减少内存使用
+  inputImage?: string;  // 输入图片路径（用于图片编辑和上采样）
 }
 
 /**

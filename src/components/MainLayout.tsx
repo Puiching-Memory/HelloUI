@@ -14,6 +14,7 @@ import {
   ImageRegular,
   EditRegular,
   VideoClipRegular,
+  ZoomInRegular,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -83,7 +84,7 @@ const useStyles = makeStyles({
   },
 });
 
-export type PageType = 'home' | 'components' | 'settings' | 'weights' | 'sdcpp' | 'generate' | 'edit-image' | 'images' | 'video-generate';
+export type PageType = 'home' | 'components' | 'settings' | 'weights' | 'sdcpp' | 'generate' | 'edit-image' | 'images' | 'video-generate' | 'image-upscale';
 
 interface MainLayoutProps {
   currentPage: PageType;
@@ -123,14 +124,19 @@ export const MainLayout = ({ currentPage, onPageChange, children, navigationDisa
       icon: <EditRegular />,
     },
     {
-      id: 'images' as PageType,
-      label: '生成结果',
-      icon: <ImageRegular />,
-    },
-    {
       id: 'video-generate' as PageType,
       label: '视频生成',
       icon: <VideoClipRegular />,
+    },
+    {
+      id: 'image-upscale' as PageType,
+      label: '图像超分辨率',
+      icon: <ZoomInRegular />,
+    },
+    {
+      id: 'images' as PageType,
+      label: '生成结果',
+      icon: <ImageRegular />,
     },
     {
       id: 'components' as PageType,
@@ -172,7 +178,7 @@ export const MainLayout = ({ currentPage, onPageChange, children, navigationDisa
         {/* SD.cpp引擎功能页面组 */}
         <div className={styles.navGroup}>
           <div className={styles.navGroupTitle}>SD.cpp引擎</div>
-          {navItems.filter(item => ['weights', 'sdcpp', 'generate', 'edit-image', 'images', 'video-generate'].includes(item.id)).map((item) => (
+          {navItems.filter(item => ['weights', 'sdcpp', 'generate', 'edit-image', 'images', 'video-generate', 'image-upscale'].includes(item.id)).map((item) => (
             <Button
               key={item.id}
               appearance={currentPage === item.id ? 'primary' : 'subtle'}
@@ -188,7 +194,7 @@ export const MainLayout = ({ currentPage, onPageChange, children, navigationDisa
         </div>
 
         {/* 其他页面按钮 */}
-        {navItems.filter(item => !['home', 'weights', 'sdcpp', 'generate', 'edit-image', 'images', 'video-generate'].includes(item.id)).map((item) => (
+        {navItems.filter(item => !['home', 'weights', 'sdcpp', 'generate', 'edit-image', 'images', 'video-generate', 'image-upscale'].includes(item.id)).map((item) => (
           <Button
             key={item.id}
             appearance={currentPage === item.id ? 'primary' : 'subtle'}

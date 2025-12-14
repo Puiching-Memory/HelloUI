@@ -16,12 +16,15 @@ import {
   Text,
 } from '@fluentui/react-components';
 import {
-  VideoClipRegular,
+  ImageAddRegular,
   ChevronDownRegular,
   ChevronUpRegular,
   CopyRegular,
   DocumentArrowDownRegular,
+  ArrowUploadRegular,
+  DismissRegular,
 } from '@fluentui/react-icons';
+import { PhotoView } from 'react-photo-view';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
 
@@ -53,13 +56,15 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  previewVideo: {
+  previewImage: {
     width: 'auto',
     height: 'auto',
-    maxWidth: '50vw',
-    maxHeight: '50vh',
+    objectFit: 'contain',
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     borderRadius: tokens.borderRadiusMedium,
+    cursor: 'pointer',
+    maxWidth: '50vw',
+    maxHeight: '50vh',
   },
   emptyState: {
     textAlign: 'center',
@@ -213,12 +218,52 @@ const useStyles = makeStyles({
     textAlign: 'center',
     padding: tokens.spacingVerticalM,
   },
+  uploadSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+    padding: tokens.spacingVerticalM,
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: tokens.borderRadiusMedium,
+    border: `2px dashed ${tokens.colorNeutralStroke2}`,
+  },
+  uploadArea: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: tokens.spacingVerticalM,
+    padding: tokens.spacingVerticalXXL,
+    cursor: 'pointer',
+    borderRadius: tokens.borderRadiusMedium,
+    transition: 'background-color 0.2s',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground3,
+    },
+  },
+  uploadedImageContainer: {
+    position: 'relative',
+    display: 'inline-block',
+    marginTop: tokens.spacingVerticalM,
+  },
+  uploadedImage: {
+    maxWidth: '100%',
+    maxHeight: '400px',
+    objectFit: 'contain',
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: tokens.spacingVerticalXS,
+    right: tokens.spacingVerticalXS,
+    minWidth: 'auto',
+  },
 });
 
 interface ModelGroup {
   id: string;
   name: string;
-  taskType?: 'generate' | 'edit' | 'video' | 'all';
   sdModel?: string;
   vaeModel?: string;
   llmModel?: string;
@@ -235,9 +280,6 @@ interface ModelGroup {
 
 type DeviceType = 'cpu' | 'vulkan' | 'cuda';
 
-// 默认负面提示词（针对视频生成优化）
-const DEFAULT_NEGATIVE_PROMPT = '低质量, 最差质量, 模糊, 低分辨率, 闪烁, 不连贯, 跳帧, 手部错误, 脚部错误, 比例错误, 多余肢体, 缺失肢体, 水印';
-
 // 清理 ANSI 转义序列
 const stripAnsiCodes = (text: string): string => {
   return text
@@ -248,37 +290,38 @@ const stripAnsiCodes = (text: string): string => {
     .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
 };
 
-interface VideoGeneratePageProps {
+interface ImageUpscalePageProps {
   onGeneratingStateChange?: (isGenerating: boolean) => void;
 }
 
-export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePageProps) => {
+export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePageProps) => {
   const styles = useStyles();
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [deviceType, setDeviceType] = useState<DeviceType>('cuda');
   const [prompt, setPrompt] = useState<string>('');
-  const [negativePrompt, setNegativePrompt] = useState<string>(DEFAULT_NEGATIVE_PROMPT);
+  const [negativePrompt, setNegativePrompt] = useState<string>('');
   const [steps, setSteps] = useState<number>(20);
   const [width, setWidth] = useState<number>(512);
   const [height, setHeight] = useState<number>(512);
-  const [widthInput, setWidthInput] = useState<string>('512');
-  const [heightInput, setHeightInput] = useState<string>('512');
+  const [widthInput, setWidthInput] = useState<string>('');
+  const [heightInput, setHeightInput] = useState<string>('');
   const [cfgScale, setCfgScale] = useState<number>(7.0);
   const [modelGroups, setModelGroups] = useState<ModelGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [generatedVideo, setGeneratedVideo] = useState<string | null>(null);
+  const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [generationProgress, setGenerationProgress] = useState<string>('');
   const [cliOutput, setCliOutput] = useState<Array<{ type: 'stdout' | 'stderr'; text: string; timestamp: number }>>([]);
   const [cliOutputExpanded, setCliOutputExpanded] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
   const cliOutputRef = useRef<HTMLDivElement>(null);
   
-  // 视频生成特有参数
-  const [frames, setFrames] = useState<number>(16); // 视频帧数
-  const [fps, setFps] = useState<number>(8); // 帧率
+  // 上采样相关参数
+  const [scaleFactor, setScaleFactor] = useState<number>(2);
+  const [scaleFactorInput, setScaleFactorInput] = useState<string>('2');
   
-  // 其他参数
+  // 其他参数状态
   const [samplingMethod, setSamplingMethod] = useState<string>('euler_a');
   const [scheduler, setScheduler] = useState<string>('discrete');
   const [seed, setSeed] = useState<number>(-1);
@@ -299,6 +342,8 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
   const [vaeConvDirect, setVaeConvDirect] = useState<boolean>(false);
   const [vaeTiling, setVaeTiling] = useState<boolean>(true);
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
+  const [inputImagePath, setInputImagePath] = useState<string | null>(null);
+  const [inputImagePreview, setInputImagePreview] = useState<string | null>(null);
 
   // 加载模型组列表
   useEffect(() => {
@@ -334,7 +379,7 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
     checkAndLoad();
   }, []);
 
-  // 处理 CLI 输出
+  // 处理 CLI 输出的回调函数
   const handleCliOutput = useCallback((data: { type: 'stdout' | 'stderr'; text: string }) => {
     const cleanedText = stripAnsiCodes(data.text);
     if (cleanedText.trim()) {
@@ -350,8 +395,18 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
 
   // 监听 CLI 输出
   useIpcListener<{ type: 'stdout' | 'stderr'; text: string }>(
-    'generate-video:cli-output',
+    'generate:cli-output',
     handleCliOutput
+  );
+
+  // 监听预览图片更新
+  useIpcListener<{ previewImage?: string }>(
+    'generate:preview-update',
+    (data) => {
+      if (data?.previewImage) {
+        setPreviewImage(data.previewImage);
+      }
+    }
   );
 
   // 当 CLI 输出从无内容变为有内容时，自动展开
@@ -379,15 +434,20 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
     try {
       if (!window.ipcRenderer) {
         console.error('window.ipcRenderer is not available');
+        setModelGroups([]);
         return;
       }
       setLoading(true);
-      const groups = await window.ipcRenderer.invoke('model-groups:list') as ModelGroup[];
-      // 只显示支持视频生成的模型组（taskType 为 'video' 或 'all'）
-      const videoGroups = groups.filter((g: ModelGroup) => !g.taskType || g.taskType === 'video' || g.taskType === 'all');
-      setModelGroups(videoGroups);
+      const groups = await window.ipcRenderer.invoke('model-groups:list');
+      // 过滤模型组：显示 taskType 为 'edit' 或 'all' 的模型组（上采样可以使用编辑模型）
+      const filteredGroups = (groups || []).filter((group: any) => {
+        const taskType = group.taskType || 'all';
+        return taskType === 'edit' || taskType === 'all';
+      });
+      setModelGroups(filteredGroups);
     } catch (error) {
       console.error('Failed to load model groups:', error);
+      setModelGroups([]);
     } finally {
       setLoading(false);
     }
@@ -399,66 +459,82 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
         console.error('window.ipcRenderer is not available');
         return;
       }
-      const device = await window.ipcRenderer.invoke('sdcpp:get-device') as DeviceType;
-      setDeviceType(device);
+      const device = await window.ipcRenderer.invoke('sdcpp:get-device');
+      if (device) {
+        setDeviceType(device as DeviceType);
+      }
     } catch (error) {
       console.error('Failed to load device type:', error);
     }
   };
 
-  const handleDeviceTypeChange = async (newDevice: DeviceType) => {
+  const handleDeviceTypeChange = async (value: DeviceType) => {
+    setDeviceType(value);
     try {
       if (!window.ipcRenderer) {
         console.error('window.ipcRenderer is not available');
         return;
       }
-      await window.ipcRenderer.invoke('sdcpp:set-device', newDevice);
-      setDeviceType(newDevice);
+      await window.ipcRenderer.invoke('sdcpp:set-device', value);
     } catch (error) {
       console.error('Failed to set device type:', error);
     }
   };
 
-  const handleGenerate = async () => {
-    if (!window.ipcRenderer) {
-      alert('IPC 渲染器不可用');
+  const handleUpscale = async () => {
+    if (!selectedGroupId) {
+      alert('请选择模型组');
+      return;
+    }
+    if (!inputImagePath) {
+      alert('请先选择要上采样的图片');
       return;
     }
 
-    if (!selectedGroupId || !prompt.trim()) {
-      alert('请选择模型组并输入提示词');
+    if (!window.ipcRenderer) {
+      alert('IPC 通信不可用，请确保应用正常运行');
       return;
     }
 
     try {
       setGenerating(true);
-      setGeneratedVideo(null);
-      setGenerationProgress('');
+      setGeneratedImage(null);
+      setPreviewImage(null);
+      setGenerationProgress('正在初始化...');
       setCliOutput([]);
 
-      // 监听进度更新
-      const progressListener = (data: { progress?: string; video?: string }) => {
+      const progressListener = (_event: unknown, data: { progress?: string; image?: string }) => {
         if (data.progress) {
           setGenerationProgress(data.progress);
         }
-        if (data.video) {
-          setGeneratedVideo(data.video);
+        if (data.image) {
+          setGeneratedImage(data.image);
         }
       };
 
-      if (window.ipcRenderer) {
-        window.ipcRenderer.on('generate-video:progress', progressListener);
-      }
+      window.ipcRenderer.on('generate:progress', progressListener);
 
       try {
-        const result = await window.ipcRenderer.invoke('generate-video:start', {
+        const selectedGroup = modelGroups.find(g => g.id === selectedGroupId);
+        if (!selectedGroup) {
+          throw new Error('所选模型组不存在');
+        }
+        if (!selectedGroup.sdModel) {
+          throw new Error('所选模型组中未配置SD模型');
+        }
+
+        // 计算上采样后的尺寸
+        const upscaledWidth = Math.round(width * scaleFactor);
+        const upscaledHeight = Math.round(height * scaleFactor);
+
+        const result = await window.ipcRenderer.invoke('generate:start', {
           groupId: selectedGroupId,
           deviceType,
-          prompt,
-          negativePrompt: negativePrompt || undefined,
+          prompt: prompt.trim() || 'upscale image, high quality, detailed',
+          negativePrompt: negativePrompt.trim(),
           steps,
-          width,
-          height,
+          width: upscaledWidth,
+          height: upscaledHeight,
           cfgScale,
           samplingMethod,
           scheduler,
@@ -477,41 +553,41 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
           diffusionConvDirect,
           vaeConvDirect,
           vaeTiling,
-          frames, // 视频帧数
-          fps, // 帧率
+          inputImage: inputImagePath,
         });
 
-        if (result.success && result.video) {
-          setGeneratedVideo(result.video);
-          setGenerationProgress('生成完成');
+        if (result.success && result.image) {
+          setGeneratedImage(result.image);
+          setPreviewImage(null);
+          setGenerationProgress('上采样完成');
         } else {
-          throw new Error(result.error || '生成失败');
+          throw new Error(result.error || '上采样失败');
         }
       } finally {
         if (window.ipcRenderer) {
-          window.ipcRenderer.off('generate-video:progress', progressListener);
+          window.ipcRenderer.off('generate:progress', progressListener);
         }
         setGenerating(false);
       }
     } catch (error) {
-      console.error('Failed to generate video:', error);
+      console.error('Failed to upscale image:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       if (!errorMessage.includes('生成已取消') && !errorMessage.includes('cancelled')) {
-        alert(`生成视频失败: ${errorMessage}`);
+        alert(`上采样失败: ${errorMessage}`);
       }
       setGenerationProgress('');
       setGenerating(false);
     }
   };
 
-  const handleCancelGenerate = async () => {
+  const handleCancelUpscale = async () => {
     if (!window.ipcRenderer) return;
     
     try {
-      await window.ipcRenderer.invoke('generate-video:cancel');
+      await window.ipcRenderer.invoke('generate:cancel');
       setGenerationProgress('正在取消...');
     } catch (error) {
-      console.error('Failed to cancel generation:', error);
+      console.error('Failed to cancel upscale:', error);
     }
   };
 
@@ -547,38 +623,99 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
     return parts.join(' | ');
   };
 
+  const handleSelectImage = async () => {
+    if (!window.ipcRenderer) {
+      alert('IPC 通信不可用，请确保应用正常运行');
+      return;
+    }
+
+    try {
+      const filePath = await window.ipcRenderer.invoke('edit-image:select-file');
+      if (filePath) {
+        setInputImagePath(filePath);
+        const normalizedPath = filePath.replace(/\\/g, '/');
+        const previewUrl = normalizedPath.match(/^[A-Za-z]:/) 
+          ? `file:///${normalizedPath}` 
+          : `file://${normalizedPath}`;
+        setInputImagePreview(previewUrl);
+        
+        // 加载图片尺寸
+        const img = new Image();
+        img.onload = () => {
+          setWidth(img.width);
+          setHeight(img.height);
+          setWidthInput(img.width.toString());
+          setHeightInput(img.height.toString());
+        };
+        img.src = previewUrl;
+      }
+    } catch (error) {
+      console.error('Failed to select image:', error);
+      alert('选择图片失败，请重试');
+    }
+  };
+
+  const handleRemoveImage = () => {
+    setInputImagePath(null);
+    setInputImagePreview(null);
+    setWidth(512);
+    setHeight(512);
+    setWidthInput('512');
+    setHeightInput('512');
+  };
+
   return (
     <div className={styles.container}>
-      <Title1>视频生成</Title1>
+      <Title1>图像超分辨率</Title1>
 
       {/* 预览区域 */}
       <Card className={styles.previewCard}>
-        <Title2>生成结果</Title2>
+        <Title2>上采样结果</Title2>
         <div className={styles.previewSection}>
           {generating ? (
             <div className={styles.emptyState}>
-              <Spinner size="large" />
-              <Body1 style={{ marginTop: tokens.spacingVerticalM }}>
-                {generationProgress || '正在生成视频...'}
-              </Body1>
+              {previewImage ? (
+                <>
+                  <PhotoView src={previewImage}>
+                    <img 
+                      src={previewImage} 
+                      alt="预览图片" 
+                      className={styles.previewImage}
+                      title="点击放大查看预览"
+                    />
+                  </PhotoView>
+                  <Body1 style={{ marginTop: tokens.spacingVerticalM }}>
+                    {generationProgress || '正在上采样...'}
+                  </Body1>
+                </>
+              ) : (
+                <>
+                  <Spinner size="large" />
+                  <Body1 style={{ marginTop: tokens.spacingVerticalM }}>
+                    {generationProgress || '正在上采样...'}
+                  </Body1>
+                </>
+              )}
             </div>
-          ) : generatedVideo ? (
+          ) : generatedImage ? (
             <>
-              <video 
-                src={generatedVideo} 
-                controls
-                className={styles.previewVideo}
-                style={{ maxWidth: '50vw', maxHeight: '50vh' }}
-              />
+              <PhotoView src={generatedImage}>
+                <img 
+                  src={generatedImage} 
+                  alt="上采样后的图片" 
+                  className={styles.previewImage}
+                  title="点击放大查看"
+                />
+              </PhotoView>
               <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalS }}>
-                {generationProgress || '生成完成'}
+                {generationProgress || '上采样完成'}
               </Body1>
             </>
           ) : (
             <div className={styles.emptyState}>
-              <Body1>生成的视频将显示在这里</Body1>
+              <Body1>上采样后的图片将显示在这里</Body1>
               <Body1 style={{ fontSize: tokens.fontSizeBase200, marginTop: tokens.spacingVerticalS }}>
-                请在下方配置生成参数并点击"开始生成"按钮
+                请先选择要上采样的图片，配置参数后点击"开始上采样"按钮
               </Body1>
             </div>
           )}
@@ -648,7 +785,7 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
           >
             {cliOutput.length === 0 ? (
               <div className={styles.cliOutputEmpty}>
-                暂无输出，开始生成后将显示 SD.cpp 的 CLI 输出
+                暂无输出，开始上采样后将显示 SD.cpp 的 CLI 输出
               </div>
             ) : (
               cliOutput.map((line, index) => (
@@ -670,8 +807,85 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
 
       {/* 配置区域 */}
       <Card className={styles.configCard}>
-        <Title2>生成配置</Title2>
+        <Title2>上采样配置</Title2>
         <div className={styles.formSection}>
+          {/* 图片上传区域 */}
+          <Field label="待上采样图片" required>
+            <div className={styles.uploadSection}>
+              {inputImagePreview ? (
+                <div className={styles.uploadedImageContainer}>
+                  <PhotoView src={inputImagePreview}>
+                    <img 
+                      src={inputImagePreview} 
+                      alt="待上采样图片" 
+                      className={styles.uploadedImage}
+                      title="点击放大查看"
+                    />
+                  </PhotoView>
+                  <Button
+                    icon={<DismissRegular />}
+                    appearance="subtle"
+                    className={styles.removeImageButton}
+                    onClick={handleRemoveImage}
+                    title="移除图片"
+                  />
+                </div>
+              ) : (
+                <div className={styles.uploadArea} onClick={handleSelectImage}>
+                  <ArrowUploadRegular style={{ fontSize: '48px', color: tokens.colorNeutralForeground3 }} />
+                  <Body1 style={{ color: tokens.colorNeutralForeground3 }}>
+                    点击选择要上采样的图片
+                  </Body1>
+                  <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                    支持 PNG、JPG、JPEG、BMP、WEBP、GIF 格式
+                  </Body1>
+                </div>
+              )}
+              {!inputImagePreview && (
+                <Button
+                  icon={<ArrowUploadRegular />}
+                  onClick={handleSelectImage}
+                  appearance="primary"
+                >
+                  选择图片
+                </Button>
+              )}
+            </div>
+          </Field>
+
+          {/* 上采样倍数 */}
+          <Field label="上采样倍数" hint="默认: 2倍（2x）">
+            <Input
+              type="number"
+              value={scaleFactorInput}
+              onChange={(_, data) => {
+                setScaleFactorInput(data.value);
+                const val = parseFloat(data.value);
+                if (!isNaN(val) && val >= 1 && val <= 8) {
+                  setScaleFactor(val);
+                }
+              }}
+              onBlur={() => {
+                const val = parseFloat(scaleFactorInput);
+                if (isNaN(val) || val < 1) {
+                  setScaleFactorInput('2');
+                  setScaleFactor(2);
+                } else if (val > 8) {
+                  setScaleFactorInput('8');
+                  setScaleFactor(8);
+                } else {
+                  setScaleFactor(val);
+                }
+              }}
+              min={1}
+              max={8}
+              step={0.5}
+            />
+            <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalXS }}>
+              上采样后尺寸: {inputImagePath ? `${Math.round(width * scaleFactor)} × ${Math.round(height * scaleFactor)}` : '未知'}
+            </Body1>
+          </Field>
+
           {/* 模型组选择 */}
           <Field label="选择模型组" required>
             <Dropdown
@@ -689,14 +903,6 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
                     }
                     if (selectedGroup.defaultCfgScale !== undefined) {
                       setCfgScale(selectedGroup.defaultCfgScale);
-                    }
-                    if (selectedGroup.defaultWidth !== undefined) {
-                      setWidth(selectedGroup.defaultWidth);
-                      setWidthInput(selectedGroup.defaultWidth.toString());
-                    }
-                    if (selectedGroup.defaultHeight !== undefined) {
-                      setHeight(selectedGroup.defaultHeight);
-                      setHeightInput(selectedGroup.defaultHeight.toString());
                     }
                     if (selectedGroup.defaultSamplingMethod !== undefined) {
                       setSamplingMethod(selectedGroup.defaultSamplingMethod);
@@ -726,76 +932,33 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
           </Field>
           <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
             {modelGroups.length === 0
-              ? '暂无可用模型组，请先在"模型权重管理"页面创建支持视频生成的模型组'
+              ? '暂无可用模型组，请先在"模型权重管理"页面创建模型组'
               : selectedGroup
               ? `已选择: ${selectedGroup.name}${getModelInfo(selectedGroup) ? ` (${getModelInfo(selectedGroup)})` : ''}`
               : '未选择'}
           </Body1>
 
           {/* 提示词输入 */}
-          <Field label="提示词" required>
+          <Field label="提示词（可选）" hint="留空将使用默认提示词">
             <Textarea
               value={prompt}
               onChange={(_, data) => setPrompt(data.value)}
-              placeholder="输入视频描述，例如：a beautiful landscape with mountains and lakes, smooth camera movement"
-              rows={4}
-              resize="vertical"
-            />
-          </Field>
-
-          {/* 负面提示词 */}
-          <Field 
-            label={
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                <span>负面提示词（可选）</span>
-                <Button
-                  size="small"
-                  appearance="subtle"
-                  onClick={() => setNegativePrompt(DEFAULT_NEGATIVE_PROMPT)}
-                  style={{ minWidth: 'auto' }}
-                >
-                  恢复默认
-                </Button>
-              </div>
-            }
-            hint="已提供通用默认值，可根据需要修改"
-          >
-            <Textarea
-              value={negativePrompt}
-              onChange={(_, data) => setNegativePrompt(data.value)}
-              placeholder="输入不希望出现在视频中的内容"
+              placeholder="输入图片描述，例如：high quality, detailed, sharp"
               rows={3}
               resize="vertical"
             />
           </Field>
 
-          {/* 视频生成特有参数 */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: tokens.spacingHorizontalM }}>
-            <Field label="视频帧数" hint="默认: 16">
-              <Input
-                type="number"
-                value={frames.toString()}
-                onChange={(_, data) => {
-                  const val = parseInt(data.value) || 16;
-                  setFrames(Math.max(1, Math.min(128, val)));
-                }}
-                min={1}
-                max={128}
-              />
-            </Field>
-            <Field label="帧率 (FPS)" hint="默认: 8">
-              <Input
-                type="number"
-                value={fps.toString()}
-                onChange={(_, data) => {
-                  const val = parseInt(data.value) || 8;
-                  setFps(Math.max(1, Math.min(60, val)));
-                }}
-                min={1}
-                max={60}
-              />
-            </Field>
-          </div>
+          {/* 负面提示词 */}
+          <Field label="负面提示词（可选）">
+            <Textarea
+              value={negativePrompt}
+              onChange={(_, data) => setNegativePrompt(data.value)}
+              placeholder="输入不希望出现在图片中的内容"
+              rows={2}
+              resize="vertical"
+            />
+          </Field>
 
           {/* 推理引擎和模型设备分配 */}
           <div className={styles.modelDeviceCard}>
@@ -833,6 +996,20 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
                   <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
                     控制网络模型
                   </Body1>
+                  {controlNetCpu && (
+                    <div className={styles.modelDeviceInfo}>
+                      <Text style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorPaletteBlueForeground2 }}>
+                        ⚠️ 强制使用CPU，将始终在CPU上运行
+                      </Text>
+                    </div>
+                  )}
+                  {!controlNetCpu && offloadToCpu && (
+                    <div className={styles.modelDeviceInfo}>
+                      <Text style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                        💾 未使用时将卸载到CPU（RAM）
+                      </Text>
+                    </div>
+                  )}
                 </div>
                 <div className={styles.modelDeviceItemRight}>
                   <Dropdown
@@ -858,6 +1035,20 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
                   <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
                     文本编码器模型
                   </Body1>
+                  {clipOnCpu && (
+                    <div className={styles.modelDeviceInfo}>
+                      <Text style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorPaletteBlueForeground2 }}>
+                        ⚠️ 强制使用CPU，将始终在CPU上运行
+                      </Text>
+                    </div>
+                  )}
+                  {!clipOnCpu && offloadToCpu && (
+                    <div className={styles.modelDeviceInfo}>
+                      <Text style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                        💾 未使用时将卸载到CPU（RAM）
+                      </Text>
+                    </div>
+                  )}
                 </div>
                 <div className={styles.modelDeviceItemRight}>
                   <Dropdown
@@ -883,6 +1074,20 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
                   <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
                     变分自编码器模型
                   </Body1>
+                  {vaeOnCpu && (
+                    <div className={styles.modelDeviceInfo}>
+                      <Text style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorPaletteBlueForeground2 }}>
+                        ⚠️ 强制使用CPU，将始终在CPU上运行
+                      </Text>
+                    </div>
+                  )}
+                  {!vaeOnCpu && offloadToCpu && (
+                    <div className={styles.modelDeviceInfo}>
+                      <Text style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                        💾 未使用时将卸载到CPU（RAM）
+                      </Text>
+                    </div>
+                  )}
                 </div>
                 <div className={styles.modelDeviceItemRight}>
                   <Dropdown
@@ -941,66 +1146,6 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
                 step={0.1}
               />
             </Field>
-            <Field label="视频宽度" hint="默认: 512">
-              <Input
-                type="number"
-                value={widthInput}
-                onChange={(_, data) => {
-                  setWidthInput(data.value);
-                  const val = parseInt(data.value);
-                  if (!isNaN(val) && val >= 64 && val <= 2048) {
-                    setWidth(val);
-                  }
-                }}
-                onBlur={() => {
-                  const val = parseInt(widthInput);
-                  if (isNaN(val) || val < 64) {
-                    setWidthInput('512');
-                    setWidth(512);
-                  } else if (val > 2048) {
-                    setWidthInput('2048');
-                    setWidth(2048);
-                  } else {
-                    const aligned = Math.round(val / 64) * 64;
-                    setWidthInput(aligned.toString());
-                    setWidth(aligned);
-                  }
-                }}
-                min={64}
-                max={2048}
-                step={64}
-              />
-            </Field>
-            <Field label="视频高度" hint="默认: 512">
-              <Input
-                type="number"
-                value={heightInput}
-                onChange={(_, data) => {
-                  setHeightInput(data.value);
-                  const val = parseInt(data.value);
-                  if (!isNaN(val) && val >= 64 && val <= 2048) {
-                    setHeight(val);
-                  }
-                }}
-                onBlur={() => {
-                  const val = parseInt(heightInput);
-                  if (isNaN(val) || val < 64) {
-                    setHeightInput('512');
-                    setHeight(512);
-                  } else if (val > 2048) {
-                    setHeightInput('2048');
-                    setHeight(2048);
-                  } else {
-                    const aligned = Math.round(val / 64) * 64;
-                    setHeightInput(aligned.toString());
-                    setHeight(aligned);
-                  }
-                }}
-                min={64}
-                max={2048}
-                step={64}
-              />
-            </Field>
             <Field label="采样方法" hint="默认: euler_a">
               <Dropdown
                 value={samplingMethod}
@@ -1040,6 +1185,10 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
                 <Option value="exponential">Exponential</Option>
                 <Option value="ays">AYS</Option>
                 <Option value="gits">GITS</Option>
+                <Option value="smoothstep">Smoothstep</Option>
+                <Option value="sgm_uniform">SGM Uniform</Option>
+                <Option value="simple">Simple</Option>
+                <Option value="lcm">LCM</Option>
               </Dropdown>
             </Field>
             <Field label="种子" hint="留空或-1表示随机">
@@ -1191,25 +1340,25 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
             </div>
           )}
 
-          {/* 生成按钮 */}
+          {/* 上采样按钮 */}
           <div className={styles.actions}>
             {generating ? (
               <Button
-                onClick={handleCancelGenerate}
+                onClick={handleCancelUpscale}
                 appearance="secondary"
                 size="large"
               >
-                取消生成
+                取消上采样
               </Button>
             ) : (
               <Button
-                icon={<VideoClipRegular />}
-                onClick={handleGenerate}
-                disabled={!selectedGroupId || !prompt.trim() || loading}
+                icon={<ImageAddRegular />}
+                onClick={handleUpscale}
+                disabled={!selectedGroupId || !inputImagePath || loading}
                 appearance="primary"
                 size="large"
               >
-                开始生成
+                开始上采样
               </Button>
             )}
             <Button
