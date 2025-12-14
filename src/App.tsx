@@ -8,23 +8,50 @@ import { SettingsPage } from './pages/SettingsPage';
 import { ModelWeightsPage } from './pages/ModelWeightsPage';
 import { SDCppPage } from './pages/SDCppPage';
 import { GeneratePage } from './pages/GeneratePage';
+import { EditImagePage } from './pages/EditImagePage';
 import { GeneratedImagesPage } from './pages/GeneratedImagesPage';
+import { MaterialDecomposePage } from './pages/MaterialDecomposePage';
+import { MaterialMaterialsPage } from './pages/MaterialMaterialsPage';
+import { VideoGeneratePage } from './pages/VideoGeneratePage';
+
+export type ThemeMode = 'light' | 'dark' | 'system';
+
+const THEME_STORAGE_KEY = 'app-theme-mode';
 
 function App() {
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>('system');
+  const [systemIsDark, setSystemIsDark] = useState(false);
   const [currentPage, setCurrentPage] = useState<PageType>('home');
   const [isUploading, setIsUploading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  // 从 localStorage 加载保存的主题设置
+  useEffect(() => {
+    const savedTheme = localStorage.getItem(THEME_STORAGE_KEY) as ThemeMode | null;
+    if (savedTheme && (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system')) {
+      setThemeMode(savedTheme);
+    }
+  }, []);
 
   // 检测系统主题偏好
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    setIsDarkMode(mediaQuery.matches);
+    setSystemIsDark(mediaQuery.matches);
 
-    const handler = (e: MediaQueryListEvent) => setIsDarkMode(e.matches);
+    const handler = (e: MediaQueryListEvent) => setSystemIsDark(e.matches);
     mediaQuery.addEventListener('change', handler);
     return () => mediaQuery.removeEventListener('change', handler);
   }, []);
+
+  // 根据主题模式计算实际的主题
+  const isDarkMode = themeMode === 'system' ? systemIsDark : themeMode === 'dark';
+
+  // 处理主题切换
+  const handleThemeChange = (mode: ThemeMode) => {
+    setThemeMode(mode);
+    localStorage.setItem(THEME_STORAGE_KEY, mode);
+  };
 
   const renderPage = () => {
     switch (currentPage) {
@@ -33,15 +60,15 @@ function App() {
       case 'components':
         return <ComponentsPage />;
       case 'settings':
-        return <SettingsPage />;
+        return <SettingsPage themeMode={themeMode} onThemeChange={handleThemeChange} />;
       default:
         return <HomePage />;
     }
   };
 
   const handlePageChange = (page: PageType) => {
-    // 如果正在上传或正在生成，禁止切换页面
-    if (isUploading || isGenerating) {
+    // 如果正在上传、正在生成或正在处理，禁止切换页面
+    if (isUploading || isGenerating || isProcessing) {
       return;
     }
     setCurrentPage(page);
@@ -53,8 +80,8 @@ function App() {
         <MainLayout 
           currentPage={currentPage} 
           onPageChange={handlePageChange}
-          navigationDisabled={isUploading || isGenerating}
-          navigationDisabledReason={isGenerating ? '正在生成图片，请稍候...' : isUploading ? '正在上传文件，请稍候...' : undefined}
+          navigationDisabled={isUploading || isGenerating || isProcessing}
+          navigationDisabledReason={isGenerating ? '正在生成图片，请稍候...' : isProcessing ? '正在处理图片，请稍候...' : isUploading ? '正在上传文件，请稍候...' : undefined}
         >
           {currentPage === 'weights' ? (
             <ModelWeightsPage onUploadStateChange={setIsUploading} />
@@ -62,8 +89,16 @@ function App() {
             <SDCppPage />
           ) : currentPage === 'generate' ? (
             <GeneratePage onGeneratingStateChange={setIsGenerating} />
+          ) : currentPage === 'edit-image' ? (
+            <EditImagePage onGeneratingStateChange={setIsGenerating} />
           ) : currentPage === 'images' ? (
             <GeneratedImagesPage />
+          ) : currentPage === 'video-generate' ? (
+            <VideoGeneratePage />
+          ) : currentPage === 'material-decompose' ? (
+            <MaterialDecomposePage onProcessingStateChange={setIsProcessing} />
+          ) : currentPage === 'materials' ? (
+            <MaterialMaterialsPage />
           ) : (
             renderPage()
           )}

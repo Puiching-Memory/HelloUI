@@ -1,6 +1,6 @@
 {
   "name": "helloui",
-  "version": "1.0.1",
+  "version": "1.2.0",
   "description": "Electron app with React 19, TypeScript and Vite",
   "main": "dist-electron/main.js",
   "type": "module",
@@ -24,6 +24,7 @@
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.182.0",
     "@vitejs/plugin-react": "^5.1.1",
     "concurrently": "^9.2.1",
     "electron": "^39.2.6",
@@ -41,7 +42,8 @@
     "react": "^19.2.1",
     "react-compare-slider": "^3.1.0",
     "react-dom": "^19.2.1",
-    "react-photo-view": "^1.2.7"
+    "react-photo-view": "^1.2.7",
+    "three": "^0.182.0"
   },
   "build": {
     "appId": "com.helloui.app",
@@ -55,6 +57,12 @@
     ],
     "win": {
       "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     }
   }
 }
