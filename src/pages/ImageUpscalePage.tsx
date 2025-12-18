@@ -439,10 +439,10 @@ export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePagePr
       }
       setLoading(true);
       const groups = await window.ipcRenderer.invoke('model-groups:list');
-      // 过滤模型组：显示 taskType 为 'edit' 或 'all' 的模型组（上采样可以使用编辑模型）
+      // 过滤模型组：显示 taskType 为 'edit' 的模型组（上采样可以使用编辑模型）
       const filteredGroups = (groups || []).filter((group: any) => {
-        const taskType = group.taskType || 'all';
-        return taskType === 'edit' || taskType === 'all';
+        const taskType = group.taskType;
+        return taskType === 'edit';
       });
       setModelGroups(filteredGroups);
     } catch (error) {
