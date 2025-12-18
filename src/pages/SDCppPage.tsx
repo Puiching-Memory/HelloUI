@@ -61,6 +61,11 @@ const useStyles = makeStyles({
     minWidth: '150px',
     overflow: 'hidden',
   },
+  tableCellVersion: {
+    maxWidth: '200px',
+    minWidth: '150px',
+    overflow: 'hidden',
+  },
 });
 
 interface EngineFile {
@@ -77,6 +82,11 @@ export const SDCppPage = () => {
   const styles = useStyles();
   const [engineFolder, setEngineFolder] = useState<string>('');
   const [files, setFiles] = useState<EngineFile[]>([]);
+  const [deviceVersions, setDeviceVersions] = useState<Record<DeviceType, string | null>>({
+    cpu: null,
+    vulkan: null,
+    cuda: null,
+  });
   const [loading, setLoading] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
 
@@ -121,33 +131,46 @@ export const SDCppPage = () => {
     if (!engineFolder || !window.ipcRenderer) return;
     setLoading(true);
     try {
-      // 加载所有设备类型的文件
+      // 加载所有设备类型的文件和版本号
       const deviceTypes: DeviceType[] = ['cpu', 'vulkan', 'cuda'];
       const allFilesPromises = deviceTypes.map(async (deviceType) => {
         try {
-          const fileList = await window.ipcRenderer.invoke('sdcpp:list-files', engineFolder, deviceType);
+          const result = await window.ipcRenderer.invoke('sdcpp:list-files', engineFolder, deviceType);
           // 为每个文件添加设备类型信息
-          return (fileList || []).map((file: Omit<EngineFile, 'deviceType'>) => ({
+          const files = (result?.files || []).map((file: Omit<EngineFile, 'deviceType'>) => ({
             ...file,
             deviceType,
           }));
+          return { files, version: result?.version || null, deviceType };
         } catch (error) {
           console.error(`Failed to load files for ${deviceType}:`, error);
-          return [];
+          return { files: [], version: null, deviceType };
         }
       });
 
-      const allFilesArrays = await Promise.all(allFilesPromises);
-      const allFiles = allFilesArrays.flat();
+      const results = await Promise.all(allFilesPromises);
+      const allFiles = results.flatMap(r => r.files);
+      const versions: Record<DeviceType, string | null> = {
+        cpu: null,
+        vulkan: null,
+        cuda: null,
+      };
+      
+      // 收集版本号信息
+      results.forEach(r => {
+        versions[r.deviceType] = r.version;
+      });
       
       // 按修改时间降序排序
       allFiles.sort((a, b) => b.modified - a.modified);
       
       console.log(`[SDCppPage] Found ${allFiles.length} files across all device types`);
       setFiles(allFiles);
+      setDeviceVersions(versions);
     } catch (error) {
       console.error('Failed to load file list:', error);
       setFiles([]);
+      setDeviceVersions({ cpu: null, vulkan: null, cuda: null });
     } finally {
       setLoading(false);
     }
@@ -191,10 +214,18 @@ export const SDCppPage = () => {
   const renderDeviceFileList = (deviceType: DeviceType) => {
     const deviceFiles = filesByDevice[deviceType] || [];
     const deviceLabel = getDeviceLabel(deviceType);
+    const version = deviceVersions[deviceType];
 
     return (
       <Card className={styles.section} key={deviceType}>
-        <Title2>{deviceLabel} 引擎文件</Title2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalM }}>
+          <Title2>{deviceLabel} 引擎文件</Title2>
+          {version && (
+            <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+              版本: {version}
+            </Body1>
+          )}
+        </div>
         {loading && deviceFiles.length === 0 ? (
           <div className={styles.emptyState}>
             <Spinner size="large" />

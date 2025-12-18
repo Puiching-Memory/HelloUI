@@ -19,9 +19,8 @@ export interface WeightFile {
 
 /**
  * 任务类型
- * @deprecated 'all' 类型已废弃，不再支持。每个模型组必须明确指定其支持的任务类型。
  */
-export type TaskType = 'generate' | 'edit' | 'video' | 'all';
+export type TaskType = 'generate' | 'edit' | 'video' | 'upscale';
 
 /**
  * 模型组接口
@@ -29,7 +28,7 @@ export type TaskType = 'generate' | 'edit' | 'video' | 'all';
 export interface ModelGroup {
   id: string;
   name: string;
-  taskType?: TaskType;  // 任务类型：generate（图片生成）、edit（图片编辑）、video（视频生成）。注意：'all' 类型已废弃，不再支持。
+  taskType?: TaskType;  // 任务类型：generate（图片生成）、edit（图片编辑）、video（视频生成）、upscale（图像超分辨率）
   sdModel?: string;  // SD/基础模型路径（图片或视频）
   highNoiseSdModel?: string; // 高噪声SD模型路径（视频生成用，可选）
   vaeModel?: string;  // VAE模型路径
@@ -52,7 +51,6 @@ export interface ModelGroup {
  */
 export interface GenerateImageParams {
   groupId?: string;  // 使用模型组ID
-  modelPath?: string;  // 兼容旧版本：直接使用模型路径
   deviceType: DeviceType;
   prompt: string;
   negativePrompt?: string;

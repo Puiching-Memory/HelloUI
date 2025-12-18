@@ -47,12 +47,12 @@ export class ResourceManager {
    * @param type 资源类型
    */
   cleanupByType(type: string): void {
-    for (const [id, resource] of this.resources.entries()) {
+    this.resources.forEach((resource, id) => {
       if (resource.type === type) {
         resource.cleanup();
         this.resources.delete(id);
       }
-    }
+    });
   }
 
   /**

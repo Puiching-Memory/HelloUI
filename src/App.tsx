@@ -1,4 +1,5 @@
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
+import { catppuccinLightTheme, catppuccinDarkTheme, catppuccinLatteTheme, catppuccinLatteDarkTheme } from './theme/catppuccinTheme';
 import { useState, useEffect } from 'react';
 import { PhotoProvider } from 'react-photo-view';
 import { MainLayout, PageType } from './components/MainLayout';
@@ -12,13 +13,20 @@ import { EditImagePage } from './pages/EditImagePage';
 import { GeneratedImagesPage } from './pages/GeneratedImagesPage';
 import { VideoGeneratePage } from './pages/VideoGeneratePage';
 import { ImageUpscalePage } from './pages/ImageUpscalePage';
+import type { Theme } from '@fluentui/react-components';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
+export type ColorScheme = 'catppuccin' | 'latte' | 'default';
 
 const THEME_STORAGE_KEY = 'app-theme-mode';
+const COLOR_SCHEME_STORAGE_KEY = 'app-color-scheme';
 
 function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>('system');
+  const [colorScheme, setColorScheme] = useState<ColorScheme>(() => {
+    const saved = localStorage.getItem(COLOR_SCHEME_STORAGE_KEY) as ColorScheme | null;
+    return (saved === 'catppuccin' || saved === 'latte' || saved === 'default') ? saved : 'default';
+  });
   const [systemIsDark, setSystemIsDark] = useState(false);
   const [currentPage, setCurrentPage] = useState<PageType>('home');
   const [isUploading, setIsUploading] = useState(false);
@@ -45,22 +53,44 @@ function App() {
   // 根据主题模式计算实际的主题
   const isDarkMode = themeMode === 'system' ? systemIsDark : themeMode === 'dark';
 
-  // 处理主题切换
+  // 获取当前使用的主题
+  const getCurrentTheme = (): Theme => {
+    if (colorScheme === 'catppuccin') {
+      return isDarkMode ? catppuccinDarkTheme : catppuccinLightTheme;
+    } else if (colorScheme === 'latte') {
+      return isDarkMode ? catppuccinLatteDarkTheme : catppuccinLatteTheme;
+    } else {
+      return isDarkMode ? webDarkTheme : webLightTheme;
+    }
+  };
+
+  // 处理主题模式切换
   const handleThemeChange = (mode: ThemeMode) => {
     setThemeMode(mode);
     localStorage.setItem(THEME_STORAGE_KEY, mode);
   };
 
+  // 处理颜色方案切换
+  const handleColorSchemeChange = (scheme: ColorScheme) => {
+    setColorScheme(scheme);
+    localStorage.setItem(COLOR_SCHEME_STORAGE_KEY, scheme);
+  };
+
   const renderPage = () => {
     switch (currentPage) {
       case 'home':
-        return <HomePage />;
+        return <HomePage onNavigate={handlePageChange} />;
       case 'components':
         return <ComponentsPage />;
       case 'settings':
-        return <SettingsPage themeMode={themeMode} onThemeChange={handleThemeChange} />;
+        return <SettingsPage 
+          themeMode={themeMode} 
+          onThemeChange={handleThemeChange}
+          colorScheme={colorScheme}
+          onColorSchemeChange={handleColorSchemeChange}
+        />;
       default:
-        return <HomePage />;
+        return <HomePage onNavigate={handlePageChange} />;
     }
   };
 
@@ -72,8 +102,18 @@ function App() {
     setCurrentPage(page);
   };
 
+  // 更新根元素的 data-theme 属性以支持滚动条主题切换
+  useEffect(() => {
+    const root = document.documentElement;
+    if (isDarkMode) {
+      root.setAttribute('data-theme', 'dark');
+    } else {
+      root.setAttribute('data-theme', 'light');
+    }
+  }, [isDarkMode]);
+
   return (
-    <FluentProvider theme={isDarkMode ? webDarkTheme : webLightTheme}>
+    <FluentProvider theme={getCurrentTheme()}>
       <PhotoProvider>
         <MainLayout 
           currentPage={currentPage} 

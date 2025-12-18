@@ -303,8 +303,6 @@ export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePagePr
   const [steps, setSteps] = useState<number>(20);
   const [width, setWidth] = useState<number>(512);
   const [height, setHeight] = useState<number>(512);
-  const [widthInput, setWidthInput] = useState<string>('');
-  const [heightInput, setHeightInput] = useState<string>('');
   const [cfgScale, setCfgScale] = useState<number>(7.0);
   const [modelGroups, setModelGroups] = useState<ModelGroup[]>([]);
   const [loading, setLoading] = useState(false);
@@ -439,10 +437,10 @@ export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePagePr
       }
       setLoading(true);
       const groups = await window.ipcRenderer.invoke('model-groups:list');
-      // 过滤模型组：显示 taskType 为 'edit' 的模型组（上采样可以使用编辑模型）
+      // 过滤模型组：显示 taskType 为 'upscale' 的模型组
       const filteredGroups = (groups || []).filter((group: any) => {
         const taskType = group.taskType;
-        return taskType === 'edit';
+        return taskType === 'upscale';
       });
       setModelGroups(filteredGroups);
     } catch (error) {
@@ -644,8 +642,6 @@ export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePagePr
         img.onload = () => {
           setWidth(img.width);
           setHeight(img.height);
-          setWidthInput(img.width.toString());
-          setHeightInput(img.height.toString());
         };
         img.src = previewUrl;
       }
@@ -660,8 +656,6 @@ export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePagePr
     setInputImagePreview(null);
     setWidth(512);
     setHeight(512);
-    setWidthInput('512');
-    setHeightInput('512');
   };
 
   return (

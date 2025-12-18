@@ -30,6 +30,8 @@ import {
   VideoClipRegular,
   EditRegular,
   ImageAddRegular,
+  GridRegular,
+  ListRegular,
 } from '@fluentui/react-icons';
 import { PhotoView } from 'react-photo-view';
 import { useState, useEffect } from 'react';
@@ -66,6 +68,78 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalL,
     padding: tokens.spacingVerticalM,
   },
+  listContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+    padding: tokens.spacingVerticalM,
+  },
+  listItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    padding: tokens.spacingVerticalM,
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    transition: 'all 0.2s ease',
+    cursor: 'pointer',
+    position: 'relative',
+    ':hover': {
+      border: `1px solid ${tokens.colorNeutralStroke1}`,
+      boxShadow: tokens.shadow4,
+    },
+  },
+  listItemSelected: {
+    border: `2px solid ${tokens.colorBrandStroke1}`,
+    boxShadow: tokens.shadow8,
+    ':hover': {
+      border: `2px solid ${tokens.colorBrandStroke1}`,
+      boxShadow: tokens.shadow16,
+    },
+  },
+  listItemThumbnail: {
+    width: '120px',
+    height: '120px',
+    minWidth: '120px',
+    borderRadius: tokens.borderRadiusSmall,
+    backgroundColor: tokens.colorNeutralBackground2,
+    overflow: 'hidden',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  listItemThumbnailImage: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+  },
+  listItemContent: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    minWidth: 0,
+  },
+  listItemHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    flexWrap: 'wrap',
+  },
+  listItemMeta: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: tokens.spacingHorizontalM,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+  },
+  listItemActions: {
+    display: 'flex',
+    gap: tokens.spacingHorizontalXS,
+    flexShrink: 0,
+  },
   imageCard: {
     display: 'flex',
     flexDirection: 'column',
@@ -77,24 +151,19 @@ const useStyles = makeStyles({
     cursor: 'pointer',
     position: 'relative',
     ':hover': {
-      borderTopColor: tokens.colorNeutralStroke1,
-      borderRightColor: tokens.colorNeutralStroke1,
-      borderBottomColor: tokens.colorNeutralStroke1,
-      borderLeftColor: tokens.colorNeutralStroke1,
+      border: `1px solid ${tokens.colorNeutralStroke1}`,
       boxShadow: tokens.shadow8,
       transform: 'translateY(-2px)',
     },
   },
   imageCardSelected: {
-    borderTopColor: tokens.colorBrandStroke1,
-    borderRightColor: tokens.colorBrandStroke1,
-    borderBottomColor: tokens.colorBrandStroke1,
-    borderLeftColor: tokens.colorBrandStroke1,
-    borderTopWidth: '2px',
-    borderRightWidth: '2px',
-    borderBottomWidth: '2px',
-    borderLeftWidth: '2px',
+    border: `2px solid ${tokens.colorBrandStroke1}`,
     boxShadow: tokens.shadow8,
+    ':hover': {
+      border: `2px solid ${tokens.colorBrandStroke1}`,
+      boxShadow: tokens.shadow16,
+      transform: 'translateY(-2px)',
+    },
   },
   imageCardCheckbox: {
     position: 'absolute',
@@ -313,11 +382,21 @@ export const GeneratedImagesPage = () => {
   const [compareDialogOpen, setCompareDialogOpen] = useState(false);
   const [compareImage1, setCompareImage1] = useState<GeneratedImage | null>(null);
   const [compareImage2, setCompareImage2] = useState<GeneratedImage | null>(null);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
+    // 从 localStorage 加载视图模式
+    const saved = localStorage.getItem('generated-images-view-mode');
+    return (saved === 'grid' || saved === 'list') ? saved : 'grid';
+  });
 
   // 加载图片列表
   useEffect(() => {
     loadImages().catch(console.error);
   }, []);
+
+  // 保存视图模式到 localStorage
+  useEffect(() => {
+    localStorage.setItem('generated-images-view-mode', viewMode);
+  }, [viewMode]);
 
   const loadImages = async () => {
     try {
@@ -627,6 +706,22 @@ export const GeneratedImagesPage = () => {
             )}
           </div>
           <div className={styles.headerActions}>
+            <div style={{ display: 'flex', gap: tokens.spacingHorizontalXS, alignItems: 'center' }}>
+              <Button
+                icon={<GridRegular />}
+                appearance={viewMode === 'grid' ? 'primary' : 'subtle'}
+                size="small"
+                onClick={() => setViewMode('grid')}
+                title="大图标视图"
+              />
+              <Button
+                icon={<ListRegular />}
+                appearance={viewMode === 'list' ? 'primary' : 'subtle'}
+                size="small"
+                onClick={() => setViewMode('list')}
+                title="列表视图"
+              />
+            </div>
             {selectedImages.size > 0 && (
               <>
                 {selectedImages.size === 2 && (
@@ -697,178 +792,328 @@ export const GeneratedImagesPage = () => {
               />
             </div>
             
-            {/* 结果网格 */}
-            <div className={styles.gridContainer}>
-              {images.map((image) => {
-                const isSelected = selectedImages.has(image.path);
-                const typeInfo = getTypeInfo(image);
-                const isVideo = image.mediaType === 'video';
-                // 只使用previewImage，不使用本地文件路径（浏览器无法加载本地路径）
-                const imageSrc = image.previewImage 
-                  ? `data:${getImageMimeType(image.name)};base64,${image.previewImage}`
-                  : null;
-                const hasImage = !!image.previewImage && !isVideo;
-                
-                return (
-                  <div
-                    key={image.path}
-                    className={`${styles.imageCard} ${isSelected ? styles.imageCardSelected : ''}`}
-                    onClick={(e) => {
-                      // 如果点击的是复选框或按钮，不触发卡片选择
-                      const target = e.target as HTMLElement;
-                      if (target.closest('button') || target.closest('input[type="checkbox"]')) {
-                        return;
-                      }
-                      handleToggleSelect(image.path);
-                    }}
-                    onMouseEnter={() => setHoveredImagePath(image.path)}
-                    onMouseLeave={() => setHoveredImagePath(null)}
-                  >
-                    {/* 复选框 */}
-                    <div className={styles.imageCardCheckbox} onClick={(e) => e.stopPropagation()}>
+            {/* 结果列表/网格 */}
+            {viewMode === 'grid' ? (
+              <div className={styles.gridContainer}>
+                {images.map((image) => {
+                  const isSelected = selectedImages.has(image.path);
+                  const typeInfo = getTypeInfo(image);
+                  const isVideo = image.mediaType === 'video';
+                  const imageSrc = image.previewImage 
+                    ? `data:${getImageMimeType(image.name)};base64,${image.previewImage}`
+                    : null;
+                  const hasImage = !!image.previewImage && !isVideo;
+                  
+                  return (
+                    <div
+                      key={image.path}
+                      className={`${styles.imageCard} ${isSelected ? styles.imageCardSelected : ''}`}
+                      onClick={(e) => {
+                        const target = e.target as HTMLElement;
+                        if (target.closest('button') || target.closest('input[type="checkbox"]')) {
+                          return;
+                        }
+                        handleToggleSelect(image.path);
+                      }}
+                      onMouseEnter={() => setHoveredImagePath(image.path)}
+                      onMouseLeave={() => setHoveredImagePath(null)}
+                    >
+                      {/* 复选框 */}
+                      <div className={styles.imageCardCheckbox} onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={isSelected}
+                          onChange={() => handleToggleSelect(image.path)}
+                        />
+                      </div>
+
+                      {/* 类型标签 */}
+                      <div style={{ 
+                        position: 'absolute', 
+                        top: tokens.spacingVerticalS, 
+                        right: tokens.spacingHorizontalS,
+                        zIndex: 10,
+                      }}>
+                        <Badge appearance="filled" color={typeInfo.color} icon={typeInfo.icon}>
+                          {typeInfo.label}
+                        </Badge>
+                      </div>
+
+                      {/* 预览区域 */}
+                      <div className={styles.imagePreviewContainer}>
+                        {isVideo ? (
+                          <div className={styles.imagePlaceholder}>
+                            <VideoClipRegular style={{ fontSize: '64px' }} />
+                          </div>
+                        ) : hasImage && imageSrc ? (
+                          <>
+                            <PhotoView src={imageSrc}>
+                              <img
+                                src={imageSrc}
+                                alt={image.name}
+                                className={styles.imagePreview}
+                                onError={(e) => {
+                                  const target = e.target as HTMLImageElement;
+                                  target.style.display = 'none';
+                                  const container = target.parentElement;
+                                  if (container) {
+                                    const placeholder = container.querySelector(`.${styles.imagePlaceholder}`);
+                                    if (placeholder) {
+                                      (placeholder as HTMLElement).style.display = 'flex';
+                                    }
+                                  }
+                                }}
+                              />
+                            </PhotoView>
+                            <div className={styles.imagePlaceholder} style={{ display: 'none' }}>
+                              <ImageRegular />
+                            </div>
+                          </>
+                        ) : (
+                          <div className={styles.imagePlaceholder}>
+                            <ImageRegular />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 卡片内容 */}
+                      <div className={styles.imageCardContent}>
+                        <div className={styles.imageCardHeader}>
+                          <Body1 className={styles.imageFileName} title={image.name}>
+                            {image.name}
+                          </Body1>
+                          {image.prompt && (
+                            <Body1 className={styles.imagePrompt} title={image.prompt}>
+                              {image.prompt}
+                            </Body1>
+                          )}
+                        </div>
+
+                        {/* 元信息 */}
+                        <div className={styles.imageCardMeta}>
+                          {/* 第一行：基本信息和分辨率 */}
+                          <div className={styles.imageCardMetaRow}>
+                            {!isVideo && image.width && image.height && (
+                              <div className={styles.imageCardMetaItem}>
+                                <DocumentRegular style={{ fontSize: '14px' }} />
+                                <span>{image.width} × {image.height}</span>
+                              </div>
+                            )}
+                            <div className={styles.imageCardMetaItem}>
+                              <span>{formatFileSize(image.size)}</span>
+                            </div>
+                            {image.deviceType && (
+                              <div className={styles.imageCardMetaItem}>
+                                <span>{image.deviceType.toUpperCase()}</span>
+                              </div>
+                            )}
+                            {image.duration && (
+                              <div className={styles.imageCardMetaItem}>
+                                <span>耗时: {formatDuration(image.duration)}</span>
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* 第二行：生成参数（仅图片生成和编辑显示） */}
+                          {!isVideo && (image.steps || image.cfgScale || image.samplingMethod || image.scheduler) && (
+                            <div className={styles.imageCardMetaRow}>
+                              {image.steps && (
+                                <div className={styles.imageCardMetaItem}>
+                                  <span>步数: {image.steps}</span>
+                                </div>
+                              )}
+                              {image.cfgScale && (
+                                <div className={styles.imageCardMetaItem}>
+                                  <span>CFG: {image.cfgScale}</span>
+                                </div>
+                              )}
+                              {image.samplingMethod && (
+                                <div className={styles.imageCardMetaItem}>
+                                  <span>采样: {image.samplingMethod}</span>
+                                </div>
+                              )}
+                              {image.scheduler && (
+                                <div className={styles.imageCardMetaItem}>
+                                  <span>调度: {image.scheduler}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          
+                          {/* 第三行：种子和批次（仅图片生成和编辑显示） */}
+                          {!isVideo && ((image.seed !== null && image.seed !== undefined) || image.batchCount) ? (
+                            <div className={styles.imageCardMetaRow}>
+                              {image.seed !== null && image.seed !== undefined && (
+                                <div className={styles.imageCardMetaItem}>
+                                  <span>种子: {image.seed}</span>
+                                </div>
+                              )}
+                              {image.batchCount && image.batchCount > 1 && (
+                                <div className={styles.imageCardMetaItem}>
+                                  <span>批次: {image.batchCount}</span>
+                                </div>
+                              )}
+                            </div>
+                          ) : null}
+                        </div>
+
+                        {/* 操作按钮 */}
+                        <div 
+                          className={styles.imageCardActions} 
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ opacity: hoveredImagePath === image.path ? 1 : 0 }}
+                        >
+                          <Button
+                            icon={<InfoRegular />}
+                            appearance="subtle"
+                            size="small"
+                            onClick={async () => {
+                              setSelectedImageForDetail(image);
+                              setDetailVideoSrc(null);
+                              setDetailVideoError(null);
+                              const mediaType = image.mediaType || 'image';
+                              if (mediaType === 'video' && window.ipcRenderer) {
+                                try {
+                                  setDetailVideoLoading(true);
+                                  const result = await window.ipcRenderer.invoke('generated-images:get-video-data', image.path);
+                                  const uint8Array = new Uint8Array(result.data);
+                                  const blob = new Blob([uint8Array], { type: result.mimeType });
+                                  const blobUrl = URL.createObjectURL(blob);
+                                  setDetailVideoSrc(blobUrl);
+                                } catch (error) {
+                                  console.error('Failed to load video data:', error);
+                                  setDetailVideoError('加载视频失败，请尝试下载后使用系统播放器打开。');
+                                } finally {
+                                  setDetailVideoLoading(false);
+                                }
+                              }
+                              setDetailDialogOpen(true);
+                            }}
+                          >
+                            详情
+                          </Button>
+                          <Button
+                            icon={<ArrowDownloadRegular />}
+                            appearance="subtle"
+                            size="small"
+                            onClick={() => handleDownload(image)}
+                          >
+                            下载
+                          </Button>
+                          <Button
+                            icon={<DeleteRegular />}
+                            appearance="subtle"
+                            size="small"
+                            onClick={() => handleDeleteClick(image)}
+                          >
+                            删除
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className={styles.listContainer}>
+                {images.map((image) => {
+                  const isSelected = selectedImages.has(image.path);
+                  const typeInfo = getTypeInfo(image);
+                  const isVideo = image.mediaType === 'video';
+                  const imageSrc = image.previewImage 
+                    ? `data:${getImageMimeType(image.name)};base64,${image.previewImage}`
+                    : null;
+                  const hasImage = !!image.previewImage && !isVideo;
+                  
+                  return (
+                    <div
+                      key={image.path}
+                      className={`${styles.listItem} ${isSelected ? styles.listItemSelected : ''}`}
+                      onClick={(e) => {
+                        const target = e.target as HTMLElement;
+                        if (target.closest('button') || target.closest('input[type="checkbox"]')) {
+                          return;
+                        }
+                        handleToggleSelect(image.path);
+                      }}
+                    >
+                      {/* 复选框 */}
                       <Checkbox
                         checked={isSelected}
                         onChange={() => handleToggleSelect(image.path)}
+                        onClick={(e) => e.stopPropagation()}
                       />
-                    </div>
 
-                    {/* 类型标签 */}
-                    <div style={{ 
-                      position: 'absolute', 
-                      top: tokens.spacingVerticalS, 
-                      right: tokens.spacingHorizontalS,
-                      zIndex: 10,
-                    }}>
-                      <Badge appearance="filled" color={typeInfo.color} icon={typeInfo.icon}>
-                        {typeInfo.label}
-                      </Badge>
-                    </div>
-
-                    {/* 预览区域 */}
-                    <div className={styles.imagePreviewContainer}>
-                      {isVideo ? (
-                        <div className={styles.imagePlaceholder}>
-                          <VideoClipRegular style={{ fontSize: '64px' }} />
-                        </div>
-                      ) : hasImage && imageSrc ? (
-                        <>
+                      {/* 缩略图 */}
+                      <div className={styles.listItemThumbnail}>
+                        {isVideo ? (
+                          <VideoClipRegular style={{ fontSize: '48px', color: tokens.colorNeutralForeground3 }} />
+                        ) : hasImage && imageSrc ? (
                           <PhotoView src={imageSrc}>
                             <img
                               src={imageSrc}
                               alt={image.name}
-                              className={styles.imagePreview}
-                              onError={(e) => {
-                                // 如果图片加载失败，显示占位符
-                                const target = e.target as HTMLImageElement;
-                                target.style.display = 'none';
-                                const container = target.parentElement;
-                                if (container) {
-                                  const placeholder = container.querySelector(`.${styles.imagePlaceholder}`);
-                                  if (placeholder) {
-                                    (placeholder as HTMLElement).style.display = 'flex';
-                                  }
-                                }
-                              }}
+                              className={styles.listItemThumbnailImage}
                             />
                           </PhotoView>
-                          <div className={styles.imagePlaceholder} style={{ display: 'none' }}>
-                            <ImageRegular />
-                          </div>
-                        </>
-                      ) : (
-                        <div className={styles.imagePlaceholder}>
-                          <ImageRegular />
-                        </div>
-                      )}
-                    </div>
+                        ) : (
+                          <ImageRegular style={{ fontSize: '48px', color: tokens.colorNeutralForeground3 }} />
+                        )}
+                      </div>
 
-                    {/* 卡片内容 */}
-                    <div className={styles.imageCardContent}>
-                      <div className={styles.imageCardHeader}>
-                        <Body1 className={styles.imageFileName} title={image.name}>
-                          {image.name}
-                        </Body1>
+                      {/* 内容 */}
+                      <div className={styles.listItemContent}>
+                        <div className={styles.listItemHeader}>
+                          <Body1 style={{ fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase300 }}>
+                            {image.name}
+                          </Body1>
+                          <Badge appearance="filled" color={typeInfo.color} icon={typeInfo.icon}>
+                            {typeInfo.label}
+                          </Badge>
+                        </div>
                         {image.prompt && (
-                          <Body1 className={styles.imagePrompt} title={image.prompt}>
+                          <Body1 
+                            style={{ 
+                              fontSize: tokens.fontSizeBase200, 
+                              color: tokens.colorNeutralForeground2,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              display: '-webkit-box',
+                              WebkitLineClamp: 1,
+                              WebkitBoxOrient: 'vertical',
+                            }}
+                            title={image.prompt}
+                          >
                             {image.prompt}
                           </Body1>
                         )}
-                      </div>
-
-                      {/* 元信息 */}
-                      <div className={styles.imageCardMeta}>
-                        {/* 第一行：基本信息和分辨率 */}
-                        <div className={styles.imageCardMetaRow}>
+                        <div className={styles.listItemMeta}>
                           {!isVideo && image.width && image.height && (
-                            <div className={styles.imageCardMetaItem}>
-                              <DocumentRegular style={{ fontSize: '14px' }} />
-                              <span>{image.width} × {image.height}</span>
-                            </div>
+                            <span>{image.width} × {image.height}</span>
                           )}
-                          <div className={styles.imageCardMetaItem}>
-                            <span>{formatFileSize(image.size)}</span>
-                          </div>
+                          <span>{formatFileSize(image.size)}</span>
                           {image.deviceType && (
-                            <div className={styles.imageCardMetaItem}>
-                              <span>{image.deviceType.toUpperCase()}</span>
-                            </div>
+                            <span>{image.deviceType.toUpperCase()}</span>
                           )}
                           {image.duration && (
-                            <div className={styles.imageCardMetaItem}>
-                              <span>耗时: {formatDuration(image.duration)}</span>
-                            </div>
+                            <span>耗时: {formatDuration(image.duration)}</span>
+                          )}
+                          {!isVideo && image.steps && (
+                            <span>步数: {image.steps}</span>
+                          )}
+                          {!isVideo && image.cfgScale && (
+                            <span>CFG: {image.cfgScale}</span>
+                          )}
+                          {!isVideo && image.samplingMethod && (
+                            <span>采样: {image.samplingMethod}</span>
+                          )}
+                          {!isVideo && image.seed !== null && image.seed !== undefined && (
+                            <span>种子: {image.seed}</span>
                           )}
                         </div>
-                        
-                        {/* 第二行：生成参数（仅图片生成和编辑显示） */}
-                        {!isVideo && (image.steps || image.cfgScale || image.samplingMethod || image.scheduler) && (
-                          <div className={styles.imageCardMetaRow}>
-                            {image.steps && (
-                              <div className={styles.imageCardMetaItem}>
-                                <span>步数: {image.steps}</span>
-                              </div>
-                            )}
-                            {image.cfgScale && (
-                              <div className={styles.imageCardMetaItem}>
-                                <span>CFG: {image.cfgScale}</span>
-                              </div>
-                            )}
-                            {image.samplingMethod && (
-                              <div className={styles.imageCardMetaItem}>
-                                <span>采样: {image.samplingMethod}</span>
-                              </div>
-                            )}
-                            {image.scheduler && (
-                              <div className={styles.imageCardMetaItem}>
-                                <span>调度: {image.scheduler}</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        
-                        {/* 第三行：种子和批次（仅图片生成和编辑显示） */}
-                        {!isVideo && ((image.seed !== null && image.seed !== undefined) || image.batchCount) ? (
-                          <div className={styles.imageCardMetaRow}>
-                            {image.seed !== null && image.seed !== undefined && (
-                              <div className={styles.imageCardMetaItem}>
-                                <span>种子: {image.seed}</span>
-                              </div>
-                            )}
-                            {image.batchCount && image.batchCount > 1 && (
-                              <div className={styles.imageCardMetaItem}>
-                                <span>批次: {image.batchCount}</span>
-                              </div>
-                            )}
-                          </div>
-                        ) : null}
                       </div>
 
                       {/* 操作按钮 */}
-                      <div 
-                        className={styles.imageCardActions} 
-                        onClick={(e) => e.stopPropagation()}
-                        style={{ opacity: hoveredImagePath === image.path ? 1 : 0 }}
-                      >
+                      <div className={styles.listItemActions} onClick={(e) => e.stopPropagation()}>
                         <Button
                           icon={<InfoRegular />}
                           appearance="subtle"
@@ -882,7 +1127,6 @@ export const GeneratedImagesPage = () => {
                               try {
                                 setDetailVideoLoading(true);
                                 const result = await window.ipcRenderer.invoke('generated-images:get-video-data', image.path);
-                                // 将数组转换回 Uint8Array，然后创建 Blob 和 Blob URL
                                 const uint8Array = new Uint8Array(result.data);
                                 const blob = new Blob([uint8Array], { type: result.mimeType });
                                 const blobUrl = URL.createObjectURL(blob);
@@ -917,14 +1161,13 @@ export const GeneratedImagesPage = () => {
                         </Button>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </>
         )}
       </Card>
-
 
       {/* 删除确认对话框 */}
       <Dialog open={deleteDialogOpen} onOpenChange={(_, data) => setDeleteDialogOpen(data.open)}>

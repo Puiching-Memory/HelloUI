@@ -131,6 +131,12 @@ HelloUI/
 
 ---
 
+## 致谢
+
+- [Catppuccin](https://github.com/catppuccin/catppuccin) - 本项目使用的配色方案库
+
+---
+
 ## 许可证
 
 MIT

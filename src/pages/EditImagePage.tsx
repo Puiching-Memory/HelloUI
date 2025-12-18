@@ -920,7 +920,7 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
             <Textarea
               value={prompt}
               onChange={(_, data) => setPrompt(data.value)}
-              placeholder="输入图片描述，例如：a beautiful landscape with mountains and lakes"
+              placeholder="输入图片描述，例如：将背景改为日落场景"
               rows={4}
               resize="vertical"
             />
