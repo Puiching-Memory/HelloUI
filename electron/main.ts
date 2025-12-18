@@ -191,6 +191,10 @@ ipcMain.handle('weights:list-files', async (_, folder: string) => {
   
   for (const entry of entries) {
     if (entry.isFile()) {
+      // 排除配置文件 model-groups.json，避免在权重列表中显示，防止用户误删/误操作
+      if (entry.name === 'model-groups.json') {
+        continue
+      }
       const filePath = join(folder, entry.name)
       const stats = await fs.stat(filePath)
       files.push({
@@ -783,16 +787,35 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
           args.push('--vae', vaeModelPath)
         }
       }
-      // 添加 LLM 文本编码器支持（用于某些模型如 Z-Image 等）
-      if (group?.llmModel) {
-        // 将相对路径转换为绝对路径
-        const llmModelPath = resolveModelPath(group.llmModel)
-        if (existsSync(llmModelPath)) {
-          args.push('--llm', llmModelPath)
+      
+      // 根据任务类型选择不同的文本编码器模型
+      const taskType = group?.taskType
+      if (taskType === 'edit') {
+        // 图片编辑任务：使用 CLIP L 和 T5XXL 模型
+        if (group?.clipLModel) {
+          const clipLModelPath = resolveModelPath(group.clipLModel)
+          if (existsSync(clipLModelPath)) {
+            args.push('--clip_l', clipLModelPath)
+            console.log(`[Generate] CLIP L model: ${clipLModelPath}`)
+          }
+        }
+        if (group?.t5xxlModel) {
+          const t5xxlModelPath = resolveModelPath(group.t5xxlModel)
+          if (existsSync(t5xxlModelPath)) {
+            args.push('--t5xxl', t5xxlModelPath)
+            console.log(`[Generate] T5XXL model: ${t5xxlModelPath}`)
+          }
+        }
+      } else {
+        // 其他任务类型：使用 LLM 文本编码器支持（用于某些模型如 Z-Image 等）
+        if (group?.llmModel) {
+          // 将相对路径转换为绝对路径
+          const llmModelPath = resolveModelPath(group.llmModel)
+          if (existsSync(llmModelPath)) {
+            args.push('--llm', llmModelPath)
+          }
         }
       }
-      // 注意：根据 sd-cli.exe 的帮助，还可能需要 clip_l, clip_g, clip_vision, t5xxl 等
-      // 可以根据具体模型类型进一步扩展
     }
 
     if (negativePrompt) {
@@ -800,11 +823,28 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
     }
 
     // 添加输入图片（用于图片编辑和上采样）
+    // 对于图片编辑任务，优先使用 -r 参数（如果支持），否则使用 --input-image
     if (inputImage) {
       const inputImagePath = resolve(inputImage)
       if (existsSync(inputImagePath)) {
-        args.push('--input-image', inputImagePath)
-        console.log(`[Generate] Input image: ${inputImagePath}`)
+        // 检查是否是图片编辑任务（通过检查是否有 clipLModel 或 t5xxlModel 来判断）
+        let isEditTask = false
+        if (groupId) {
+          const groups = await loadModelGroups()
+          const group = groups.find(g => g.id === groupId)
+          if (group && (group.taskType === 'edit' || group.clipLModel || group.t5xxlModel)) {
+            isEditTask = true
+          }
+        }
+        
+        // 图片编辑任务使用 -r 参数，其他任务使用 --input-image
+        if (isEditTask) {
+          args.push('-r', inputImagePath)
+          console.log(`[Generate] Input image (edit mode): ${inputImagePath}`)
+        } else {
+          args.push('--input-image', inputImagePath)
+          console.log(`[Generate] Input image: ${inputImagePath}`)
+        }
       } else {
         throw new Error(`输入图片文件不存在: ${inputImagePath}`)
       }
@@ -1293,6 +1333,9 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
 
 // ========== 视频生成相关 IPC 处理程序 ==========
 
+// 视频生成的默认负面提示词
+const VIDEO_DEFAULT_NEGATIVE_PROMPT = '色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走'
+
 // IPC 处理程序：取消视频生成
 ipcMain.handle('generate-video:cancel', async () => {
   if (currentGenerateProcess && !currentGenerateProcess.killed) {
@@ -1340,6 +1383,7 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
 
     // 确定使用的模型路径
     let sdModelPath: string | undefined
+    let highNoiseModelPath: string | undefined
 
     if (groupId) {
       const groups = await loadModelGroups()
@@ -1351,9 +1395,17 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
         throw new Error('模型组中未配置SD模型')
       }
       sdModelPath = resolveModelPath(group.sdModel)
-      
       if (!existsSync(sdModelPath)) {
         throw new Error(`SD模型文件不存在: ${sdModelPath}`)
+      }
+
+      // 如果模型组配置了高噪声模型，在此解析路径
+      if (group.highNoiseSdModel) {
+        const candidate = resolveModelPath(group.highNoiseSdModel)
+        if (!existsSync(candidate)) {
+          throw new Error(`高噪声SD模型文件不存在: ${candidate}`)
+        }
+        highNoiseModelPath = candidate
       }
     } else if (modelPath) {
       sdModelPath = resolveModelPath(modelPath)
@@ -1377,18 +1429,19 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
     }
 
     const timestamp = Date.now()
+    // 改为输出 MP4，便于在 HTML5 video 中直接播放
     const outputVideoPath = join(outputsDir, `video_${timestamp}.mp4`)
     const outputMetadataPath = join(outputsDir, `video_${timestamp}.json`)
 
     // 构建命令行参数
-    // 注意：sdcpp 主要是图像生成，这里创建一个框架
-    // 实际视频生成可能需要其他工具或扩展的 sdcpp 功能
+    // 参考 sd-cli.exe 视频生成功能：使用模块 vid_gen
     const args: string[] = [
+      '-M', 'vid_gen',
       '--diffusion-model', sdModelPath,
       '--prompt', prompt,
     ]
     
-    // 添加 VAE 和 LLM 模型支持
+    // 添加 VAE 和 文本编码器（T5/LLM）模型支持
     if (groupId) {
       const groups = await loadModelGroups()
       const group = groups.find(g => g.id === groupId)
@@ -1401,23 +1454,36 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
       if (group?.llmModel) {
         const llmModelPath = resolveModelPath(group.llmModel)
         if (existsSync(llmModelPath)) {
-          args.push('--llm', llmModelPath)
+          // 在视频任务中，我们将该字段视为文本编码器（如 T5），对应 --t5xxl
+          args.push('--t5xxl', llmModelPath)
         }
       }
     }
 
-    if (negativePrompt) {
-      args.push('--negative-prompt', negativePrompt)
+    // 视频生成：如果用户提供了负面提示词，使用用户的；否则使用默认的
+    const finalNegativePrompt = negativePrompt || VIDEO_DEFAULT_NEGATIVE_PROMPT
+    args.push('--negative-prompt', finalNegativePrompt)
+
+    // CLI 直接输出 AVI 视频文件
+    args.push('--output', outputVideoPath)
+
+    // 如果存在高噪声模型，则启用 --high-noise-diffusion-model
+    if (highNoiseModelPath) {
+      args.push('--high-noise-diffusion-model', highNoiseModelPath)
     }
 
-    // 注意：sdcpp 默认输出图片，视频生成需要额外的处理
-    // 这里先输出为图片序列，然后可以转换为视频
-    const outputImagePath = join(outputsDir, `video_${timestamp}_frame.png`)
-    args.push('--output', outputImagePath)
+    // 视频帧数，对应示例命令中的 --video-frames
+    if (frames && frames > 0) {
+      args.push('--video-frames', frames.toString())
+    }
 
-    // 添加高级参数（与图片生成相同）
+    // 添加高级参数
     if (steps !== 20) {
       args.push('--steps', steps.toString())
+      // 高噪声路径的步数：先与主路径保持一致
+      if (highNoiseModelPath) {
+        args.push('--high-noise-steps', steps.toString())
+      }
     }
     if (width !== 512) {
       args.push('--width', width.toString())
@@ -1427,14 +1493,23 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
     }
     if (Math.abs(cfgScale - 7.0) > 0.0001) {
       args.push('--cfg-scale', cfgScale.toString())
+      // 高噪声路径的 CFG scale：默认与主路径一致
+      if (highNoiseModelPath) {
+        args.push('--high-noise-cfg-scale', cfgScale.toString())
+      }
     }
 
     if (samplingMethod && typeof samplingMethod === 'string' && samplingMethod.trim() !== '') {
-      args.push('--sampling-method', samplingMethod.trim())
+      const method = samplingMethod.trim()
+      args.push('--sampling-method', method)
+      // 高噪声路径的采样方法：默认与主路径一致
+      if (highNoiseModelPath) {
+        args.push('--high-noise-sampling-method', method)
+      }
     }
 
     if (scheduler && typeof scheduler === 'string' && scheduler.trim() !== '') {
-      args.push('--schedule', scheduler.trim())
+      args.push('--scheduler', scheduler.trim())
     }
 
     if (seed !== undefined && seed >= 0) {
@@ -1497,6 +1572,10 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
     if (vaeTiling === true) {
       args.push('--vae-tiling')
     }
+
+    // Wan 视频模型常用 flow-shift，可设置为一个合理默认值
+    const FLOW_SHIFT_DEFAULT = 3.0
+    args.push('--flow-shift', FLOW_SHIFT_DEFAULT.toString())
 
     console.log(`[Generate Video] Starting video generation: ${sdExePath}`)
     console.log(`[Generate Video] Command line arguments: ${args.join(' ')}`)
@@ -1650,101 +1729,93 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
 
         if (code === 0) {
           // 生成成功
-          // 注意：sdcpp 主要生成图片，这里需要将图片序列转换为视频
-          // 目前先返回生成的图片，后续可以扩展为真正的视频生成
-          if (existsSync(outputImagePath)) {
-            try {
-              const endTime = Date.now()
-              const duration = endTime - startTime
-              
-              let groupName: string | undefined
-              let vaeModelPath: string | undefined
-              let llmModelPath: string | undefined
-              
-              if (groupId) {
-                const groups = await loadModelGroups()
-                const group = groups.find(g => g.id === groupId)
-                if (group) {
-                  groupName = group.name
-                  vaeModelPath = group.vaeModel
-                  llmModelPath = group.llmModel
-                }
+          // CLI 直接输出 AVI 视频文件
+          try {
+            const endTime = Date.now()
+            const duration = endTime - startTime
+
+            let groupName: string | undefined
+            let vaeModelPath: string | undefined
+            let llmModelPath: string | undefined
+
+            if (groupId) {
+              const groups = await loadModelGroups()
+              const group = groups.find(g => g.id === groupId)
+              if (group) {
+                groupName = group.name
+                vaeModelPath = group.vaeModel
+                llmModelPath = group.llmModel
               }
-              
-              // 保存生成参数元数据
-              const metadata = {
-                prompt,
-                negativePrompt,
-                steps,
-                width,
-                height,
-                cfgScale,
-                deviceType,
-                groupId: groupId || null,
-                groupName: groupName || null,
-                modelPath: sdModelPath,
-                vaeModelPath: vaeModelPath || null,
-                llmModelPath: llmModelPath || null,
-                timestamp,
-                generatedAt: new Date().toISOString(),
-                samplingMethod: samplingMethod || null,
-                scheduler: scheduler || null,
-                seed: seed !== undefined ? seed : null,
-                batchCount,
-                threads: threads !== undefined ? threads : null,
-                preview: preview || null,
-                previewInterval: previewInterval || null,
-                verbose,
-                color,
-                offloadToCpu,
-                diffusionFa,
-                controlNetCpu,
-                clipOnCpu,
-                vaeOnCpu,
-                diffusionConvDirect,
-                vaeConvDirect,
-                vaeTiling,
-                frames,
-                fps,
-                commandLine: args.join(' '),
-                duration,
-                type: 'video' as const,
-                mediaType: 'video' as const,
-              }
-              
-              await fs.writeFile(outputMetadataPath, JSON.stringify(metadata, null, 2), 'utf-8')
-              
-              // 注意：目前 sdcpp 生成的是图片，需要转换为视频
-              // 这里先返回图片路径，后续可以扩展为真正的视频生成
-              // 暂时将图片复制为视频文件（实际应该使用 ffmpeg 等工具转换）
-              if (existsSync(outputImagePath)) {
-                // 暂时使用图片路径，后续可以扩展为视频转换
-                const videoBuffer = await fs.readFile(outputImagePath)
-                const base64Video = `data:image/png;base64,${videoBuffer.toString('base64')}`
-                
-                const durationSeconds = (duration / 1000).toFixed(2)
-                console.log(`[Generate Video] Video generation completed in ${durationSeconds}s (${duration}ms)`)
-                
-                event.sender.send('generate-video:progress', { 
-                  progress: `生成完成（耗时: ${durationSeconds}秒）`,
-                  video: base64Video 
-                })
-                
-                safeResolve({
-                  success: true,
-                  video: base64Video,
-                  videoPath: outputImagePath, // 暂时返回图片路径
-                  duration,
-                })
-              } else {
-                safeReject(new Error('生成完成但未找到输出文件'))
-              }
-            } catch (error) {
-              console.error('[Generate Video] Failed to read video:', error)
-              safeReject(new Error(`读取生成的视频失败: ${error instanceof Error ? error.message : String(error)}`))
             }
-          } else {
-            safeReject(new Error('生成完成但未找到输出文件'))
+
+            // 检查视频文件是否存在
+            if (!existsSync(outputVideoPath)) {
+              safeReject(new Error('生成完成但未找到输出视频文件'))
+              return
+            }
+
+            const durationSeconds = (duration / 1000).toFixed(2)
+            console.log(`[Generate Video] Video generation completed in ${durationSeconds}s (${duration}ms)`)
+
+            // 保存生成参数元数据
+            const metadata = {
+              prompt,
+              negativePrompt,
+              steps,
+              width,
+              height,
+              cfgScale,
+              deviceType,
+              groupId: groupId || null,
+              groupName: groupName || null,
+              modelPath: sdModelPath,
+              vaeModelPath: vaeModelPath || null,
+              llmModelPath: llmModelPath || null,
+              timestamp,
+              generatedAt: new Date().toISOString(),
+              samplingMethod: samplingMethod || null,
+              scheduler: scheduler || null,
+              seed: seed !== undefined ? seed : null,
+              batchCount,
+              threads: threads !== undefined ? threads : null,
+              preview: preview || null,
+              previewInterval: previewInterval || null,
+              verbose,
+              color,
+              offloadToCpu,
+              diffusionFa,
+              controlNetCpu,
+              clipOnCpu,
+              vaeOnCpu,
+              diffusionConvDirect,
+              vaeConvDirect,
+              vaeTiling,
+              frames,
+              fps,
+              commandLine: args.join(' '),
+              duration,
+              type: 'video' as const,
+              mediaType: 'video' as const,
+            }
+
+            await fs.writeFile(outputMetadataPath, JSON.stringify(metadata, null, 2), 'utf-8')
+
+            // 发送完成消息（使用 file:// 协议 URL）
+            const videoFileUrl = `file:///${outputVideoPath.replace(/\\/g, '/')}`
+            event.sender.send('generate-video:progress', {
+              progress: `生成完成（耗时: ${durationSeconds}秒）`,
+              video: videoFileUrl,
+            })
+
+            safeResolve({
+              success: true,
+              video: videoFileUrl,
+              videoPath: outputVideoPath,
+              duration,
+            })
+          } catch (error) {
+            console.error('[Generate Video] Failed to process generated video:', error)
+            safeReject(new Error(`处理生成视频失败: ${error instanceof Error ? error.message : String(error)}`))
           }
         } else {
           const endTime = Date.now()
@@ -1948,6 +2019,47 @@ ipcMain.handle('generated-images:delete', async (_, filePath: string) => {
 ipcMain.handle('generated-images:get-preview', async (_, imagePath: string) => {
   const imageBuffer = await fs.readFile(imagePath)
   return imageBuffer.toString('base64')
+})
+
+// IPC 处理程序：获取视频数据（返回 ArrayBuffer 和 MIME 类型），用于在前端创建 Blob URL 播放本地视频
+ipcMain.handle('generated-images:get-video-data', async (_, videoPath: string) => {
+  const ext = extname(videoPath).toLowerCase()
+  const videoBuffer = await fs.readFile(videoPath)
+
+  let mimeType = 'video/*'
+  switch (ext) {
+    case '.mp4':
+      mimeType = 'video/mp4'
+      break
+    case '.webm':
+      mimeType = 'video/webm'
+      break
+    case '.avi':
+      mimeType = 'video/x-msvideo'
+      break
+    case '.mov':
+      mimeType = 'video/quicktime'
+      break
+    case '.mkv':
+      mimeType = 'video/x-matroska'
+      break
+    case '.flv':
+      mimeType = 'video/x-flv'
+      break
+    case '.wmv':
+      mimeType = 'video/x-ms-wmv'
+      break
+    default:
+      mimeType = 'video/*'
+      break
+  }
+
+  // 返回 ArrayBuffer（通过 Uint8Array 转换）和 MIME 类型
+  // 注意：Electron IPC 会自动序列化 Buffer，前端接收到的会是类似数组的对象
+  return {
+    data: Array.from(videoBuffer), // 转换为普通数组以便序列化
+    mimeType: mimeType
+  }
 })
 
 // IPC 处理程序：批量下载并打包为 ZIP

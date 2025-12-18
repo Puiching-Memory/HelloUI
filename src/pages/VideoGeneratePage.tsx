@@ -14,6 +14,9 @@ import {
   Input,
   Checkbox,
   Text,
+  MessageBar,
+  MessageBarBody,
+  MessageBarTitle,
 } from '@fluentui/react-components';
 import {
   VideoClipRegular,
@@ -50,8 +53,9 @@ const useStyles = makeStyles({
     flex: '1 1 auto',
     minHeight: 0,
     overflow: 'auto',
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: 'stretch',
+    justifyContent: 'flex-start',
+    padding: tokens.spacingVerticalM,
   },
   previewVideo: {
     width: 'auto',
@@ -213,6 +217,74 @@ const useStyles = makeStyles({
     textAlign: 'center',
     padding: tokens.spacingVerticalM,
   },
+  framePreviewLayout: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+    height: '100%',
+  },
+  framePreviewMain: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: tokens.colorNeutralBackground3,
+    borderRadius: tokens.borderRadiusMedium,
+    padding: tokens.spacingVerticalM,
+    minHeight: '260px',
+  },
+  framePreviewImage: {
+    maxWidth: '100%',
+    maxHeight: '50vh',
+    borderRadius: tokens.borderRadiusMedium,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    objectFit: 'contain',
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  frameTimeline: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+  },
+  frameTimelineHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  frameTimelineTrack: {
+    display: 'flex',
+    flexDirection: 'row',
+    gap: tokens.spacingHorizontalXS,
+    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalXS}`,
+    backgroundColor: tokens.colorNeutralBackground3,
+    borderRadius: tokens.borderRadiusMedium,
+    overflowX: 'auto',
+  },
+  frameThumbnailButton: {
+    border: 'none',
+    padding: 0,
+    background: 'transparent',
+    cursor: 'pointer',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+  },
+  frameThumbnail: {
+    width: '72px',
+    height: '72px',
+    objectFit: 'cover',
+    borderRadius: tokens.borderRadiusSmall,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  frameThumbnailSelected: {
+    outline: `2px solid ${tokens.colorPaletteBlueBorder2}`,
+    outlineOffset: 1,
+  },
+  frameTimecode: {
+    fontSize: tokens.fontSizeBase100,
+    color: tokens.colorNeutralForeground3,
+    textAlign: 'center',
+  },
 });
 
 interface ModelGroup {
@@ -268,6 +340,8 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generatedVideo, setGeneratedVideo] = useState<string | null>(null);
+  const [videoFrames, setVideoFrames] = useState<string[]>([]);
+  const [selectedFrameIndex, setSelectedFrameIndex] = useState<number>(0);
   const [generationProgress, setGenerationProgress] = useState<string>('');
   const [cliOutput, setCliOutput] = useState<Array<{ type: 'stdout' | 'stderr'; text: string; timestamp: number }>>([]);
   const [cliOutputExpanded, setCliOutputExpanded] = useState(false);
@@ -383,8 +457,8 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
       }
       setLoading(true);
       const groups = await window.ipcRenderer.invoke('model-groups:list') as ModelGroup[];
-      // 只显示支持视频生成的模型组（taskType 为 'video' 或 'all'）
-      const videoGroups = groups.filter((g: ModelGroup) => !g.taskType || g.taskType === 'video' || g.taskType === 'all');
+      // 只显示支持视频生成的模型组（taskType 为 'video'）
+      const videoGroups = groups.filter((g: ModelGroup) => g.taskType === 'video');
       setModelGroups(videoGroups);
     } catch (error) {
       console.error('Failed to load model groups:', error);
@@ -433,16 +507,27 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
     try {
       setGenerating(true);
       setGeneratedVideo(null);
+      setVideoFrames([]);
+      setSelectedFrameIndex(0);
       setGenerationProgress('');
       setCliOutput([]);
 
       // 监听进度更新
-      const progressListener = (data: { progress?: string; video?: string }) => {
+      const progressListener = (data: { progress?: string; video?: string; frames?: string[] }) => {
         if (data.progress) {
           setGenerationProgress(data.progress);
         }
         if (data.video) {
           setGeneratedVideo(data.video);
+        }
+        if (data.frames && Array.isArray(data.frames) && data.frames.length > 0) {
+          setVideoFrames(data.frames);
+          setSelectedFrameIndex(prev => {
+            if (prev < 0 || prev >= data.frames!.length) {
+              return 0;
+            }
+            return prev;
+          });
         }
       };
 
@@ -481,8 +566,14 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
           fps, // 帧率
         });
 
-        if (result.success && result.video) {
-          setGeneratedVideo(result.video);
+        if (result.success && (result.video || (result.frames && result.frames.length > 0))) {
+          if (result.video) {
+            setGeneratedVideo(result.video);
+          }
+          if (result.frames && Array.isArray(result.frames) && result.frames.length > 0) {
+            setVideoFrames(result.frames);
+            setSelectedFrameIndex(0);
+          }
           setGenerationProgress('生成完成');
         } else {
           throw new Error(result.error || '生成失败');
@@ -551,6 +642,14 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
     <div className={styles.container}>
       <Title1>视频生成</Title1>
 
+      {/* 警告提示 */}
+      <MessageBar intent="warning">
+        <MessageBarTitle>功能尚未准备好</MessageBarTitle>
+        <MessageBarBody>
+          视频生成功能目前仍在开发中，可能存在不稳定的情况。生成的视频文件可能无法在浏览器中直接播放，建议使用系统播放器打开查看。
+        </MessageBarBody>
+      </MessageBar>
+
       {/* 预览区域 */}
       <Card className={styles.previewCard}>
         <Title2>生成结果</Title2>
@@ -562,10 +661,52 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
                 {generationProgress || '正在生成视频...'}
               </Body1>
             </div>
+          ) : videoFrames.length > 0 ? (
+            <div className={styles.framePreviewLayout}>
+              <div className={styles.framePreviewMain}>
+                <img
+                  src={videoFrames[Math.min(selectedFrameIndex, videoFrames.length - 1)]}
+                  alt={`第 ${selectedFrameIndex + 1} 帧预览`}
+                  className={styles.framePreviewImage}
+                />
+              </div>
+              <div className={styles.frameTimeline}>
+                <div className={styles.frameTimelineHeader}>
+                  <Body1>帧预览时间线</Body1>
+                  <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                    第 {selectedFrameIndex + 1}/{videoFrames.length} 帧 · {fps} FPS
+                  </Body1>
+                </div>
+                <div className={styles.frameTimelineTrack}>
+                  {videoFrames.map((frame, index) => {
+                    const isSelected = index === selectedFrameIndex;
+                    const timeInSeconds = (index / Math.max(fps, 1)).toFixed(2);
+                    return (
+                      <button
+                        key={index}
+                        type="button"
+                        className={styles.frameThumbnailButton}
+                        onClick={() => setSelectedFrameIndex(index)}
+                      >
+                        <img
+                          src={frame}
+                          alt={`第 ${index + 1} 帧`}
+                          className={`${styles.frameThumbnail} ${isSelected ? styles.frameThumbnailSelected : ''}`}
+                        />
+                        <span className={styles.frameTimecode}>{timeInSeconds}s</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                  {generationProgress || '生成完成'}
+                </Body1>
+              </div>
+            </div>
           ) : generatedVideo ? (
             <>
-              <video 
-                src={generatedVideo} 
+              <video
+                src={generatedVideo}
                 controls
                 className={styles.previewVideo}
                 style={{ maxWidth: '50vw', maxHeight: '50vh' }}

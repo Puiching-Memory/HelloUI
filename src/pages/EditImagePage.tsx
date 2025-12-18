@@ -448,10 +448,10 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
       }
       setLoading(true);
       const groups = await window.ipcRenderer.invoke('model-groups:list');
-      // 过滤模型组：只显示 taskType 为 'edit' 或 'all' 的模型组
+      // 过滤模型组：只显示 taskType 为 'edit' 的模型组
       const filteredGroups = (groups || []).filter((group: any) => {
-        const taskType = group.taskType || 'all';
-        return taskType === 'edit' || taskType === 'all';
+        const taskType = group.taskType;
+        return taskType === 'edit';
       });
       setModelGroups(filteredGroups);
     } catch (error) {

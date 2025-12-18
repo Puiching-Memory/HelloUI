@@ -19,6 +19,7 @@ export interface WeightFile {
 
 /**
  * 任务类型
+ * @deprecated 'all' 类型已废弃，不再支持。每个模型组必须明确指定其支持的任务类型。
  */
 export type TaskType = 'generate' | 'edit' | 'video' | 'all';
 
@@ -28,10 +29,13 @@ export type TaskType = 'generate' | 'edit' | 'video' | 'all';
 export interface ModelGroup {
   id: string;
   name: string;
-  taskType?: TaskType;  // 任务类型：generate（图片生成）、edit（图片编辑）、video（视频生成）、all（所有任务）
-  sdModel?: string;  // SD模型路径
+  taskType?: TaskType;  // 任务类型：generate（图片生成）、edit（图片编辑）、video（视频生成）。注意：'all' 类型已废弃，不再支持。
+  sdModel?: string;  // SD/基础模型路径（图片或视频）
+  highNoiseSdModel?: string; // 高噪声SD模型路径（视频生成用，可选）
   vaeModel?: string;  // VAE模型路径
-  llmModel?: string;  // LLM/CLIP模型路径
+  llmModel?: string;  // LLM/CLIP/T5 文本编码器模型路径
+  clipLModel?: string;  // CLIP L模型路径（图片编辑任务用，可选）
+  t5xxlModel?: string;  // T5XXL模型路径（图片编辑任务用，可选）
   defaultSteps?: number;  // 推荐的默认采样步数
   defaultCfgScale?: number;  // 推荐的默认CFG Scale值
   defaultWidth?: number;  // 推荐的默认图片宽度

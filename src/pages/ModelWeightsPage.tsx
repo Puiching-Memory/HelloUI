@@ -107,10 +107,13 @@ type TaskType = 'generate' | 'edit' | 'video' | 'all';
 interface ModelGroup {
   id: string;
   name: string;
-  taskType?: TaskType;  // 任务类型：generate（图片生成）、edit（图片编辑）、video（视频生成）、all（所有任务）
+  taskType?: TaskType;  // 任务类型：generate（图片生成）、edit（图片编辑）、video（视频生成）
   sdModel?: string;
+  highNoiseSdModel?: string;  // 高噪声SD模型路径（视频生成用，可选）
   vaeModel?: string;
   llmModel?: string;
+  clipLModel?: string;  // CLIP L模型路径（图片编辑任务用，可选）
+  t5xxlModel?: string;  // T5XXL模型路径（图片编辑任务用，可选）
   defaultSteps?: number;  // 推荐的默认采样步数
   defaultCfgScale?: number;  // 推荐的默认CFG Scale值
   defaultWidth?: number;  // 推荐的默认图片宽度
@@ -145,8 +148,11 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
   const [editingGroup, setEditingGroup] = useState<ModelGroup | null>(null);
   const [groupName, setGroupName] = useState('');
   const [groupSdModel, setGroupSdModel] = useState<string>('');
+  const [groupHighNoiseSdModel, setGroupHighNoiseSdModel] = useState<string>('');
   const [groupVaeModel, setGroupVaeModel] = useState<string>('');
   const [groupLlmModel, setGroupLlmModel] = useState<string>('');
+  const [groupClipLModel, setGroupClipLModel] = useState<string>('');
+  const [groupT5xxlModel, setGroupT5xxlModel] = useState<string>('');
   const [groupDefaultSteps, setGroupDefaultSteps] = useState<string>('20');
   const [groupDefaultCfgScale, setGroupDefaultCfgScale] = useState<string>('7.0');
   const [groupDefaultWidth, setGroupDefaultWidth] = useState<string>('512');
@@ -154,7 +160,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
   const [groupDefaultSamplingMethod, setGroupDefaultSamplingMethod] = useState<string>('euler_a');
   const [groupDefaultScheduler, setGroupDefaultScheduler] = useState<string>('discrete');
   const [groupDefaultSeed, setGroupDefaultSeed] = useState<string>('');
-  const [groupTaskType, setGroupTaskType] = useState<TaskType>('all');
+  const [groupTaskType, setGroupTaskType] = useState<TaskType>('generate');
 
   // 加载权重文件夹路径
   useEffect(() => {
@@ -339,8 +345,11 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     setEditingGroup(null);
     setGroupName('');
     setGroupSdModel('');
+    setGroupHighNoiseSdModel('');
     setGroupVaeModel('');
     setGroupLlmModel('');
+    setGroupClipLModel('');
+    setGroupT5xxlModel('');
     setGroupDefaultSteps('20');
     setGroupDefaultCfgScale('7.0');
     setGroupDefaultWidth('512');
@@ -348,7 +357,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     setGroupDefaultSamplingMethod('euler_a');
     setGroupDefaultScheduler('discrete');
     setGroupDefaultSeed('');
-    setGroupTaskType('all');
+    setGroupTaskType('generate');
     setGroupDialogOpen(true);
   };
 
@@ -356,8 +365,11 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     setEditingGroup(group);
     setGroupName(group.name);
     setGroupSdModel(group.sdModel || '');
+    setGroupHighNoiseSdModel(group.highNoiseSdModel || '');
     setGroupVaeModel(group.vaeModel || '');
     setGroupLlmModel(group.llmModel || '');
+    setGroupClipLModel(group.clipLModel || '');
+    setGroupT5xxlModel(group.t5xxlModel || '');
     setGroupDefaultSteps(group.defaultSteps?.toString() || '20');
     setGroupDefaultCfgScale(group.defaultCfgScale?.toString() || '7.0');
     setGroupDefaultWidth(group.defaultWidth?.toString() || '512');
@@ -365,7 +377,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     setGroupDefaultSamplingMethod(group.defaultSamplingMethod || 'euler_a');
     setGroupDefaultScheduler(group.defaultScheduler || 'discrete');
     setGroupDefaultSeed(group.defaultSeed !== undefined && group.defaultSeed >= 0 ? group.defaultSeed.toString() : '');
-    setGroupTaskType(group.taskType || 'all');
+    setGroupTaskType(group.taskType || 'generate');
     setGroupDialogOpen(true);
   };
 
@@ -375,7 +387,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
       return;
     }
 
-    // 创建新模型组时，必须所有三个模型都选择了有效模型
+    // 创建新模型组时，必须所有必需的模型都选择了有效模型
     if (!editingGroup) {
       if (!groupSdModel || !groupSdModel.trim()) {
         alert('创建新模型组时，必须选择SD模型');
@@ -385,9 +397,22 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
         alert('创建新模型组时，必须选择VAE模型');
         return;
       }
-      if (!groupLlmModel || !groupLlmModel.trim()) {
-        alert('创建新模型组时，必须选择LLM/CLIP模型');
-        return;
+      if (groupTaskType === 'edit') {
+        // 图片编辑任务需要 CLIP L 和 T5XXL 模型
+        if (!groupClipLModel || !groupClipLModel.trim()) {
+          alert('创建图片编辑模型组时，必须选择CLIP L模型');
+          return;
+        }
+        if (!groupT5xxlModel || !groupT5xxlModel.trim()) {
+          alert('创建图片编辑模型组时，必须选择T5XXL模型');
+          return;
+        }
+      } else {
+        // 其他任务类型需要 LLM/CLIP 模型
+        if (!groupLlmModel || !groupLlmModel.trim()) {
+          alert('创建新模型组时，必须选择LLM/CLIP模型');
+          return;
+        }
       }
     }
 
@@ -398,8 +423,11 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
           name: groupName.trim(),
           taskType: groupTaskType,
           sdModel: groupSdModel || undefined,
+          highNoiseSdModel: groupHighNoiseSdModel || undefined,
           vaeModel: groupVaeModel || undefined,
           llmModel: groupLlmModel || undefined,
+          clipLModel: groupClipLModel || undefined,
+          t5xxlModel: groupT5xxlModel || undefined,
           defaultSteps: groupDefaultSteps ? parseFloat(groupDefaultSteps) : undefined,
           defaultCfgScale: groupDefaultCfgScale ? parseFloat(groupDefaultCfgScale) : undefined,
           defaultWidth: groupDefaultWidth ? parseInt(groupDefaultWidth) : undefined,
@@ -414,8 +442,11 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
           name: groupName.trim(),
           taskType: groupTaskType,
           sdModel: groupSdModel || undefined,
+          highNoiseSdModel: groupHighNoiseSdModel || undefined,
           vaeModel: groupVaeModel || undefined,
           llmModel: groupLlmModel || undefined,
+          clipLModel: groupClipLModel || undefined,
+          t5xxlModel: groupT5xxlModel || undefined,
           defaultSteps: groupDefaultSteps ? parseFloat(groupDefaultSteps) : undefined,
           defaultCfgScale: groupDefaultCfgScale ? parseFloat(groupDefaultCfgScale) : undefined,
           defaultWidth: groupDefaultWidth ? parseInt(groupDefaultWidth) : undefined,
@@ -589,9 +620,8 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                         return '图片编辑';
                       case 'video':
                         return '视频生成';
-                      case 'all':
                       default:
-                        return '所有任务';
+                        return '未指定';
                     }
                   };
                   
@@ -742,6 +772,8 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
           setGroupSdModel('');
           setGroupVaeModel('');
           setGroupLlmModel('');
+          setGroupClipLModel('');
+          setGroupT5xxlModel('');
           setGroupDefaultSteps('20');
           setGroupDefaultCfgScale('7.0');
           setGroupDefaultWidth('512');
@@ -763,9 +795,9 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                     placeholder="请输入模型组名称"
                   />
                 </Field>
-                <Field label="任务类型" hint="选择此模型组可用于哪些任务">
+                <Field label="任务类型" hint="选择此模型组可用于哪些任务" required>
                   <Dropdown
-                    value={groupTaskType === 'all' ? '所有任务' : groupTaskType === 'generate' ? '图片生成' : groupTaskType === 'edit' ? '图片编辑' : '视频生成'}
+                    value={groupTaskType === 'generate' ? '图片生成' : groupTaskType === 'edit' ? '图片编辑' : '视频生成'}
                     selectedOptions={[groupTaskType]}
                     onOptionSelect={(_, data) => {
                       if (data.optionValue) {
@@ -773,15 +805,17 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                       }
                     }}
                   >
-                    <Option value="all">所有任务</Option>
                     <Option value="generate">图片生成</Option>
                     <Option value="edit">图片编辑</Option>
                     <Option value="video">视频生成</Option>
                   </Dropdown>
                 </Field>
-                <Field label="SD模型（必选）">
+                <Field
+                  label={groupTaskType === 'video' ? '基础视频模型（必选，LowNoise）' : 'SD模型（必选）'}
+                  hint={groupTaskType === 'video' ? '例如 Wan2.2-T2V/I2V-LowNoise-*.gguf' : undefined}
+                >
                   <Dropdown
-                    placeholder="请选择SD模型"
+                    placeholder={groupTaskType === 'video' ? '请选择基础视频模型（LowNoise）' : '请选择SD模型'}
                     value={getModelFileName(groupSdModel)}
                     selectedOptions={[groupSdModel]}
                     onOptionSelect={(_, data) => {
@@ -790,18 +824,39 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                       }
                     }}
                   >
-                    {files.filter(file => {
-                      // 当前已选择的SD模型可以显示（如果正在编辑）
-                      if (file.path === groupSdModel) return true;
-                      // 过滤掉已被VAE或LLM选择的模型
-                      return file.path !== groupVaeModel && file.path !== groupLlmModel;
-                    }).map((file) => (
+                    {files.map((file) => (
                       <Option key={file.path} value={file.path} text={file.name}>
                         {file.name}
                       </Option>
                     ))}
                   </Dropdown>
                 </Field>
+                {groupTaskType === 'video' && (
+                  <Field
+                    label="高噪声视频模型（可选，HighNoise）"
+                    hint="例如 Wan2.2-T2V/I2V-HighNoise-*.gguf。若未选择，将只使用基础模型。"
+                  >
+                    <Dropdown
+                      placeholder="请选择高噪声视频模型（HighNoise，可选）"
+                      value={getModelFileName(groupHighNoiseSdModel)}
+                      selectedOptions={[groupHighNoiseSdModel]}
+                      onOptionSelect={(_, data) => {
+                        if (data.optionValue) {
+                          setGroupHighNoiseSdModel(data.optionValue);
+                        } else {
+                          setGroupHighNoiseSdModel('');
+                        }
+                      }}
+                    >
+                      {editingGroup && <Option value="" text="无">无</Option>}
+                      {files.map((file) => (
+                        <Option key={file.path} value={file.path} text={file.name}>
+                          {file.name}
+                        </Option>
+                      ))}
+                    </Dropdown>
+                  </Field>
+                )}
                 <Field label={editingGroup ? "VAE模型（可选）" : "VAE模型（必选）"}>
                   <Dropdown
                     placeholder={editingGroup ? "请选择VAE模型（可选）" : "请选择VAE模型（必选）"}
@@ -819,8 +874,9 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                     {files.filter(file => {
                       // 当前已选择的VAE模型可以显示（如果正在编辑）
                       if (file.path === groupVaeModel) return true;
-                      // 过滤掉已被SD或LLM选择的模型
-                      return file.path !== groupSdModel && file.path !== groupLlmModel;
+                      // 过滤掉已被其他模型选择的文件
+                      return file.path !== groupSdModel && file.path !== groupLlmModel && 
+                             file.path !== groupClipLModel && file.path !== groupT5xxlModel;
                     }).map((file) => (
                       <Option key={file.path} value={file.path} text={file.name}>
                         {file.name}
@@ -828,37 +884,106 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                     ))}
                   </Dropdown>
                 </Field>
-                <Field label={editingGroup ? "LLM/CLIP模型（可选）" : "LLM/CLIP模型（必选）"}>
-                  <Dropdown
-                    placeholder={editingGroup ? "请选择LLM/CLIP模型（可选）" : "请选择LLM/CLIP模型（必选）"}
-                    value={getModelFileName(groupLlmModel)}
-                    selectedOptions={[groupLlmModel]}
-                    onOptionSelect={(_, data) => {
-                      if (data.optionValue) {
-                        setGroupLlmModel(data.optionValue);
-                      } else {
-                        setGroupLlmModel('');
-                      }
-                    }}
+                {groupTaskType === 'edit' ? (
+                  <>
+                    <Field label={editingGroup ? "CLIP L模型（可选）" : "CLIP L模型（必选）"}>
+                      <Dropdown
+                        placeholder={editingGroup ? "请选择CLIP L模型（可选）" : "请选择CLIP L模型（必选）"}
+                        value={getModelFileName(groupClipLModel)}
+                        selectedOptions={[groupClipLModel]}
+                        onOptionSelect={(_, data) => {
+                          if (data.optionValue) {
+                            setGroupClipLModel(data.optionValue);
+                          } else {
+                            setGroupClipLModel('');
+                          }
+                        }}
+                      >
+                        {editingGroup && <Option value="" text="无">无</Option>}
+                        {files.filter(file => {
+                          // 当前已选择的CLIP L模型可以显示（如果正在编辑）
+                          if (file.path === groupClipLModel) return true;
+                          // 过滤掉已被其他模型选择的文件
+                          return file.path !== groupSdModel && file.path !== groupVaeModel && 
+                                 file.path !== groupLlmModel && file.path !== groupT5xxlModel;
+                        }).map((file) => (
+                          <Option key={file.path} value={file.path} text={file.name}>
+                            {file.name}
+                          </Option>
+                        ))}
+                      </Dropdown>
+                    </Field>
+                    <Field label={editingGroup ? "T5XXL模型（可选）" : "T5XXL模型（必选）"}>
+                      <Dropdown
+                        placeholder={editingGroup ? "请选择T5XXL模型（可选）" : "请选择T5XXL模型（必选）"}
+                        value={getModelFileName(groupT5xxlModel)}
+                        selectedOptions={[groupT5xxlModel]}
+                        onOptionSelect={(_, data) => {
+                          if (data.optionValue) {
+                            setGroupT5xxlModel(data.optionValue);
+                          } else {
+                            setGroupT5xxlModel('');
+                          }
+                        }}
+                      >
+                        {editingGroup && <Option value="" text="无">无</Option>}
+                        {files.filter(file => {
+                          // 当前已选择的T5XXL模型可以显示（如果正在编辑）
+                          if (file.path === groupT5xxlModel) return true;
+                          // 过滤掉已被其他模型选择的文件
+                          return file.path !== groupSdModel && file.path !== groupVaeModel && 
+                                 file.path !== groupLlmModel && file.path !== groupClipLModel;
+                        }).map((file) => (
+                          <Option key={file.path} value={file.path} text={file.name}>
+                            {file.name}
+                          </Option>
+                        ))}
+                      </Dropdown>
+                    </Field>
+                  </>
+                ) : (
+                  <Field
+                    label={
+                      groupTaskType === 'video'
+                        ? (editingGroup ? '文本编码器 / T5 模型（可选）' : '文本编码器 / T5 模型（必选）')
+                        : (editingGroup ? 'LLM/CLIP模型（可选）' : 'LLM/CLIP模型（必选）')
+                    }
                   >
-                    {editingGroup && <Option value="" text="无">无</Option>}
-                    {files.filter(file => {
-                      // 当前已选择的LLM模型可以显示（如果正在编辑）
-                      if (file.path === groupLlmModel) return true;
-                      // 过滤掉已被SD或VAE选择的模型
-                      return file.path !== groupSdModel && file.path !== groupVaeModel;
-                    }).map((file) => (
-                      <Option key={file.path} value={file.path} text={file.name}>
-                        {file.name}
-                      </Option>
-                    ))}
-                  </Dropdown>
-                </Field>
+                    <Dropdown
+                      placeholder={
+                        groupTaskType === 'video'
+                          ? (editingGroup ? '请选择文本编码器 / T5 模型（可选）' : '请选择文本编码器 / T5 模型（必选）')
+                          : (editingGroup ? '请选择LLM/CLIP模型（可选）' : '请选择LLM/CLIP模型（必选）')
+                      }
+                      value={getModelFileName(groupLlmModel)}
+                      selectedOptions={[groupLlmModel]}
+                      onOptionSelect={(_, data) => {
+                        if (data.optionValue) {
+                          setGroupLlmModel(data.optionValue);
+                        } else {
+                          setGroupLlmModel('');
+                        }
+                      }}
+                    >
+                      {editingGroup && <Option value="" text="无">无</Option>}
+                      {files.filter(file => {
+                        // 当前已选择的LLM模型可以显示（如果正在编辑）
+                        if (file.path === groupLlmModel) return true;
+                        // 过滤掉已被SD或VAE选择的模型
+                        return file.path !== groupSdModel && file.path !== groupVaeModel;
+                      }).map((file) => (
+                        <Option key={file.path} value={file.path} text={file.name}>
+                          {file.name}
+                        </Option>
+                      ))}
+                    </Dropdown>
+                  </Field>
+                )}
                 <Title2 style={{ fontSize: tokens.fontSizeBase400, marginTop: tokens.spacingVerticalM }}>
                   推荐默认设置（可选）
                 </Title2>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: tokens.spacingHorizontalM }}>
-                  <Field label="采样步数" hint="默认: 20">
+                <Field label={groupTaskType === 'video' ? '采样步数（主路径）' : '采样步数'} hint="默认: 20">
                     <Input
                       type="number"
                       value={groupDefaultSteps}
@@ -961,27 +1086,29 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                       <Option value="tcd">TCD</Option>
                     </Dropdown>
                   </Field>
-                  <Field label="调度器" hint="默认: discrete">
-                    <Dropdown
-                      value={groupDefaultScheduler}
-                      selectedOptions={[groupDefaultScheduler]}
-                      onOptionSelect={(_, data) => {
-                        if (data.optionValue) {
-                          setGroupDefaultScheduler(data.optionValue);
-                        }
-                      }}
-                    >
-                      <Option value="discrete">Discrete</Option>
-                      <Option value="karras">Karras</Option>
-                      <Option value="exponential">Exponential</Option>
-                      <Option value="ays">AYS</Option>
-                      <Option value="gits">GITS</Option>
-                      <Option value="smoothstep">Smoothstep</Option>
-                      <Option value="sgm_uniform">SGM Uniform</Option>
-                      <Option value="simple">Simple</Option>
-                      <Option value="lcm">LCM</Option>
-                    </Dropdown>
-                  </Field>
+                  {groupTaskType !== 'video' && (
+                    <Field label="调度器" hint="默认: discrete">
+                      <Dropdown
+                        value={groupDefaultScheduler}
+                        selectedOptions={[groupDefaultScheduler]}
+                        onOptionSelect={(_, data) => {
+                          if (data.optionValue) {
+                            setGroupDefaultScheduler(data.optionValue);
+                          }
+                        }}
+                      >
+                        <Option value="discrete">Discrete</Option>
+                        <Option value="karras">Karras</Option>
+                        <Option value="exponential">Exponential</Option>
+                        <Option value="ays">AYS</Option>
+                        <Option value="gits">GITS</Option>
+                        <Option value="smoothstep">Smoothstep</Option>
+                        <Option value="sgm_uniform">SGM Uniform</Option>
+                        <Option value="simple">Simple</Option>
+                        <Option value="lcm">LCM</Option>
+                      </Dropdown>
+                    </Field>
+                  )}
                   <Field label="种子" hint="留空表示随机">
                     <Input
                       type="number"
@@ -1018,7 +1145,14 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                 disabled={
                   loading || 
                   !groupName.trim() || 
-                  (!editingGroup && (!groupSdModel || !groupSdModel.trim() || !groupVaeModel || !groupVaeModel.trim() || !groupLlmModel || !groupLlmModel.trim()))
+                  (!editingGroup && (
+                    !groupSdModel || !groupSdModel.trim() || 
+                    !groupVaeModel || !groupVaeModel.trim() || 
+                    (groupTaskType === 'edit' 
+                      ? (!groupClipLModel || !groupClipLModel.trim() || !groupT5xxlModel || !groupT5xxlModel.trim())
+                      : (!groupLlmModel || !groupLlmModel.trim())
+                    )
+                  ))
                 }
               >
                 保存

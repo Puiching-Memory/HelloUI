@@ -305,6 +305,9 @@ export const GeneratedImagesPage = () => {
   const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [selectedImageForDetail, setSelectedImageForDetail] = useState<GeneratedImage | null>(null);
+  const [detailVideoSrc, setDetailVideoSrc] = useState<string | null>(null);
+  const [detailVideoLoading, setDetailVideoLoading] = useState(false);
+  const [detailVideoError, setDetailVideoError] = useState<string | null>(null);
   const [hoveredImagePath, setHoveredImagePath] = useState<string | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [compareDialogOpen, setCompareDialogOpen] = useState(false);
@@ -870,8 +873,27 @@ export const GeneratedImagesPage = () => {
                           icon={<InfoRegular />}
                           appearance="subtle"
                           size="small"
-                          onClick={() => {
+                          onClick={async () => {
                             setSelectedImageForDetail(image);
+                            setDetailVideoSrc(null);
+                            setDetailVideoError(null);
+                            const mediaType = image.mediaType || 'image';
+                            if (mediaType === 'video' && window.ipcRenderer) {
+                              try {
+                                setDetailVideoLoading(true);
+                                const result = await window.ipcRenderer.invoke('generated-images:get-video-data', image.path);
+                                // 将数组转换回 Uint8Array，然后创建 Blob 和 Blob URL
+                                const uint8Array = new Uint8Array(result.data);
+                                const blob = new Blob([uint8Array], { type: result.mimeType });
+                                const blobUrl = URL.createObjectURL(blob);
+                                setDetailVideoSrc(blobUrl);
+                              } catch (error) {
+                                console.error('Failed to load video data:', error);
+                                setDetailVideoError('加载视频失败，请尝试下载后使用系统播放器打开。');
+                              } finally {
+                                setDetailVideoLoading(false);
+                              }
+                            }
                             setDetailDialogOpen(true);
                           }}
                         >
@@ -963,43 +985,101 @@ export const GeneratedImagesPage = () => {
       <Dialog open={detailDialogOpen} onOpenChange={(_, data) => {
         setDetailDialogOpen(data.open);
         if (!data.open) {
+          // 清理 Blob URL 以释放内存
+          if (detailVideoSrc && detailVideoSrc.startsWith('blob:')) {
+            URL.revokeObjectURL(detailVideoSrc);
+          }
           setSelectedImageForDetail(null);
           setCopiedField(null);
+          setDetailVideoSrc(null);
+          setDetailVideoError(null);
+          setDetailVideoLoading(false);
         }
       }}>
-        <DialogSurface style={{ maxWidth: '900px', maxHeight: '90vh', width: '90vw' }}>
-          <DialogTitle>图片详情</DialogTitle>
+          <DialogSurface style={{ maxWidth: '900px', maxHeight: '90vh', width: '90vw' }}>
+          <DialogTitle>结果详情</DialogTitle>
           <DialogBody>
             <DialogContent style={{ maxHeight: '75vh', overflowY: 'auto', padding: 0 }}>
               {selectedImageForDetail && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-                  {/* 图片预览区域 - 顶部大图 */}
-                  {selectedImageForDetail.previewImage && (
-                    <div style={{ 
-                      width: '100%', 
-                      backgroundColor: tokens.colorNeutralBackground2,
-                      padding: tokens.spacingVerticalL,
-                      display: 'flex',
-                      justifyContent: 'center',
-                      alignItems: 'center',
-                      borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-                    }}>
-                      <PhotoView src={`data:${getImageMimeType(selectedImageForDetail.name)};base64,${selectedImageForDetail.previewImage}`}>
-                        <img
-                          src={`data:${getImageMimeType(selectedImageForDetail.name)};base64,${selectedImageForDetail.previewImage}`}
-                          alt={selectedImageForDetail.name}
-                          style={{
-                            maxWidth: '100%',
-                            maxHeight: '400px',
-                            borderRadius: tokens.borderRadiusLarge,
-                            border: `1px solid ${tokens.colorNeutralStroke2}`,
-                            cursor: 'pointer',
-                            boxShadow: tokens.shadow8,
-                          }}
-                        />
-                      </PhotoView>
-                    </div>
-                  )}
+                  {/* 预览区域 - 顶部大图（图片或视频） */}
+                  {(() => {
+                    const mediaType = selectedImageForDetail.mediaType || 'image';
+                    const isVideo = mediaType === 'video';
+
+                    if (isVideo) {
+                      return (
+                        <div style={{ 
+                          width: '100%', 
+                          backgroundColor: tokens.colorNeutralBackground2,
+                          padding: tokens.spacingVerticalL,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          gap: tokens.spacingVerticalS,
+                          borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+                        }}>
+                          {detailVideoLoading && (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: tokens.spacingVerticalS }}>
+                              <Spinner />
+                              <Body1>正在加载视频...</Body1>
+                            </div>
+                          )}
+                          {detailVideoError && (
+                            <Body1 style={{ color: tokens.colorPaletteRedForeground1 }}>
+                              {detailVideoError}
+                            </Body1>
+                          )}
+                          {detailVideoSrc && !detailVideoLoading && !detailVideoError && (
+                            <video
+                              src={detailVideoSrc}
+                              controls
+                              style={{
+                                maxWidth: '100%',
+                                maxHeight: '400px',
+                                borderRadius: tokens.borderRadiusLarge,
+                                border: `1px solid ${tokens.colorNeutralStroke2}`,
+                                boxShadow: tokens.shadow8,
+                                backgroundColor: 'black',
+                              }}
+                            />
+                          )}
+                        </div>
+                      );
+                    }
+
+                    if (selectedImageForDetail.previewImage) {
+                      return (
+                        <div style={{ 
+                          width: '100%', 
+                          backgroundColor: tokens.colorNeutralBackground2,
+                          padding: tokens.spacingVerticalL,
+                          display: 'flex',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+                        }}>
+                          <PhotoView src={`data:${getImageMimeType(selectedImageForDetail.name)};base64,${selectedImageForDetail.previewImage}`}>
+                            <img
+                              src={`data:${getImageMimeType(selectedImageForDetail.name)};base64,${selectedImageForDetail.previewImage}`}
+                              alt={selectedImageForDetail.name}
+                              style={{
+                                maxWidth: '100%',
+                                maxHeight: '400px',
+                                borderRadius: tokens.borderRadiusLarge,
+                                border: `1px solid ${tokens.colorNeutralStroke2}`,
+                                cursor: 'pointer',
+                                boxShadow: tokens.shadow8,
+                              }}
+                            />
+                          </PhotoView>
+                        </div>
+                      );
+                    }
+
+                    return null;
+                  })()}
 
                   {/* 内容区域 - 使用卡片分组 */}
                   <div style={{ padding: tokens.spacingVerticalL, display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalL }}>
