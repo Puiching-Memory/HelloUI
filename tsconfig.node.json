@@ -6,7 +6,10 @@
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
     "strict": true,
-    "types": ["node"]
+    "types": ["node"],
+    "declaration": true,
+    "declarationMap": true,
+    "outDir": "./dist-electron"
   },
   "include": ["vite.config.ts", "electron"]
 }

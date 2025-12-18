@@ -24,9 +24,6 @@ export default defineConfig({
             sourcemap: true,
             minify: process.env.NODE_ENV === 'production',
             outDir: 'dist-electron',
-            rollupOptions: {
-              external: Object.keys('dependencies' in {} ? {} : {}),
-            },
           },
         },
       },

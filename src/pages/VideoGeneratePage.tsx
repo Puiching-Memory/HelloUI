@@ -277,8 +277,8 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
   },
   frameThumbnailSelected: {
-    outline: `2px solid ${tokens.colorPaletteBlueBorder2}`,
-    outlineOffset: 1,
+    outline: `2px solid ${tokens.colorBrandStroke1}`,
+    outlineOffset: '1px',
   },
   frameTimecode: {
     fontSize: tokens.fontSizeBase100,
@@ -878,7 +878,7 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
             <Textarea
               value={prompt}
               onChange={(_, data) => setPrompt(data.value)}
-              placeholder="输入视频描述，例如：a beautiful landscape with mountains and lakes, smooth camera movement"
+              placeholder="输入视频描述，例如：一幅美丽的山水画，有山峰和湖泊，平滑的镜头移动"
               rows={4}
               resize="vertical"
             />

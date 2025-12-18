@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron'
-import { join, basename, extname, resolve, dirname, isAbsolute, sep } from 'path'
+import { join, basename, extname, resolve, dirname, isAbsolute, relative, sep } from 'path'
 import { fileURLToPath } from 'url'
 import { promises as fs } from 'fs'
 import { existsSync, createReadStream, createWriteStream, watchFile, unwatchFile } from 'fs'
@@ -93,14 +93,28 @@ function getRunPath(): string {
   return app.isPackaged ? dirname(process.execPath) : join(__dirname, '..')
 }
 
-// 将相对路径转换为绝对路径（基于运行路径）
-function resolveModelPath(modelPath: string): string {
+// 将相对路径转换为绝对路径（基于运行路径和 models 文件夹）
+function resolveModelPath(modelPath: string | undefined): string | undefined {
+  if (!modelPath) {
+    return undefined
+  }
+  
   // 如果已经是绝对路径，直接返回
   if (isAbsolute(modelPath)) {
     return modelPath
   }
-  // 如果是相对路径，基于运行路径解析
-  return resolve(getRunPath(), modelPath)
+  
+  // 如果路径以 "models/" 开头，移除该前缀
+  let normalizedPath = modelPath.replace(/^models[\/\\]/, '')
+  
+  // 如果路径包含路径分隔符，说明是相对路径，基于运行路径解析
+  // 否则，假设文件在 models 文件夹中
+  if (normalizedPath.includes('/') || normalizedPath.includes('\\')) {
+    return resolve(getRunPath(), normalizedPath)
+  } else {
+    // 纯文件名，假设在 models 文件夹中
+    return join(getDefaultModelsFolder(), normalizedPath)
+  }
 }
 
 // 获取默认的 models 文件夹路径
@@ -521,10 +535,45 @@ ipcMain.handle('sdcpp:get-device', async () => {
 })
 
 // IPC 处理程序：列出文件夹中的文件（根据设备类型）
+// 获取可执行文件的版本号
+async function getExecutableVersion(exePath: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    // 使用 chcp 65001 设置代码页为 UTF-8，确保正确处理中文字符
+    const command = `chcp 65001 >nul && "${exePath}" --version`
+    exec(command, { timeout: 5000 }, (error, stdout, stderr) => {
+      if (error) {
+        // 如果命令执行失败，返回 null
+        resolve(null)
+        return
+      }
+      
+      // 解析版本信息
+      const output = (stdout || stderr || '').trim()
+      if (output) {
+        // 提取版本信息，例如：stable-diffusion.cpp version unknown, commit bda7fab
+        // 尝试提取 commit hash 或版本号
+        const commitMatch = output.match(/commit\s+([a-f0-9]+)/i)
+        const versionMatch = output.match(/version\s+([^\s,]+)/i)
+        
+        if (versionMatch && versionMatch[1] !== 'unknown') {
+          resolve(versionMatch[1])
+        } else if (commitMatch) {
+          resolve(`commit ${commitMatch[1]}`)
+        } else {
+          // 如果无法解析，返回原始输出的前100个字符
+          resolve(output.length > 100 ? output.substring(0, 100) + '...' : output)
+        }
+      } else {
+        resolve(null)
+      }
+    })
+  })
+}
+
 ipcMain.handle('sdcpp:list-files', async (_, folder: string, deviceType: 'cpu' | 'vulkan' | 'cuda') => {
   const deviceFolder = join(folder, deviceType)
   if (!existsSync(deviceFolder)) {
-    return []
+    return { files: [], version: null }
   }
   
   const entries = await fs.readdir(deviceFolder, { withFileTypes: true })
@@ -533,6 +582,12 @@ ipcMain.handle('sdcpp:list-files', async (_, folder: string, deviceType: 'cpu' |
   // TODO: 未来如需支持其他平台，可在此处添加对应的文件扩展名（如 .so 用于 Linux，.dylib 用于 macOS）
   const engineExtensions = ['.exe', '.dll', '.bin', '.txt']
   
+  // 查找 sd-cli.exe 以获取引擎版本号
+  let engineVersion: string | null = null
+  const executableName = 'sd-cli.exe'
+  const executablePath = join(deviceFolder, executableName)
+  
+  // 收集所有文件信息
   for (const entry of entries) {
     if (entry.isFile()) {
       const ext = extname(entry.name).toLowerCase()
@@ -549,8 +604,17 @@ ipcMain.handle('sdcpp:list-files', async (_, folder: string, deviceType: 'cpu' |
     }
   }
   
+  // 如果找到 sd-cli.exe，获取引擎版本号（代表整个引擎文件夹的版本）
+  if (existsSync(executablePath)) {
+    try {
+      engineVersion = await getExecutableVersion(executablePath)
+    } catch (error) {
+      console.error(`Failed to get engine version for ${executablePath}:`, error)
+    }
+  }
+  
   files.sort((a, b) => b.modified - a.modified)
-  return files
+  return { files, version: engineVersion }
 })
 
 
@@ -591,6 +655,48 @@ function getModelGroupsFilePath(): string {
   return join(modelsFolder, 'model-groups.json')
 }
 
+// 将绝对路径转换为相对于 models 文件夹的相对路径
+function toRelativePath(absolutePath: string | undefined): string | undefined {
+  if (!absolutePath) {
+    return undefined
+  }
+  
+  const modelsFolder = getDefaultModelsFolder()
+  
+  // 如果路径已经是相对路径（不以盘符或 / 开头），直接返回
+  if (!isAbsolute(absolutePath)) {
+    return absolutePath
+  }
+  
+  // 检查路径是否在 models 文件夹内
+  try {
+    const relativePath = relative(modelsFolder, absolutePath)
+    // 如果 relative 返回的路径以 .. 开头，说明不在 models 文件夹内，保持原路径
+    if (relativePath.startsWith('..')) {
+      console.warn(`[Main] Path ${absolutePath} is not within models folder, keeping as-is`)
+      return absolutePath
+    }
+    // 规范化路径分隔符（统一使用正斜杠）
+    return relativePath.replace(/\\/g, '/')
+  } catch (error) {
+    console.error(`[Main] Error converting path ${absolutePath} to relative:`, error)
+    return absolutePath
+  }
+}
+
+// 将模型组中的绝对路径转换为相对路径
+function normalizeModelGroupPaths(group: ModelGroup): ModelGroup {
+  return {
+    ...group,
+    sdModel: toRelativePath(group.sdModel),
+    highNoiseSdModel: toRelativePath(group.highNoiseSdModel),
+    vaeModel: toRelativePath(group.vaeModel),
+    llmModel: toRelativePath(group.llmModel),
+    clipLModel: toRelativePath(group.clipLModel),
+    t5xxlModel: toRelativePath(group.t5xxlModel),
+  }
+}
+
 // 加载模型组列表
 async function loadModelGroups(): Promise<ModelGroup[]> {
   const filePath = getModelGroupsFilePath()
@@ -598,7 +704,9 @@ async function loadModelGroups(): Promise<ModelGroup[]> {
     return []
   }
   const content = await fs.readFile(filePath, 'utf-8')
-  return JSON.parse(content) as ModelGroup[]
+  const groups = JSON.parse(content) as ModelGroup[]
+  // 加载时也规范化路径，确保旧数据中的绝对路径被转换
+  return groups.map(normalizeModelGroupPaths)
 }
 
 // 保存模型组列表
@@ -609,7 +717,9 @@ async function saveModelGroups(groups: ModelGroup[]): Promise<void> {
   if (!existsSync(dirPath)) {
     await fs.mkdir(dirPath, { recursive: true })
   }
-  await fs.writeFile(filePath, JSON.stringify(groups, null, 2), 'utf-8')
+  // 保存前规范化所有路径，确保只保存相对路径
+  const normalizedGroups = groups.map(normalizeModelGroupPaths)
+  await fs.writeFile(filePath, JSON.stringify(normalizedGroups, null, 2), 'utf-8')
 }
 
 // IPC 处理程序：获取所有模型组
@@ -691,7 +801,6 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
   try {
     const { 
       groupId, 
-      modelPath, 
       deviceType, 
       prompt, 
       negativePrompt = '',
@@ -733,21 +842,18 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
         throw new Error('模型组中未配置SD模型')
       }
       // 将相对路径转换为绝对路径
-      sdModelPath = resolveModelPath(group.sdModel)
+      const resolvedSdModelPath = resolveModelPath(group.sdModel)
+      if (!resolvedSdModelPath) {
+        throw new Error('无法解析SD模型路径')
+      }
+      sdModelPath = resolvedSdModelPath
       
       // 检查模型文件是否存在
       if (!existsSync(sdModelPath)) {
         throw new Error(`SD模型文件不存在: ${sdModelPath}`)
       }
-    } else if (modelPath) {
-      // 兼容旧版本：直接使用模型路径
-      // 将相对路径转换为绝对路径
-      sdModelPath = resolveModelPath(modelPath)
-      if (!existsSync(sdModelPath)) {
-        throw new Error(`模型文件不存在: ${sdModelPath}`)
-      }
     } else {
-      throw new Error('必须提供模型组ID或模型路径')
+      throw new Error('必须提供模型组ID')
     }
 
     // 获取 SD.cpp 可执行文件路径
@@ -783,7 +889,7 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
       if (group?.vaeModel) {
         // 将相对路径转换为绝对路径
         const vaeModelPath = resolveModelPath(group.vaeModel)
-        if (existsSync(vaeModelPath)) {
+        if (vaeModelPath && existsSync(vaeModelPath)) {
           args.push('--vae', vaeModelPath)
         }
       }
@@ -794,14 +900,14 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
         // 图片编辑任务：使用 CLIP L 和 T5XXL 模型
         if (group?.clipLModel) {
           const clipLModelPath = resolveModelPath(group.clipLModel)
-          if (existsSync(clipLModelPath)) {
+          if (clipLModelPath && existsSync(clipLModelPath)) {
             args.push('--clip_l', clipLModelPath)
             console.log(`[Generate] CLIP L model: ${clipLModelPath}`)
           }
         }
         if (group?.t5xxlModel) {
           const t5xxlModelPath = resolveModelPath(group.t5xxlModel)
-          if (existsSync(t5xxlModelPath)) {
+          if (t5xxlModelPath && existsSync(t5xxlModelPath)) {
             args.push('--t5xxl', t5xxlModelPath)
             console.log(`[Generate] T5XXL model: ${t5xxlModelPath}`)
           }
@@ -811,7 +917,7 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
         if (group?.llmModel) {
           // 将相对路径转换为绝对路径
           const llmModelPath = resolveModelPath(group.llmModel)
-          if (existsSync(llmModelPath)) {
+          if (llmModelPath && existsSync(llmModelPath)) {
             args.push('--llm', llmModelPath)
           }
         }
@@ -1352,7 +1458,6 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
   try {
     const { 
       groupId, 
-      modelPath, 
       deviceType, 
       prompt, 
       negativePrompt = '',
@@ -1394,7 +1499,11 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
       if (!group.sdModel) {
         throw new Error('模型组中未配置SD模型')
       }
-      sdModelPath = resolveModelPath(group.sdModel)
+      const resolvedSdModelPath = resolveModelPath(group.sdModel)
+      if (!resolvedSdModelPath) {
+        throw new Error('无法解析SD模型路径')
+      }
+      sdModelPath = resolvedSdModelPath
       if (!existsSync(sdModelPath)) {
         throw new Error(`SD模型文件不存在: ${sdModelPath}`)
       }
@@ -1402,18 +1511,16 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
       // 如果模型组配置了高噪声模型，在此解析路径
       if (group.highNoiseSdModel) {
         const candidate = resolveModelPath(group.highNoiseSdModel)
+        if (!candidate) {
+          throw new Error('无法解析高噪声SD模型路径')
+        }
         if (!existsSync(candidate)) {
           throw new Error(`高噪声SD模型文件不存在: ${candidate}`)
         }
         highNoiseModelPath = candidate
       }
-    } else if (modelPath) {
-      sdModelPath = resolveModelPath(modelPath)
-      if (!existsSync(sdModelPath)) {
-        throw new Error(`模型文件不存在: ${sdModelPath}`)
-      }
     } else {
-      throw new Error('必须提供模型组ID或模型路径')
+      throw new Error('必须提供模型组ID')
     }
 
     // 获取 SD.cpp 可执行文件路径
@@ -1447,13 +1554,13 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
       const group = groups.find(g => g.id === groupId)
       if (group?.vaeModel) {
         const vaeModelPath = resolveModelPath(group.vaeModel)
-        if (existsSync(vaeModelPath)) {
+        if (vaeModelPath && existsSync(vaeModelPath)) {
           args.push('--vae', vaeModelPath)
         }
       }
       if (group?.llmModel) {
         const llmModelPath = resolveModelPath(group.llmModel)
-        if (existsSync(llmModelPath)) {
+        if (llmModelPath && existsSync(llmModelPath)) {
           // 在视频任务中，我们将该字段视为文本编码器（如 T5），对应 --t5xxl
           args.push('--t5xxl', llmModelPath)
         }

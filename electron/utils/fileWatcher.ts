@@ -104,15 +104,15 @@ export class FileWatcher {
    */
   cleanupAll(): void {
     // 清理所有文件监控
-    for (const cleanup of this.watchedFiles.values()) {
+    this.watchedFiles.forEach((cleanup) => {
       cleanup();
-    }
+    });
     this.watchedFiles.clear();
 
     // 清理所有目录监控
-    for (const cleanup of this.watchedDirs.values()) {
+    this.watchedDirs.forEach((cleanup) => {
       cleanup();
-    }
+    });
     this.watchedDirs.clear();
   }
 

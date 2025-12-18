@@ -33,8 +33,15 @@ import {
   DismissRegular,
   AddRegular,
   EditRegular,
+  ChevronDownRegular,
+  ChevronUpRegular,
+  ImageAddRegular,
+  EditRegular as EditIcon,
+  VideoClipRegular,
+  ZoomInRegular,
 } from '@fluentui/react-icons';
 import { useState, useEffect } from 'react';
+import type { TaskType, ModelGroup, WeightFile } from '../../electron/types/index';
 
 const useStyles = makeStyles({
   container: {
@@ -93,37 +100,123 @@ const useStyles = makeStyles({
     minWidth: '150px',
     overflow: 'hidden',
   },
+  modelGroupGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))',
+    gap: tokens.spacingVerticalL,
+  },
+  modelGroupCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+    padding: tokens.spacingVerticalL,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusLarge,
+    backgroundColor: tokens.colorNeutralBackground1,
+    transition: 'all 0.2s ease',
+    ':hover': {
+      border: `1px solid ${tokens.colorBrandStroke1}`,
+      boxShadow: tokens.shadow4,
+    },
+  },
+  modelGroupHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: tokens.spacingHorizontalM,
+  },
+  modelGroupTitle: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    flex: 1,
+  },
+  modelGroupActions: {
+    display: 'flex',
+    gap: tokens.spacingHorizontalXS,
+    flexShrink: 0,
+  },
+  taskTypeBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXXS,
+    padding: `${tokens.spacingVerticalXXS} ${tokens.spacingHorizontalS}`,
+    borderRadius: tokens.borderRadiusSmall,
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    backgroundColor: tokens.colorBrandBackground2,
+    color: tokens.colorBrandForeground1,
+  },
+  modelList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+  },
+  modelItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    padding: tokens.spacingVerticalS,
+    borderRadius: tokens.borderRadiusSmall,
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  modelLabel: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground2,
+    minWidth: '80px',
+    flexShrink: 0,
+  },
+  modelValue: {
+    flex: 1,
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  expandableSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+  },
+  expandableHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    cursor: 'pointer',
+    padding: tokens.spacingVerticalS,
+    borderRadius: tokens.borderRadiusSmall,
+    transition: 'background-color 0.2s ease',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground2,
+    },
+  },
+  expandableContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+  },
+  paramGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, 1fr)',
+    gap: tokens.spacingVerticalXS,
+  },
+  paramItem: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    fontSize: tokens.fontSizeBase200,
+    padding: `${tokens.spacingVerticalXXS} ${tokens.spacingHorizontalS}`,
+  },
+  paramLabel: {
+    color: tokens.colorNeutralForeground2,
+  },
+  paramValue: {
+    color: tokens.colorNeutralForeground1,
+    fontWeight: tokens.fontWeightSemibold,
+  },
 });
-
-interface WeightFile {
-  name: string;
-  size: number;
-  path: string;
-  modified: number;
-}
-
-type TaskType = 'generate' | 'edit' | 'video' | 'all';
-
-interface ModelGroup {
-  id: string;
-  name: string;
-  taskType?: TaskType;  // 任务类型：generate（图片生成）、edit（图片编辑）、video（视频生成）
-  sdModel?: string;
-  highNoiseSdModel?: string;  // 高噪声SD模型路径（视频生成用，可选）
-  vaeModel?: string;
-  llmModel?: string;
-  clipLModel?: string;  // CLIP L模型路径（图片编辑任务用，可选）
-  t5xxlModel?: string;  // T5XXL模型路径（图片编辑任务用，可选）
-  defaultSteps?: number;  // 推荐的默认采样步数
-  defaultCfgScale?: number;  // 推荐的默认CFG Scale值
-  defaultWidth?: number;  // 推荐的默认图片宽度
-  defaultHeight?: number;  // 推荐的默认图片高度
-  defaultSamplingMethod?: string;  // 推荐的默认采样方法
-  defaultScheduler?: string;  // 推荐的默认调度器
-  defaultSeed?: number;  // 推荐的默认种子（-1表示随机）
-  createdAt: number;
-  updatedAt: number;
-}
 
 interface ModelWeightsPageProps {
   onUploadStateChange?: (isUploading: boolean) => void;
@@ -161,6 +254,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
   const [groupDefaultScheduler, setGroupDefaultScheduler] = useState<string>('discrete');
   const [groupDefaultSeed, setGroupDefaultSeed] = useState<string>('');
   const [groupTaskType, setGroupTaskType] = useState<TaskType>('generate');
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   // 加载权重文件夹路径
   useEffect(() => {
@@ -598,88 +692,216 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
             </Body1>
           </div>
         ) : (
-          <div className={styles.tableContainer}>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHeaderCell>组名称</TableHeaderCell>
-                  <TableHeaderCell>任务类型</TableHeaderCell>
-                  <TableHeaderCell>SD模型</TableHeaderCell>
-                  <TableHeaderCell>VAE模型</TableHeaderCell>
-                  <TableHeaderCell>LLM模型</TableHeaderCell>
-                  <TableHeaderCell>操作</TableHeaderCell>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {modelGroups.map((group) => {
-                  const getTaskTypeLabel = (taskType?: TaskType) => {
-                    switch (taskType) {
-                      case 'generate':
-                        return '图片生成';
-                      case 'edit':
-                        return '图片编辑';
-                      case 'video':
-                        return '视频生成';
-                      default:
-                        return '未指定';
-                    }
-                  };
-                  
-                  return (
-                  <TableRow key={group.id}>
-                    <TableCell>
-                      <Body1>{group.name}</Body1>
-                    </TableCell>
-                    <TableCell>
-                      <Body1>{getTaskTypeLabel(group.taskType)}</Body1>
-                    </TableCell>
-                    <TableCell>
-                      <Tooltip content={getModelFileName(group.sdModel)} relationship="label">
-                        <div className={styles.truncatedText} title={getModelFileName(group.sdModel)}>
-                          <Body1>{getModelFileName(group.sdModel)}</Body1>
-                        </div>
-                      </Tooltip>
-                    </TableCell>
-                    <TableCell>
-                      <Tooltip content={getModelFileName(group.vaeModel)} relationship="label">
-                        <div className={styles.truncatedText} title={getModelFileName(group.vaeModel)}>
-                          <Body1>{getModelFileName(group.vaeModel)}</Body1>
-                        </div>
-                      </Tooltip>
-                    </TableCell>
-                    <TableCell>
-                      <Tooltip content={getModelFileName(group.llmModel)} relationship="label">
-                        <div className={styles.truncatedText} title={getModelFileName(group.llmModel)}>
-                          <Body1>{getModelFileName(group.llmModel)}</Body1>
-                        </div>
-                      </Tooltip>
-                    </TableCell>
-                    <TableCell>
-                      <div style={{ display: 'flex', gap: tokens.spacingHorizontalS }}>
-                        <Button
-                          icon={<EditRegular />}
-                          size="small"
-                          onClick={() => handleEditGroup(group)}
-                          disabled={loading}
-                        >
-                          编辑
-                        </Button>
-                        <Button
-                          icon={<DeleteRegular />}
-                          size="small"
-                          appearance="secondary"
-                          onClick={() => handleDeleteGroup(group)}
-                          disabled={loading}
-                        >
-                          删除
-                        </Button>
+          <div className={styles.modelGroupGrid}>
+            {modelGroups.map((group) => {
+              const getTaskTypeLabel = (taskType?: TaskType) => {
+                switch (taskType) {
+                  case 'generate':
+                    return '图片生成';
+                  case 'edit':
+                    return '图片编辑';
+                  case 'video':
+                    return '视频生成';
+                  case 'upscale':
+                    return '图像超分辨率';
+                  default:
+                    return '未指定';
+                }
+              };
+
+              const getTaskTypeIcon = (taskType?: TaskType) => {
+                switch (taskType) {
+                  case 'generate':
+                    return <ImageAddRegular fontSize={16} />;
+                  case 'edit':
+                    return <EditIcon fontSize={16} />;
+                  case 'video':
+                    return <VideoClipRegular fontSize={16} />;
+                  case 'upscale':
+                    return <ZoomInRegular fontSize={16} />;
+                  default:
+                    return null;
+                }
+              };
+
+              const isExpanded = expandedGroups.has(group.id);
+              const toggleExpand = () => {
+                const newExpanded = new Set(expandedGroups);
+                if (isExpanded) {
+                  newExpanded.delete(group.id);
+                } else {
+                  newExpanded.add(group.id);
+                }
+                setExpandedGroups(newExpanded);
+              };
+
+              return (
+                <Card key={group.id} className={styles.modelGroupCard}>
+                  <div className={styles.modelGroupHeader}>
+                    <div className={styles.modelGroupTitle}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+                        <Title2 style={{ fontSize: tokens.fontSizeBase500, margin: 0 }}>
+                          {group.name}
+                        </Title2>
+                        <span className={styles.taskTypeBadge}>
+                          {getTaskTypeIcon(group.taskType)}
+                          {getTaskTypeLabel(group.taskType)}
+                        </span>
                       </div>
-                    </TableCell>
-                  </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                    </div>
+                    <div className={styles.modelGroupActions}>
+                      <Button
+                        icon={<EditRegular />}
+                        size="small"
+                        onClick={() => handleEditGroup(group)}
+                        disabled={loading}
+                      >
+                        编辑
+                      </Button>
+                      <Button
+                        icon={<DeleteRegular />}
+                        size="small"
+                        appearance="secondary"
+                        onClick={() => handleDeleteGroup(group)}
+                        disabled={loading}
+                      >
+                        删除
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className={styles.modelList}>
+                    {group.sdModel && (
+                      <div className={styles.modelItem}>
+                        <span className={styles.modelLabel}>SD模型</span>
+                        <Tooltip content={getModelFileName(group.sdModel)} relationship="label">
+                          <span className={styles.modelValue} title={getModelFileName(group.sdModel)}>
+                            {getModelFileName(group.sdModel)}
+                          </span>
+                        </Tooltip>
+                      </div>
+                    )}
+                    {group.highNoiseSdModel && (
+                      <div className={styles.modelItem}>
+                        <span className={styles.modelLabel}>高噪声模型</span>
+                        <Tooltip content={getModelFileName(group.highNoiseSdModel)} relationship="label">
+                          <span className={styles.modelValue} title={getModelFileName(group.highNoiseSdModel)}>
+                            {getModelFileName(group.highNoiseSdModel)}
+                          </span>
+                        </Tooltip>
+                      </div>
+                    )}
+                    {group.vaeModel && (
+                      <div className={styles.modelItem}>
+                        <span className={styles.modelLabel}>VAE模型</span>
+                        <Tooltip content={getModelFileName(group.vaeModel)} relationship="label">
+                          <span className={styles.modelValue} title={getModelFileName(group.vaeModel)}>
+                            {getModelFileName(group.vaeModel)}
+                          </span>
+                        </Tooltip>
+                      </div>
+                    )}
+                    {group.taskType === 'edit' ? (
+                      <>
+                        {group.clipLModel && (
+                          <div className={styles.modelItem}>
+                            <span className={styles.modelLabel}>CLIP L</span>
+                            <Tooltip content={getModelFileName(group.clipLModel)} relationship="label">
+                              <span className={styles.modelValue} title={getModelFileName(group.clipLModel)}>
+                                {getModelFileName(group.clipLModel)}
+                              </span>
+                            </Tooltip>
+                          </div>
+                        )}
+                        {group.t5xxlModel && (
+                          <div className={styles.modelItem}>
+                            <span className={styles.modelLabel}>T5XXL</span>
+                            <Tooltip content={getModelFileName(group.t5xxlModel)} relationship="label">
+                              <span className={styles.modelValue} title={getModelFileName(group.t5xxlModel)}>
+                                {getModelFileName(group.t5xxlModel)}
+                              </span>
+                            </Tooltip>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      group.llmModel && (
+                        <div className={styles.modelItem}>
+                          <span className={styles.modelLabel}>
+                            {group.taskType === 'video' ? 'T5/文本编码器' : 'LLM/CLIP'}
+                          </span>
+                          <Tooltip content={getModelFileName(group.llmModel)} relationship="label">
+                            <span className={styles.modelValue} title={getModelFileName(group.llmModel)}>
+                              {getModelFileName(group.llmModel)}
+                            </span>
+                          </Tooltip>
+                        </div>
+                      )
+                    )}
+                  </div>
+
+                  {(group.defaultSteps || group.defaultCfgScale || group.defaultWidth || group.defaultHeight || 
+                    group.defaultSamplingMethod || group.defaultScheduler || group.defaultSeed) && (
+                    <div className={styles.expandableSection}>
+                      <div className={styles.expandableHeader} onClick={toggleExpand}>
+                        <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>
+                          默认参数设置
+                        </Body1>
+                        {isExpanded ? <ChevronUpRegular /> : <ChevronDownRegular />}
+                      </div>
+                      {isExpanded && (
+                        <div className={styles.expandableContent}>
+                          <div className={styles.paramGrid}>
+                            {group.defaultSteps && (
+                              <div className={styles.paramItem}>
+                                <span className={styles.paramLabel}>采样步数</span>
+                                <span className={styles.paramValue}>{group.defaultSteps}</span>
+                              </div>
+                            )}
+                            {group.defaultCfgScale && (
+                              <div className={styles.paramItem}>
+                                <span className={styles.paramLabel}>CFG Scale</span>
+                                <span className={styles.paramValue}>{group.defaultCfgScale}</span>
+                              </div>
+                            )}
+                            {group.defaultWidth && (
+                              <div className={styles.paramItem}>
+                                <span className={styles.paramLabel}>宽度</span>
+                                <span className={styles.paramValue}>{group.defaultWidth}px</span>
+                              </div>
+                            )}
+                            {group.defaultHeight && (
+                              <div className={styles.paramItem}>
+                                <span className={styles.paramLabel}>高度</span>
+                                <span className={styles.paramValue}>{group.defaultHeight}px</span>
+                              </div>
+                            )}
+                            {group.defaultSamplingMethod && (
+                              <div className={styles.paramItem}>
+                                <span className={styles.paramLabel}>采样方法</span>
+                                <span className={styles.paramValue}>{group.defaultSamplingMethod}</span>
+                              </div>
+                            )}
+                            {group.defaultScheduler && (
+                              <div className={styles.paramItem}>
+                                <span className={styles.paramLabel}>调度器</span>
+                                <span className={styles.paramValue}>{group.defaultScheduler}</span>
+                              </div>
+                            )}
+                            {group.defaultSeed !== undefined && group.defaultSeed !== null && group.defaultSeed !== -1 && (
+                              <div className={styles.paramItem}>
+                                <span className={styles.paramLabel}>种子</span>
+                                <span className={styles.paramValue}>{group.defaultSeed}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
           </div>
         )}
       </Card>
@@ -797,7 +1019,12 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                 </Field>
                 <Field label="任务类型" hint="选择此模型组可用于哪些任务" required>
                   <Dropdown
-                    value={groupTaskType === 'generate' ? '图片生成' : groupTaskType === 'edit' ? '图片编辑' : '视频生成'}
+                    value={
+                      groupTaskType === 'generate' ? '图片生成' :
+                      groupTaskType === 'edit' ? '图片编辑' :
+                      groupTaskType === 'video' ? '视频生成' :
+                      groupTaskType === 'upscale' ? '图像超分辨率' : ''
+                    }
                     selectedOptions={[groupTaskType]}
                     onOptionSelect={(_, data) => {
                       if (data.optionValue) {
@@ -808,6 +1035,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                     <Option value="generate">图片生成</Option>
                     <Option value="edit">图片编辑</Option>
                     <Option value="video">视频生成</Option>
+                    <Option value="upscale">图像超分辨率</Option>
                   </Dropdown>
                 </Field>
                 <Field
