@@ -14,6 +14,12 @@ import {
   Input,
   Checkbox,
   Text,
+  Dialog,
+  DialogSurface,
+  DialogTitle,
+  DialogBody,
+  DialogActions,
+  DialogContent,
 } from '@fluentui/react-components';
 import {
   ImageAddRegular,
@@ -32,6 +38,7 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalL,
     padding: tokens.spacingVerticalL,
+    paddingBottom: '120px', // 为浮动控制面板留出空间
     minHeight: '100%',
     maxWidth: '1600px',
     margin: '0 auto',
@@ -95,6 +102,30 @@ const useStyles = makeStyles({
     display: 'flex',
     gap: tokens.spacingHorizontalM,
     flexWrap: 'wrap',
+  },
+  floatingControlPanel: {
+    position: 'fixed',
+    bottom: tokens.spacingVerticalL,
+    // 与 container 对齐：container 在 mainContent 中（从 240px 开始）居中，maxWidth: 1600px
+    // 使用与 container 相同的布局逻辑
+    left: `calc(240px + ${tokens.spacingVerticalL})`,
+    right: tokens.spacingVerticalL,
+    maxWidth: '1600px',
+    width: 'auto',
+    margin: '0 auto',
+    zIndex: 1000,
+    boxShadow: tokens.shadow28,
+    borderRadius: tokens.borderRadiusLarge,
+    padding: tokens.spacingVerticalM,
+    // 云母 / 亚克力效果：浅色半透明背景 + 背景虚化
+    // 使用接近 Windows 11 的淡色云母，而不是纯黑
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    backdropFilter: 'blur(20px)',
+    WebkitBackdropFilter: 'blur(20px)',
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    // 细微的高光描边，增强云母质感
+    outline: `1px solid rgba(255, 255, 255, 0.35)`,
+    boxSizing: 'border-box',
   },
   cliOutputCard: {
     display: 'flex',
@@ -274,6 +305,8 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  // 最新生成图片在本地磁盘中的路径（用于直接保存）
+  const [generatedImagePath, setGeneratedImagePath] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [generationProgress, setGenerationProgress] = useState<string>('');
   const [cliOutput, setCliOutput] = useState<Array<{ type: 'stdout' | 'stderr'; text: string; timestamp: number }>>([]);
@@ -291,6 +324,8 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
   const [threadsInput, setThreadsInput] = useState<string>('');
   const [preview, setPreview] = useState<string>('proj');
   const [previewInterval, setPreviewInterval] = useState<number>(1);
+  const [messageDialogOpen, setMessageDialogOpen] = useState(false);
+  const [messageDialogContent, setMessageDialogContent] = useState<{ title: string; message: string } | null>(null);
   const [verbose, setVerbose] = useState<boolean>(false);
   const [color, setColor] = useState<boolean>(false);
   const [offloadToCpu, setOffloadToCpu] = useState<boolean>(false);
@@ -448,23 +483,27 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
 
   const handleGenerate = async () => {
     if (!selectedGroupId) {
-      alert('请选择模型组');
+      setMessageDialogContent({ title: '提示', message: '请选择模型组' });
+      setMessageDialogOpen(true);
       return;
     }
     if (!prompt.trim()) {
-      alert('请输入提示词');
+      setMessageDialogContent({ title: '提示', message: '请输入提示词' });
+      setMessageDialogOpen(true);
       return;
     }
 
     // 检查 ipcRenderer 是否可用
     if (!window.ipcRenderer) {
-      alert('IPC 通信不可用，请确保应用正常运行');
+      setMessageDialogContent({ title: '错误', message: 'IPC 通信不可用，请确保应用正常运行' });
+      setMessageDialogOpen(true);
       return;
     }
 
       try {
       setGenerating(true);
       setGeneratedImage(null);
+      setGeneratedImagePath(null);
       setPreviewImage(null); // 清空预览图片
       setGenerationProgress('正在初始化...');
       setCliOutput([]); // 清空之前的输出
@@ -520,6 +559,10 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
 
         if (result.success && result.image) {
           setGeneratedImage(result.image);
+          // 记录生成图片在 outputs 目录中的实际路径，便于在本页直接保存
+          if (result.imagePath && typeof result.imagePath === 'string') {
+            setGeneratedImagePath(result.imagePath);
+          }
           setPreviewImage(null); // 清除预览图片，显示最终图片
           setGenerationProgress('生成完成');
         } else {
@@ -536,7 +579,8 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
       const errorMessage = error instanceof Error ? error.message : String(error);
       // 检查是否是取消操作
       if (!errorMessage.includes('生成已取消') && !errorMessage.includes('cancelled')) {
-        alert(`生成图片失败: ${errorMessage}`);
+        setMessageDialogContent({ title: '生成失败', message: `生成图片失败: ${errorMessage}` });
+        setMessageDialogOpen(true);
       }
       setGenerationProgress('');
       setGenerating(false);
@@ -551,6 +595,34 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
       setGenerationProgress('正在取消...');
     } catch (error) {
       console.error('Failed to cancel generation:', error);
+    }
+  };
+
+  // 直接在生成页面保存最新生成的图片
+  const handleSaveGeneratedImage = async () => {
+    if (!generatedImagePath) {
+      setMessageDialogContent({ title: '提示', message: '当前还没有可保存的生成结果，请先生成一张图片。' });
+      setMessageDialogOpen(true);
+      return;
+    }
+
+    if (!window.ipcRenderer) {
+      setMessageDialogContent({ title: '错误', message: 'IPC 通信不可用，无法保存图片。' });
+      setMessageDialogOpen(true);
+      return;
+    }
+
+    try {
+      const success = await window.ipcRenderer.invoke('generated-images:download', generatedImagePath);
+      if (!success) {
+        setMessageDialogContent({ title: '保存失败', message: '保存图片失败，请稍后重试。' });
+        setMessageDialogOpen(true);
+      }
+    } catch (error) {
+      console.error('Failed to save generated image:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setMessageDialogContent({ title: '保存失败', message: `保存图片失败: ${errorMessage}` });
+      setMessageDialogOpen(true);
     }
   };
 
@@ -589,6 +661,44 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
   return (
     <div className={styles.container}>
       <Title1>图片生成</Title1>
+
+      {/* 浮动控制面板 - 固定在顶部 */}
+      <div className={styles.floatingControlPanel}>
+        <div className={styles.actions}>
+          {generating ? (
+            <Button
+              onClick={handleCancelGenerate}
+              appearance="secondary"
+              size="large"
+            >
+              取消生成
+            </Button>
+          ) : (
+            <Button
+              icon={<ImageAddRegular />}
+              onClick={handleGenerate}
+              disabled={!selectedGroupId || !prompt.trim() || loading}
+              appearance="primary"
+              size="large"
+            >
+              开始生成
+            </Button>
+          )}
+          <Button
+            icon={<DocumentArrowDownRegular />}
+            onClick={handleSaveGeneratedImage}
+            disabled={loading || generating || !generatedImagePath}
+          >
+            保存最新图片
+          </Button>
+          <Button
+            onClick={loadModelGroups}
+            disabled={loading || generating}
+          >
+            刷新模型组列表
+          </Button>
+        </div>
+      </div>
 
       {/* 预览区域 - 在上方，占据主要区域 */}
       <Card className={styles.previewCard}>
@@ -1278,38 +1388,28 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
               </Field>
             </div>
           )}
-
-          {/* 生成按钮 */}
-          <div className={styles.actions}>
-            {generating ? (
-              <Button
-                onClick={handleCancelGenerate}
-                appearance="secondary"
-                size="large"
-              >
-                取消生成
-              </Button>
-            ) : (
-              <Button
-                icon={<ImageAddRegular />}
-                onClick={handleGenerate}
-                disabled={!selectedGroupId || !prompt.trim() || loading}
-                appearance="primary"
-                size="large"
-              >
-                开始生成
-              </Button>
-            )}
-            <Button
-              onClick={loadModelGroups}
-              disabled={loading || generating}
-            >
-              刷新模型组列表
-            </Button>
-          </div>
         </div>
       </Card>
 
+      {/* 消息对话框 */}
+      <Dialog open={messageDialogOpen} onOpenChange={(_, data) => setMessageDialogOpen(data.open)}>
+        <DialogSurface>
+          <DialogTitle>{messageDialogContent?.title || '提示'}</DialogTitle>
+          <DialogBody>
+            <DialogContent>
+              <Body1 style={{ whiteSpace: 'pre-line' }}>{messageDialogContent?.message || ''}</Body1>
+            </DialogContent>
+          </DialogBody>
+          <DialogActions>
+            <Button
+              appearance="primary"
+              onClick={() => setMessageDialogOpen(false)}
+            >
+              确定
+            </Button>
+          </DialogActions>
+        </DialogSurface>
+      </Dialog>
     </div>
   );
 };

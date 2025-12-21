@@ -14,6 +14,12 @@ import {
   Input,
   Checkbox,
   Text,
+  Dialog,
+  DialogSurface,
+  DialogTitle,
+  DialogBody,
+  DialogActions,
+  DialogContent,
 } from '@fluentui/react-components';
 import {
   ImageAddRegular,
@@ -222,6 +228,7 @@ const useStyles = makeStyles({
   uploadSection: {
     display: 'flex',
     flexDirection: 'column',
+    alignItems: 'center',
     gap: tokens.spacingVerticalM,
     padding: tokens.spacingVerticalM,
     backgroundColor: tokens.colorNeutralBackground2,
@@ -244,8 +251,11 @@ const useStyles = makeStyles({
   },
   uploadedImageContainer: {
     position: 'relative',
-    display: 'inline-block',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginTop: tokens.spacingVerticalM,
+    width: '100%',
   },
   uploadedImage: {
     maxWidth: '100%',
@@ -284,17 +294,16 @@ type DeviceType = 'cpu' | 'vulkan' | 'cuda';
 // 默认负面提示词（精简版，保留最核心的负面提示词）
 const DEFAULT_NEGATIVE_PROMPT = '低质量, 最差质量, 模糊, 低分辨率, 手部错误, 脚部错误, 比例错误, 多余肢体, 缺失肢体, 水印';
 
-// 清理 ANSI 转义序列（控制字符）
-const stripAnsiCodes = (text: string): string => {
-  // 移除 ANSI 转义序列
-  // 匹配格式：\x1b[... 或 \u001b[... 或 \033[... 等
-  // 包括常见的控制序列如 [K (清除到行尾), [A (上移), [2J (清屏) 等
-  return text
-    .replace(/\u001b\[[0-9;]*[a-zA-Z]/g, '') // 移除 CSI 序列 (Control Sequence Introducer)
-    .replace(/\u001b[\(\)][0-9;]*[a-zA-Z]/g, '') // 移除其他转义序列
-    .replace(/\u001b./g, '') // 移除其他单字符转义序列
-    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '') // 移除十六进制格式的转义序列
-    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, ''); // 移除八进制格式的转义序列（使用十六进制替代）
+// 清理文本：移除多余的空格和重复的标签
+const cleanText = (text: string): string => {
+  // 移除重复的 [INFO ] 标签（可能是数据流分割导致的）
+  // 匹配模式：一个或多个 [INFO ] 标签，可能中间有空格
+  text = text.replace(/(\[INFO \]\s*)+/g, '[INFO ] ');
+  
+  // 移除行首和行尾的空白字符
+  text = text.trim();
+  
+  return text;
 };
 
 interface EditImagePageProps {
@@ -334,6 +343,8 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
   const [threadsInput, setThreadsInput] = useState<string>('');
   const [preview, setPreview] = useState<string>('proj');
   const [previewInterval, setPreviewInterval] = useState<number>(1);
+  const [messageDialogOpen, setMessageDialogOpen] = useState(false);
+  const [messageDialogContent, setMessageDialogContent] = useState<{ title: string; message: string } | null>(null);
   const [verbose, setVerbose] = useState<boolean>(false);
   const [color, setColor] = useState<boolean>(false);
   const [offloadToCpu, setOffloadToCpu] = useState<boolean>(false);
@@ -384,19 +395,78 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
     checkAndLoad();
   }, []);
 
+  // 用于累积不完整的行数据（渲染进程端缓冲）
+  const cliBufferRef = useRef<{ stdout: string; stderr: string }>({ stdout: '', stderr: '' });
+
   // 处理 CLI 输出的回调函数
-  const handleCliOutput = useCallback((data: { type: 'stdout' | 'stderr'; text: string }) => {
-    // 清理 ANSI 转义序列
-    const cleanedText = stripAnsiCodes(data.text);
-    // 如果清理后的文本不为空，才添加到输出中
-    if (cleanedText.trim()) {
+  // 主进程现在发送原始数据块，需要在渲染进程端进行缓冲和行分割
+  const handleCliOutput = useCallback((data: { type: 'stdout' | 'stderr'; text: string; raw?: boolean }) => {
+    // 累积到缓冲区
+    const bufferKey = data.type;
+    cliBufferRef.current[bufferKey] += data.text;
+    
+    // 处理完整行（以 \n 结尾）
+    const buffer = cliBufferRef.current[bufferKey];
+    const lines = buffer.split('\n');
+    
+    // 保留最后一个不完整的行在缓冲区中
+    cliBufferRef.current[bufferKey] = lines.pop() || '';
+    
+    // 处理完整的行
+    if (lines.length > 0) {
       setCliOutput(prev => {
-        // 检查是否与最后一行重复（避免重复添加相同的行）
-        const lastLine = prev[prev.length - 1];
-        if (lastLine && lastLine.text === cleanedText && lastLine.type === data.type) {
-          return prev;
+        let newOutput = [...prev];
+        
+        for (const line of lines) {
+          // 处理回车符：如果行包含 \r，表示要覆盖上一行
+          const hasCarriageReturn = line.includes('\r');
+          // 移除所有回车符
+          let processedLine = line.replace(/\r/g, '');
+          
+          // 清理文本（合并重复的 [INFO ] 标签等）
+          processedLine = cleanText(processedLine);
+          
+          // 跳过空行
+          if (!processedLine) {
+            continue;
+          }
+          
+          // 检查是否是进度条行（包含 |=> 或 |==> 等模式）
+          const isProgressLine = /^\s*\|[=>\s-]+\|/.test(processedLine);
+          
+          if (hasCarriageReturn || isProgressLine) {
+            // 如果是进度条或包含回车符，更新最后一行而不是添加新行
+            const lastIndex = newOutput.length - 1;
+            if (lastIndex >= 0 && newOutput[lastIndex].type === data.type) {
+              // 检查最后一行是否也是进度条
+              const lastIsProgress = /^\s*\|[=>\s-]+\|/.test(newOutput[lastIndex].text);
+              if (lastIsProgress || isProgressLine) {
+                // 更新最后一行
+                newOutput[lastIndex] = {
+                  ...newOutput[lastIndex],
+                  text: processedLine,
+                  timestamp: Date.now(),
+                };
+                continue;
+              }
+            }
+          }
+          
+          // 检查是否与最后一行重复（避免重复添加相同的行）
+          const lastLine = newOutput[newOutput.length - 1];
+          if (lastLine && lastLine.text === processedLine && lastLine.type === data.type) {
+            continue;
+          }
+          
+          // 添加新行
+          newOutput.push({
+            type: data.type,
+            text: processedLine,
+            timestamp: Date.now(),
+          });
         }
-        return [...prev, { ...data, text: cleanedText, timestamp: Date.now() }];
+        
+        return newOutput;
       });
     }
   }, []);
@@ -493,21 +563,25 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
 
   const handleGenerate = async () => {
     if (!selectedGroupId) {
-      alert('请选择模型组');
+      setMessageDialogContent({ title: '提示', message: '请选择模型组' });
+      setMessageDialogOpen(true);
       return;
     }
     if (!inputImagePath) {
-      alert('请先上传待编辑的图片');
+      setMessageDialogContent({ title: '提示', message: '请先上传待编辑的图片' });
+      setMessageDialogOpen(true);
       return;
     }
     if (!prompt.trim()) {
-      alert('请输入提示词');
+      setMessageDialogContent({ title: '提示', message: '请输入提示词' });
+      setMessageDialogOpen(true);
       return;
     }
 
     // 检查 ipcRenderer 是否可用
     if (!window.ipcRenderer) {
-      alert('IPC 通信不可用，请确保应用正常运行');
+      setMessageDialogContent({ title: '错误', message: 'IPC 通信不可用，请确保应用正常运行' });
+      setMessageDialogOpen(true);
       return;
     }
 
@@ -517,6 +591,8 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
       setPreviewImage(null); // 清空预览图片
       setGenerationProgress('正在初始化...');
       setCliOutput([]); // 清空之前的输出
+      // 清空缓冲区
+      cliBufferRef.current = { stdout: '', stderr: '' };
 
       // 监听生成进度
       const progressListener = (_event: unknown, data: { progress?: string; image?: string }) => {
@@ -586,7 +662,8 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
       const errorMessage = error instanceof Error ? error.message : String(error);
       // 检查是否是取消操作
       if (!errorMessage.includes('生成已取消') && !errorMessage.includes('cancelled')) {
-        alert(`生成图片失败: ${errorMessage}`);
+        setMessageDialogContent({ title: '生成失败', message: `生成图片失败: ${errorMessage}` });
+        setMessageDialogOpen(true);
       }
       setGenerationProgress('');
       setGenerating(false);
@@ -638,7 +715,8 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
 
   const handleSelectImage = async () => {
     if (!window.ipcRenderer) {
-      alert('IPC 通信不可用，请确保应用正常运行');
+      setMessageDialogContent({ title: '错误', message: 'IPC 通信不可用，请确保应用正常运行' });
+      setMessageDialogOpen(true);
       return;
     }
 
@@ -646,18 +724,14 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
       const filePath = await window.ipcRenderer.invoke('edit-image:select-file');
       if (filePath) {
         setInputImagePath(filePath);
-        // 创建预览 URL（使用 file:// 协议）
-        // Windows 路径需要特殊处理：C:\path\to\file.png -> file:///C:/path/to/file.png
-        const normalizedPath = filePath.replace(/\\/g, '/');
-        // 如果是绝对路径（Windows 盘符），需要添加额外的斜杠
-        const previewUrl = normalizedPath.match(/^[A-Za-z]:/) 
-          ? `file:///${normalizedPath}` 
-          : `file://${normalizedPath}`;
-        setInputImagePreview(previewUrl);
+        // 读取图片文件并转换为 base64 数据 URL
+        const dataUrl = await window.ipcRenderer.invoke('edit-image:read-image-base64', filePath);
+        setInputImagePreview(dataUrl);
       }
     } catch (error) {
       console.error('Failed to select image:', error);
-      alert('选择图片失败，请重试');
+      setMessageDialogContent({ title: '错误', message: '选择图片失败，请重试' });
+      setMessageDialogOpen(true);
     }
   };
 
@@ -1433,6 +1507,25 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
         </div>
       </Card>
 
+      {/* 消息对话框 */}
+      <Dialog open={messageDialogOpen} onOpenChange={(_, data) => setMessageDialogOpen(data.open)}>
+        <DialogSurface>
+          <DialogTitle>{messageDialogContent?.title || '提示'}</DialogTitle>
+          <DialogBody>
+            <DialogContent>
+              <Body1 style={{ whiteSpace: 'pre-line' }}>{messageDialogContent?.message || ''}</Body1>
+            </DialogContent>
+          </DialogBody>
+          <DialogActions>
+            <Button
+              appearance="primary"
+              onClick={() => setMessageDialogOpen(false)}
+            >
+              确定
+            </Button>
+          </DialogActions>
+        </DialogSurface>
+      </Dialog>
     </div>
   );
 };

@@ -6,6 +6,7 @@ import { existsSync, createReadStream, createWriteStream, watchFile, unwatchFile
 import { pipeline } from 'stream/promises'
 import { createHash } from 'crypto'
 import { spawn, exec } from 'child_process'
+import { execa } from 'execa'
 import archiver from 'archiver'
 import { AsyncOperationGuard } from './utils/AsyncOperationGuard.js'
 import { ResourceManager } from './utils/ResourceManager.js'
@@ -92,6 +93,9 @@ let currentGenerateKill: (() => void) | null = null
 function getRunPath(): string {
   return app.isPackaged ? dirname(process.execPath) : join(__dirname, '..')
 }
+
+// 注意：不再需要手动转义函数，现在使用 execa 库自动处理参数转义
+// execa 会自动处理包含空格、引号等特殊字符的参数，更安全可靠
 
 // 将相对路径转换为绝对路径（基于运行路径和 models 文件夹）
 function resolveModelPath(modelPath: string | undefined): string | undefined {
@@ -267,6 +271,49 @@ ipcMain.handle('edit-image:select-file', async () => {
     return result.filePaths[0]
   }
   return null
+})
+
+// IPC 处理程序：读取图片文件并返回 base64 数据 URL
+ipcMain.handle('edit-image:read-image-base64', async (_, filePath: string) => {
+  try {
+    if (!existsSync(filePath)) {
+      throw new Error('文件不存在')
+    }
+    
+    // 读取文件内容
+    const fileBuffer = await fs.readFile(filePath)
+    
+    // 根据文件扩展名确定 MIME 类型
+    const ext = extname(filePath).toLowerCase()
+    let mimeType = 'image/png' // 默认值
+    switch (ext) {
+      case '.jpg':
+      case '.jpeg':
+        mimeType = 'image/jpeg'
+        break
+      case '.png':
+        mimeType = 'image/png'
+        break
+      case '.bmp':
+        mimeType = 'image/bmp'
+        break
+      case '.webp':
+        mimeType = 'image/webp'
+        break
+      case '.gif':
+        mimeType = 'image/gif'
+        break
+    }
+    
+    // 转换为 base64
+    const base64 = fileBuffer.toString('base64')
+    const dataUrl = `data:${mimeType};base64,${base64}`
+    
+    return dataUrl
+  } catch (error) {
+    console.error('Failed to read image file:', error)
+    throw error
+  }
 })
 
 
@@ -538,8 +585,8 @@ ipcMain.handle('sdcpp:get-device', async () => {
 // 获取可执行文件的版本号
 async function getExecutableVersion(exePath: string): Promise<string | null> {
   return new Promise((resolve) => {
-    // 使用 chcp 65001 设置代码页为 UTF-8，确保正确处理中文字符
-    const command = `chcp 65001 >nul && "${exePath}" --version`
+    // sd-cli.exe 已经内置 UTF-8 支持（PR 1101），无需手动设置代码页
+    const command = `"${exePath}" --version`
     exec(command, { timeout: 5000 }, (error, stdout, stderr) => {
       if (error) {
         // 如果命令执行失败，返回 null
@@ -872,6 +919,7 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
     const outputImagePath = join(outputsDir, `generated_${timestamp}.png`)
     const outputMetadataPath = join(outputsDir, `generated_${timestamp}.json`)
     const previewImagePath = join(outputsDir, `preview_${timestamp}.png`)
+    // 不再需要日志文件，直接通过 stdout/stderr 捕获输出
 
     // 构建命令行参数
     // 根据 sd-cli.exe 的参数要求：
@@ -886,6 +934,16 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
     if (groupId) {
       const groups = await loadModelGroups()
       const group = groups.find(g => g.id === groupId)
+      
+      // 根据任务类型添加 mode 参数
+      const taskType = group?.taskType
+      if (taskType === 'upscale') {
+        args.push('-M', 'upscale')
+      } else {
+        // generate 和 edit 都使用 img_gen
+        args.push('-M', 'img_gen')
+      }
+      
       if (group?.vaeModel) {
         // 将相对路径转换为绝对路径
         const vaeModelPath = resolveModelPath(group.vaeModel)
@@ -895,7 +953,6 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
       }
       
       // 根据任务类型选择不同的文本编码器模型
-      const taskType = group?.taskType
       if (taskType === 'edit') {
         // 图片编辑任务：使用 CLIP L 和 T5XXL 模型
         if (group?.clipLModel) {
@@ -929,28 +986,13 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
     }
 
     // 添加输入图片（用于图片编辑和上采样）
-    // 对于图片编辑任务，优先使用 -r 参数（如果支持），否则使用 --input-image
+    // 统一使用 --init-img 参数（根据最新 CLI 文档，--input-image 已废弃，-r 是用于 Flux Kontext 模型的参考图片）
     if (inputImage) {
       const inputImagePath = resolve(inputImage)
       if (existsSync(inputImagePath)) {
-        // 检查是否是图片编辑任务（通过检查是否有 clipLModel 或 t5xxlModel 来判断）
-        let isEditTask = false
-        if (groupId) {
-          const groups = await loadModelGroups()
-          const group = groups.find(g => g.id === groupId)
-          if (group && (group.taskType === 'edit' || group.clipLModel || group.t5xxlModel)) {
-            isEditTask = true
-          }
-        }
-        
-        // 图片编辑任务使用 -r 参数，其他任务使用 --input-image
-        if (isEditTask) {
-          args.push('-r', inputImagePath)
-          console.log(`[Generate] Input image (edit mode): ${inputImagePath}`)
-        } else {
-          args.push('--input-image', inputImagePath)
+        // 统一使用 --init-img 参数
+        args.push('--init-img', inputImagePath)
           console.log(`[Generate] Input image: ${inputImagePath}`)
-        }
       } else {
         throw new Error(`输入图片文件不存在: ${inputImagePath}`)
       }
@@ -1088,30 +1130,19 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
     event.sender.send('generate:progress', { progress: '正在启动 SD.cpp 引擎...' })
 
     return new Promise((resolvePromise, reject) => {
-      // 在 Windows 上，如果路径包含中文字符，需要使用 shell: true 来正确处理编码
-      // 为了安全，我们需要转义参数中的特殊字符
-      const escapeShellArg = (arg: string): string => {
-        // Windows CMD/PowerShell 转义规则：将引号加倍，然后用引号包裹整个参数
-        // 这样可以正确处理包含空格、引号或中文字符的路径
-        return `"${arg.replace(/"/g, '""')}"`
-      }
-
-      // 在 Windows 上使用 shell: true 以正确处理中文路径
-      const spawnOptions: Parameters<typeof spawn>[2] = {
+      // 使用 execa 库来执行命令，它自动处理参数转义，无需手动转义
+      // execa 会自动转义包含空格、引号等特殊字符的参数，更安全可靠
+      // 现在不再需要输出重定向到文件，可以直接捕获 stdout 和 stderr
+      
+      console.log(`[Generate] Starting image generation: ${sdExePath}`)
+      console.log(`[Generate] Command line arguments: ${args.join(' ')}`)
+      
+      // 使用 execa 执行命令，自动处理参数转义
+      const childProcess = execa(sdExePath, args, {
         cwd: dirname(sdExePath),
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }
-
-      // 目前仅支持 Windows 平台
-      // TODO: 未来如需支持其他平台，可在此处添加平台检测逻辑
-      // Windows: 使用 shell: true 并转义所有参数以正确处理中文路径
-      // 使用 chcp 65001 设置代码页为 UTF-8，确保正确处理中文字符
-      const escapedExePath = escapeShellArg(sdExePath)
-      const escapedArgs = args.map(escapeShellArg)
-      // 使用 cmd.exe 的 /c 参数执行命令，并在前面设置 UTF-8 代码页
-      const command = `chcp 65001 >nul && ${escapedExePath} ${escapedArgs.join(' ')}`
-      spawnOptions.shell = true
-      const childProcess = spawn(command, [], spawnOptions)
+        // execa 会自动处理参数转义，无需手动转义
+        // 在 Windows 上，execa 会自动使用正确的转义规则
+      })
 
       let stdout = ''
       let stderr = ''
@@ -1127,6 +1158,41 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
 
       // 存储当前生成进程引用
       currentGenerateProcess = childProcess
+
+      // 直接捕获 stdout 和 stderr（不再需要文件重定向）
+      if (childProcess.stdout) {
+        childProcess.stdout.on('data', (data: Buffer) => {
+          const text = data.toString('utf8')
+          stdout += text
+          
+          if (operationGuard.check() && !event.sender.isDestroyed()) {
+            // 发送输出
+            event.sender.send('generate:cli-output', { type: 'stdout', text })
+            
+            // 进度检测逻辑
+            const progressMatch = text.match(/progress[:\s]+(\d+)%/i)
+            if (progressMatch) {
+              event.sender.send('generate:progress', { progress: `生成中... ${progressMatch[1]}%` })
+            } else if (text.includes('Generating') || text.includes('generating')) {
+              event.sender.send('generate:progress', { progress: '正在生成图片...' })
+            } else if (text.includes('Loading') || text.includes('loading')) {
+              event.sender.send('generate:progress', { progress: '正在加载模型...' })
+            }
+          }
+        })
+      }
+      
+      if (childProcess.stderr) {
+        childProcess.stderr.on('data', (data: Buffer) => {
+          const text = data.toString('utf8')
+          stderr += text
+          
+          if (operationGuard.check() && !event.sender.isDestroyed()) {
+            // 发送错误输出
+            event.sender.send('generate:cli-output', { type: 'stderr', text })
+          }
+        })
+      }
 
       const killProcess = () => {
         if (childProcess && !childProcess.killed && childProcess.pid) {
@@ -1225,38 +1291,7 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
         }
       }
 
-      childProcess.stdout?.on('data', (data: Buffer) => {
-        const text = data.toString()
-        stdout += text
-        console.log(`[SD.cpp stdout] ${text}`)
-        
-        if (!operationGuard.check() || event.sender.isDestroyed()) {
-          return
-        }
-        
-        event.sender.send('generate:cli-output', { type: 'stdout', text })
-        
-        const progressMatch = text.match(/progress[:\s]+(\d+)%/i)
-        if (progressMatch) {
-          event.sender.send('generate:progress', { progress: `生成中... ${progressMatch[1]}%` })
-        } else if (text.includes('Generating') || text.includes('generating')) {
-          event.sender.send('generate:progress', { progress: '正在生成图片...' })
-        } else if (text.includes('Loading') || text.includes('loading')) {
-          event.sender.send('generate:progress', { progress: '正在加载模型...' })
-        }
-      })
-
-      childProcess.stderr?.on('data', (data: Buffer) => {
-        const text = data.toString()
-        stderr += text
-        console.error(`[SD.cpp stderr] ${text}`)
-        
-        if (!operationGuard.check() || event.sender.isDestroyed()) {
-          return
-        }
-        
-        event.sender.send('generate:cli-output', { type: 'stderr', text })
-      })
+      // 不再需要文件监听，直接通过 stdout/stderr 事件捕获输出
 
       // 设置预览图片文件监听
       if (preview && preview !== 'none' && preview.trim() !== '') {
@@ -1420,10 +1455,17 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
             event.sender.send('generate:progress', { progress: `生成已取消（耗时: ${durationSeconds}秒）` })
             safeReject(new Error('生成已取消'))
           } else {
-            const errorMsg = stderr || stdout || `进程退出，代码: ${code}, 信号: ${signal}`
+            // 从日志文件读取错误信息
+            let errorMsg = stderr || stdout
+            // 使用捕获的 stderr 或 stdout 作为错误信息
+            // 不再需要读取日志文件，直接使用捕获的输出
+            if (!errorMsg) {
+              errorMsg = `进程退出，代码: ${code}, 信号: ${signal}`
+            }
             console.log(`[Generate] Image generation failed after ${durationSeconds}s (${duration}ms)`)
-            event.sender.send('generate:progress', { progress: `生成失败: ${errorMsg}（耗时: ${durationSeconds}秒）` })
-            safeReject(new Error(`图片生成失败: ${errorMsg}`))
+            const errorPreview = errorMsg.length > 100 ? errorMsg.slice(0, 100) + '...' : errorMsg
+            event.sender.send('generate:progress', { progress: `生成失败: ${errorPreview}（耗时: ${durationSeconds}秒）` })
+            safeReject(new Error(`图片生成失败: ${errorMsg.slice(0, 500)}`))
           }
         }
       })
@@ -1693,20 +1735,15 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
     event.sender.send('generate-video:progress', { progress: '正在启动 SD.cpp 引擎...' })
 
     return new Promise((resolvePromise, reject) => {
-      const escapeShellArg = (arg: string): string => {
-        return `"${arg.replace(/"/g, '""')}"`
-      }
-
-      const spawnOptions: Parameters<typeof spawn>[2] = {
+      // 使用 execa 库来执行命令，它自动处理参数转义，无需手动转义
+      // execa 会自动转义包含空格、引号等特殊字符的参数，更安全可靠
+      
+      // 使用 execa 执行命令，自动处理参数转义
+      const childProcess = execa(sdExePath, args, {
         cwd: dirname(sdExePath),
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }
-
-      const escapedExePath = escapeShellArg(sdExePath)
-      const escapedArgs = args.map(escapeShellArg)
-      const command = `chcp 65001 >nul && ${escapedExePath} ${escapedArgs.join(' ')}`
-      spawnOptions.shell = true
-      const childProcess = spawn(command, [], spawnOptions)
+        // execa 会自动处理参数转义，无需手动转义
+        // 在 Windows 上，execa 会自动使用正确的转义规则
+      })
 
       let stdout = ''
       let stderr = ''
@@ -1791,16 +1828,18 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
       }
 
       childProcess.stdout?.on('data', (data: Buffer) => {
-        const text = data.toString()
+        const text = data.toString('utf8')
         stdout += text
-        console.log(`[SD.cpp stdout] ${text}`)
+        console.log(`[SD.cpp stdout RAW] length=${data.length}, text="${text.replace(/\r/g, '\\r').replace(/\n/g, '\\n')}"`)
         
         if (!operationGuard.check() || event.sender.isDestroyed()) {
           return
         }
         
-        event.sender.send('generate-video:cli-output', { type: 'stdout', text })
+        // 直接发送原始数据块，不做任何处理
+        event.sender.send('generate-video:cli-output', { type: 'stdout', text, raw: true })
         
+        // 进度检测逻辑（基于原始数据块）
         const progressMatch = text.match(/progress[:\s]+(\d+)%/i)
         if (progressMatch) {
           event.sender.send('generate-video:progress', { progress: `生成中... ${progressMatch[1]}%` })
@@ -1812,24 +1851,25 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
       })
 
       childProcess.stderr?.on('data', (data: Buffer) => {
-        const text = data.toString()
+        const text = data.toString('utf8')
         stderr += text
-        console.error(`[SD.cpp stderr] ${text}`)
+        console.error(`[SD.cpp stderr RAW] length=${data.length}, text="${text.replace(/\r/g, '\\r').replace(/\n/g, '\\n')}"`)
         
         if (!operationGuard.check() || event.sender.isDestroyed()) {
           return
         }
         
-        event.sender.send('generate-video:cli-output', { type: 'stderr', text })
+        // 直接发送原始数据块，不做任何处理
+        event.sender.send('generate-video:cli-output', { type: 'stderr', text, raw: true })
       })
 
-      childProcess.on('error', (error) => {
+      childProcess.on('error', (error: Error) => {
         console.error('[Generate Video] Failed to start process:', error)
         event.sender.send('generate-video:progress', { progress: `错误: ${error.message}` })
         safeReject(new Error(`无法启动 SD.cpp 引擎: ${error.message}`))
       })
 
-      childProcess.on('exit', async (code, signal) => {
+      childProcess.on('exit', async (code: number | null, signal: NodeJS.Signals | null) => {
         cleanup()
 
         if (isResolved) return
@@ -2294,4 +2334,5 @@ app.whenReady().then(async () => {
   await initDefaultOutputsFolder()
   createWindow()
 })
+
 

@@ -255,6 +255,8 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
   const [groupDefaultSeed, setGroupDefaultSeed] = useState<string>('');
   const [groupTaskType, setGroupTaskType] = useState<TaskType>('generate');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [messageDialogOpen, setMessageDialogOpen] = useState(false);
+  const [messageDialogContent, setMessageDialogContent] = useState<{ title: string; message: string } | null>(null);
 
   // 加载权重文件夹路径
   useEffect(() => {
@@ -304,14 +306,16 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
   const handleSetFolder = async () => {
     if (!weightsFolder.trim() || !window.ipcRenderer) {
       if (!weightsFolder.trim()) {
-        alert('请输入有效的文件夹路径');
+        setMessageDialogContent({ title: '提示', message: '请输入有效的文件夹路径' });
+        setMessageDialogOpen(true);
       }
       return;
     }
     
     const exists = await window.ipcRenderer.invoke('weights:check-folder', weightsFolder.trim());
     if (!exists) {
-      alert('文件夹不存在，请检查路径是否正确');
+      setMessageDialogContent({ title: '错误', message: '文件夹不存在，请检查路径是否正确' });
+      setMessageDialogOpen(true);
       return;
     }
     
@@ -362,7 +366,8 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
           }
           
           if (result?.skipped && result.reason === 'duplicate') {
-            alert(`文件已存在，跳过上传。\n\n已存在的文件: ${result.existingFile}\n当前文件: ${fileName}\n\n这两个文件的内容完全相同（哈希值一致）。`);
+            setMessageDialogContent({ title: '文件已存在', message: `文件已存在，跳过上传。\n\n已存在的文件: ${result.existingFile}\n当前文件: ${fileName}\n\n这两个文件的内容完全相同（哈希值一致）。` });
+            setMessageDialogOpen(true);
             await loadFiles();
             return;
           }
@@ -385,7 +390,8 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
       
       const errorMessage = error instanceof Error ? error.message : String(error);
       if (!errorMessage.includes('上传已取消')) {
-        alert(`上传文件失败: ${errorMessage}`);
+        setMessageDialogContent({ title: '上传失败', message: `上传文件失败: ${errorMessage}` });
+        setMessageDialogOpen(true);
       }
     }
   };
@@ -477,34 +483,40 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
 
   const handleSaveGroup = async () => {
     if (!groupName.trim()) {
-      alert('请输入组名称');
+      setMessageDialogContent({ title: '提示', message: '请输入组名称' });
+      setMessageDialogOpen(true);
       return;
     }
 
     // 创建新模型组时，必须所有必需的模型都选择了有效模型
     if (!editingGroup) {
       if (!groupSdModel || !groupSdModel.trim()) {
-        alert('创建新模型组时，必须选择SD模型');
+        setMessageDialogContent({ title: '提示', message: '创建新模型组时，必须选择SD模型' });
+        setMessageDialogOpen(true);
         return;
       }
       if (!groupVaeModel || !groupVaeModel.trim()) {
-        alert('创建新模型组时，必须选择VAE模型');
+        setMessageDialogContent({ title: '提示', message: '创建新模型组时，必须选择VAE模型' });
+        setMessageDialogOpen(true);
         return;
       }
       if (groupTaskType === 'edit') {
         // 图片编辑任务需要 CLIP L 和 T5XXL 模型
         if (!groupClipLModel || !groupClipLModel.trim()) {
-          alert('创建图片编辑模型组时，必须选择CLIP L模型');
+          setMessageDialogContent({ title: '提示', message: '创建图片编辑模型组时，必须选择CLIP L模型' });
+          setMessageDialogOpen(true);
           return;
         }
         if (!groupT5xxlModel || !groupT5xxlModel.trim()) {
-          alert('创建图片编辑模型组时，必须选择T5XXL模型');
+          setMessageDialogContent({ title: '提示', message: '创建图片编辑模型组时，必须选择T5XXL模型' });
+          setMessageDialogOpen(true);
           return;
         }
       } else {
         // 其他任务类型需要 LLM/CLIP 模型
         if (!groupLlmModel || !groupLlmModel.trim()) {
-          alert('创建新模型组时，必须选择LLM/CLIP模型');
+          setMessageDialogContent({ title: '提示', message: '创建新模型组时，必须选择LLM/CLIP模型' });
+          setMessageDialogOpen(true);
           return;
         }
       }
@@ -556,7 +568,8 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     } catch (error) {
       console.error('Failed to save group:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      alert(`保存模型组失败: ${errorMessage}`);
+      setMessageDialogContent({ title: '保存失败', message: `保存模型组失败: ${errorMessage}` });
+      setMessageDialogOpen(true);
     } finally {
       setLoading(false);
     }
@@ -573,7 +586,8 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
       await loadModelGroups();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      alert(`删除模型组失败: ${errorMessage}`);
+      setMessageDialogContent({ title: '删除失败', message: `删除模型组失败: ${errorMessage}` });
+      setMessageDialogOpen(true);
     } finally {
       setLoading(false);
     }
@@ -1422,6 +1436,25 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
         </DialogSurface>
       </Dialog>
 
+      {/* 消息对话框 */}
+      <Dialog open={messageDialogOpen} onOpenChange={(_, data) => setMessageDialogOpen(data.open)}>
+        <DialogSurface>
+          <DialogTitle>{messageDialogContent?.title || '提示'}</DialogTitle>
+          <DialogBody>
+            <DialogContent>
+              <Body1 style={{ whiteSpace: 'pre-line' }}>{messageDialogContent?.message || ''}</Body1>
+            </DialogContent>
+          </DialogBody>
+          <DialogActions>
+            <Button
+              appearance="primary"
+              onClick={() => setMessageDialogOpen(false)}
+            >
+              确定
+            </Button>
+          </DialogActions>
+        </DialogSurface>
+      </Dialog>
     </div>
   );
 };

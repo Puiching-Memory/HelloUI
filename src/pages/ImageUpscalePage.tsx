@@ -14,6 +14,12 @@ import {
   Input,
   Checkbox,
   Text,
+  Dialog,
+  DialogSurface,
+  DialogTitle,
+  DialogBody,
+  DialogActions,
+  DialogContent,
 } from '@fluentui/react-components';
 import {
   ImageAddRegular,
@@ -342,6 +348,8 @@ export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePagePr
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
   const [inputImagePath, setInputImagePath] = useState<string | null>(null);
   const [inputImagePreview, setInputImagePreview] = useState<string | null>(null);
+  const [messageDialogOpen, setMessageDialogOpen] = useState(false);
+  const [messageDialogContent, setMessageDialogContent] = useState<{ title: string; message: string } | null>(null);
 
   // 加载模型组列表
   useEffect(() => {
@@ -481,16 +489,19 @@ export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePagePr
 
   const handleUpscale = async () => {
     if (!selectedGroupId) {
-      alert('请选择模型组');
+      setMessageDialogContent({ title: '提示', message: '请选择模型组' });
+      setMessageDialogOpen(true);
       return;
     }
     if (!inputImagePath) {
-      alert('请先选择要上采样的图片');
+      setMessageDialogContent({ title: '提示', message: '请先选择要上采样的图片' });
+      setMessageDialogOpen(true);
       return;
     }
 
     if (!window.ipcRenderer) {
-      alert('IPC 通信不可用，请确保应用正常运行');
+      setMessageDialogContent({ title: '错误', message: 'IPC 通信不可用，请确保应用正常运行' });
+      setMessageDialogOpen(true);
       return;
     }
 
@@ -571,7 +582,8 @@ export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePagePr
       console.error('Failed to upscale image:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       if (!errorMessage.includes('生成已取消') && !errorMessage.includes('cancelled')) {
-        alert(`上采样失败: ${errorMessage}`);
+        setMessageDialogContent({ title: '上采样失败', message: `上采样失败: ${errorMessage}` });
+        setMessageDialogOpen(true);
       }
       setGenerationProgress('');
       setGenerating(false);
@@ -623,7 +635,8 @@ export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePagePr
 
   const handleSelectImage = async () => {
     if (!window.ipcRenderer) {
-      alert('IPC 通信不可用，请确保应用正常运行');
+      setMessageDialogContent({ title: '错误', message: 'IPC 通信不可用，请确保应用正常运行' });
+      setMessageDialogOpen(true);
       return;
     }
 
@@ -647,7 +660,8 @@ export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePagePr
       }
     } catch (error) {
       console.error('Failed to select image:', error);
-      alert('选择图片失败，请重试');
+      setMessageDialogContent({ title: '错误', message: '选择图片失败，请重试' });
+      setMessageDialogOpen(true);
     }
   };
 
@@ -1364,6 +1378,26 @@ export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePagePr
           </div>
         </div>
       </Card>
+
+      {/* 消息对话框 */}
+      <Dialog open={messageDialogOpen} onOpenChange={(_, data) => setMessageDialogOpen(data.open)}>
+        <DialogSurface>
+          <DialogTitle>{messageDialogContent?.title || '提示'}</DialogTitle>
+          <DialogBody>
+            <DialogContent>
+              <Body1 style={{ whiteSpace: 'pre-line' }}>{messageDialogContent?.message || ''}</Body1>
+            </DialogContent>
+          </DialogBody>
+          <DialogActions>
+            <Button
+              appearance="primary"
+              onClick={() => setMessageDialogOpen(false)}
+            >
+              确定
+            </Button>
+          </DialogActions>
+        </DialogSurface>
+      </Dialog>
     </div>
   );
 };
