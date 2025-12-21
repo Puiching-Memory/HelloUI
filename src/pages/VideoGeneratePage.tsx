@@ -17,6 +17,12 @@ import {
   MessageBar,
   MessageBarBody,
   MessageBarTitle,
+  Dialog,
+  DialogSurface,
+  DialogTitle,
+  DialogBody,
+  DialogActions,
+  DialogContent,
 } from '@fluentui/react-components';
 import {
   VideoClipRegular,
@@ -351,6 +357,8 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
   // 视频生成特有参数
   const [frames, setFrames] = useState<number>(16); // 视频帧数
   const [fps, setFps] = useState<number>(8); // 帧率
+  const [messageDialogOpen, setMessageDialogOpen] = useState(false);
+  const [messageDialogContent, setMessageDialogContent] = useState<{ title: string; message: string } | null>(null);
   
   // 其他参数
   const [samplingMethod, setSamplingMethod] = useState<string>('euler_a');
@@ -495,12 +503,14 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
 
   const handleGenerate = async () => {
     if (!window.ipcRenderer) {
-      alert('IPC 渲染器不可用');
+      setMessageDialogContent({ title: '错误', message: 'IPC 渲染器不可用' });
+      setMessageDialogOpen(true);
       return;
     }
 
     if (!selectedGroupId || !prompt.trim()) {
-      alert('请选择模型组并输入提示词');
+      setMessageDialogContent({ title: '提示', message: '请选择模型组并输入提示词' });
+      setMessageDialogOpen(true);
       return;
     }
 
@@ -588,7 +598,8 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
       console.error('Failed to generate video:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       if (!errorMessage.includes('生成已取消') && !errorMessage.includes('cancelled')) {
-        alert(`生成视频失败: ${errorMessage}`);
+        setMessageDialogContent({ title: '生成失败', message: `生成视频失败: ${errorMessage}` });
+        setMessageDialogOpen(true);
       }
       setGenerationProgress('');
       setGenerating(false);
@@ -1362,6 +1373,26 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
           </div>
         </div>
       </Card>
+
+      {/* 消息对话框 */}
+      <Dialog open={messageDialogOpen} onOpenChange={(_, data) => setMessageDialogOpen(data.open)}>
+        <DialogSurface>
+          <DialogTitle>{messageDialogContent?.title || '提示'}</DialogTitle>
+          <DialogBody>
+            <DialogContent>
+              <Body1 style={{ whiteSpace: 'pre-line' }}>{messageDialogContent?.message || ''}</Body1>
+            </DialogContent>
+          </DialogBody>
+          <DialogActions>
+            <Button
+              appearance="primary"
+              onClick={() => setMessageDialogOpen(false)}
+            >
+              确定
+            </Button>
+          </DialogActions>
+        </DialogSurface>
+      </Dialog>
     </div>
   );
 };

@@ -382,6 +382,8 @@ export const GeneratedImagesPage = () => {
   const [compareDialogOpen, setCompareDialogOpen] = useState(false);
   const [compareImage1, setCompareImage1] = useState<GeneratedImage | null>(null);
   const [compareImage2, setCompareImage2] = useState<GeneratedImage | null>(null);
+  const [messageDialogOpen, setMessageDialogOpen] = useState(false);
+  const [messageDialogContent, setMessageDialogContent] = useState<{ title: string; message: string } | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
     // 从 localStorage 加载视图模式
     const saved = localStorage.getItem('generated-images-view-mode');
@@ -446,7 +448,8 @@ export const GeneratedImagesPage = () => {
   const handleDownload = async (image: GeneratedImage) => {
     try {
       if (!window.ipcRenderer) {
-        alert('IPC 通信不可用');
+        setMessageDialogContent({ title: '错误', message: 'IPC 通信不可用' });
+        setMessageDialogOpen(true);
         return;
       }
       const success = await window.ipcRenderer.invoke('generated-images:download', image.path);
@@ -457,7 +460,8 @@ export const GeneratedImagesPage = () => {
     } catch (error) {
       console.error('Failed to download image:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      alert(`下载图片失败: ${errorMessage}`);
+      setMessageDialogContent({ title: '下载失败', message: `下载图片失败: ${errorMessage}` });
+      setMessageDialogOpen(true);
     }
   };
 
@@ -485,7 +489,8 @@ export const GeneratedImagesPage = () => {
     } catch (error) {
       console.error('Failed to delete image:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      alert(`删除图片失败: ${errorMessage}`);
+      setMessageDialogContent({ title: '删除失败', message: `删除图片失败: ${errorMessage}` });
+      setMessageDialogOpen(true);
     }
   };
 
@@ -505,14 +510,16 @@ export const GeneratedImagesPage = () => {
       
       if (result.success) {
         const sizeInMB = (result.size / (1024 * 1024)).toFixed(2);
-        alert(`成功打包 ${selectedPaths.length} 张图片为 ZIP 文件\n文件大小: ${sizeInMB} MB`);
+        setMessageDialogContent({ title: '成功', message: `成功打包 ${selectedPaths.length} 张图片为 ZIP 文件\n文件大小: ${sizeInMB} MB` });
+        setMessageDialogOpen(true);
       } else {
         throw new Error('打包失败');
       }
     } catch (error) {
       console.error('Failed to batch download images:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      alert(`批量下载失败: ${errorMessage}`);
+      setMessageDialogContent({ title: '批量下载失败', message: `批量下载失败: ${errorMessage}` });
+      setMessageDialogOpen(true);
     }
   };
 
@@ -559,14 +566,17 @@ export const GeneratedImagesPage = () => {
       setBatchDeleteDialogOpen(false);
 
       if (failCount === 0) {
-        alert(`成功删除 ${successCount} 张图片`);
+        setMessageDialogContent({ title: '成功', message: `成功删除 ${successCount} 张图片` });
+        setMessageDialogOpen(true);
       } else {
-        alert(`删除完成：成功 ${successCount} 张，失败 ${failCount} 张。失败的图片仍保留在列表中。`);
+        setMessageDialogContent({ title: '删除完成', message: `删除完成：成功 ${successCount} 张，失败 ${failCount} 张。失败的图片仍保留在列表中。` });
+        setMessageDialogOpen(true);
       }
     } catch (error) {
       console.error('Failed to batch delete images:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      alert(`批量删除失败: ${errorMessage}`);
+      setMessageDialogContent({ title: '批量删除失败', message: `批量删除失败: ${errorMessage}` });
+      setMessageDialogOpen(true);
     }
   };
 
@@ -641,7 +651,8 @@ export const GeneratedImagesPage = () => {
     const image2 = images.find(img => img.path === selectedPaths[1]);
     
     if (!image1 || !image2) {
-      alert('无法找到选中的图片');
+      setMessageDialogContent({ title: '错误', message: '无法找到选中的图片' });
+      setMessageDialogOpen(true);
       return;
     }
 
@@ -1698,6 +1709,46 @@ export const GeneratedImagesPage = () => {
               }}
             >
               关闭
+            </Button>
+          </DialogActions>
+        </DialogSurface>
+      </Dialog>
+
+      {/* 消息对话框 */}
+      <Dialog open={messageDialogOpen} onOpenChange={(_, data) => setMessageDialogOpen(data.open)}>
+        <DialogSurface>
+          <DialogTitle>{messageDialogContent?.title || '提示'}</DialogTitle>
+          <DialogBody>
+            <DialogContent>
+              <Body1 style={{ whiteSpace: 'pre-line' }}>{messageDialogContent?.message || ''}</Body1>
+            </DialogContent>
+          </DialogBody>
+          <DialogActions>
+            <Button
+              appearance="primary"
+              onClick={() => setMessageDialogOpen(false)}
+            >
+              确定
+            </Button>
+          </DialogActions>
+        </DialogSurface>
+      </Dialog>
+
+      {/* 消息对话框 */}
+      <Dialog open={messageDialogOpen} onOpenChange={(_, data) => setMessageDialogOpen(data.open)}>
+        <DialogSurface>
+          <DialogTitle>{messageDialogContent?.title || '提示'}</DialogTitle>
+          <DialogBody>
+            <DialogContent>
+              <Body1 style={{ whiteSpace: 'pre-line' }}>{messageDialogContent?.message || ''}</Body1>
+            </DialogContent>
+          </DialogBody>
+          <DialogActions>
+            <Button
+              appearance="primary"
+              onClick={() => setMessageDialogOpen(false)}
+            >
+              确定
             </Button>
           </DialogActions>
         </DialogSurface>
