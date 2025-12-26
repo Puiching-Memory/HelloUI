@@ -26,6 +26,7 @@ export function useIpcListener<T = any>(
   deps?: React.DependencyList
 ): void {
   const handlerRef = useRef(handler);
+  const listenerRef = useRef<((_event: unknown, data: T) => void) | null>(null);
 
   // 更新 handler 引用，确保使用最新的 handler
   useEffect(() => {
@@ -37,14 +38,25 @@ export function useIpcListener<T = any>(
       return;
     }
 
+    // 如果已经存在监听器，先移除它
+    if (listenerRef.current) {
+      window.ipcRenderer.off(channel, listenerRef.current);
+      listenerRef.current = null;
+    }
+
+    // 创建新的监听器
     const listener = (_event: unknown, data: T) => {
       handlerRef.current(data);
     };
+    listenerRef.current = listener;
 
     window.ipcRenderer.on(channel, listener);
 
     return () => {
-      window.ipcRenderer.off(channel, listener);
+      if (listenerRef.current && window.ipcRenderer) {
+        window.ipcRenderer.off(channel, listenerRef.current);
+        listenerRef.current = null;
+      }
     };
   }, [channel, ...(deps || [])]);
 }

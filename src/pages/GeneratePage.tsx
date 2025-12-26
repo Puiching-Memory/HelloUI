@@ -20,6 +20,7 @@ import {
   DialogBody,
   DialogActions,
   DialogContent,
+  CounterBadge,
 } from '@fluentui/react-components';
 import {
   ImageAddRegular,
@@ -117,15 +118,27 @@ const useStyles = makeStyles({
     boxShadow: tokens.shadow28,
     borderRadius: tokens.borderRadiusLarge,
     padding: tokens.spacingVerticalM,
-    // 云母 / 亚克力效果：浅色半透明背景 + 背景虚化
-    // 使用接近 Windows 11 的淡色云母，而不是纯黑
-    backgroundColor: 'rgba(255, 255, 255, 0.72)',
-    backdropFilter: 'blur(20px)',
-    WebkitBackdropFilter: 'blur(20px)',
+    // 云母 / 亚克力效果：使用伪元素实现半透明背景，保持内容不透明
+    backgroundColor: 'transparent',
+    backdropFilter: 'blur(20px) saturate(180%)',
+    WebkitBackdropFilter: 'blur(20px) saturate(180%)',
     border: `1px solid ${tokens.colorNeutralStroke2}`,
-    // 细微的高光描边，增强云母质感
-    outline: `1px solid rgba(255, 255, 255, 0.35)`,
+    // 根据主题自动调整的高光描边
+    outline: `1px solid ${tokens.colorNeutralStroke1}`,
     boxSizing: 'border-box',
+    // 使用伪元素创建半透明背景层
+    '::before': {
+      content: '""',
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      borderRadius: tokens.borderRadiusLarge,
+      backgroundColor: tokens.colorNeutralBackground1,
+      opacity: 0.72,
+      zIndex: -1,
+    },
   },
   cliOutputCard: {
     display: 'flex',
@@ -133,6 +146,16 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalS,
     flex: '0 0 auto',
     maxHeight: '300px',
+  },
+  cliOutputCardWithNewMessage: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+    flex: '0 0 auto',
+    maxHeight: '300px',
+    border: `2px solid ${tokens.colorBrandStroke1}`,
+    boxShadow: `0 0 8px ${tokens.colorBrandStroke1}40`,
+    transition: 'all 0.3s ease-in-out',
   },
   cliOutputHeader: {
     display: 'flex',
@@ -152,9 +175,25 @@ const useStyles = makeStyles({
     padding: tokens.spacingVerticalXS,
     margin: `-${tokens.spacingVerticalXS}`,
     borderRadius: tokens.borderRadiusSmall,
+    position: 'relative',
     ':hover': {
       backgroundColor: tokens.colorNeutralBackground2,
     },
+  },
+  cliOutputTitleContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    position: 'relative',
+  },
+  cliOutputTitle: {
+    position: 'relative',
+  },
+  cliOutputBadge: {
+    position: 'absolute',
+    top: '-4px',
+    right: '-8px',
+    zIndex: 1,
   },
   cliOutputHeaderActions: {
     display: 'flex',
@@ -311,6 +350,8 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
   const [generationProgress, setGenerationProgress] = useState<string>('');
   const [cliOutput, setCliOutput] = useState<Array<{ type: 'stdout' | 'stderr'; text: string; timestamp: number }>>([]);
   const [cliOutputExpanded, setCliOutputExpanded] = useState(false);
+  const [hasUserCollapsed, setHasUserCollapsed] = useState(false); // 跟踪用户是否手动收起过
+  const [lastViewedOutputCount, setLastViewedOutputCount] = useState(0); // 跟踪最后查看的输出行数
   const [copySuccess, setCopySuccess] = useState(false);
   const cliOutputRef = useRef<HTMLDivElement>(null);
   
@@ -407,12 +448,23 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
     }
   );
 
-  // 当 CLI 输出从无内容变为有内容时，自动展开
+  // 当 CLI 输出从无内容变为有内容时，自动展开（仅在初始状态下，即用户未手动收起过）
   useEffect(() => {
-    if (cliOutput.length > 0 && !cliOutputExpanded) {
+    if (cliOutput.length > 0 && !cliOutputExpanded && !hasUserCollapsed) {
       setCliOutputExpanded(true);
+      setLastViewedOutputCount(cliOutput.length); // 自动展开时更新已查看数量
     }
-  }, [cliOutput.length, cliOutputExpanded]);
+  }, [cliOutput.length, cliOutputExpanded, hasUserCollapsed]);
+
+  // 当展开时，更新最后查看的输出数量
+  useEffect(() => {
+    if (cliOutputExpanded) {
+      setLastViewedOutputCount(cliOutput.length);
+    }
+  }, [cliOutputExpanded, cliOutput.length]);
+
+  // 计算未读消息数
+  const unreadCount = cliOutput.length - lastViewedOutputCount;
 
   // 自动滚动到底部
   useEffect(() => {
@@ -507,6 +559,8 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
       setPreviewImage(null); // 清空预览图片
       setGenerationProgress('正在初始化...');
       setCliOutput([]); // 清空之前的输出
+      setHasUserCollapsed(false); // 重置用户收起状态，允许新的自动展开
+      setLastViewedOutputCount(0); // 重置已查看数量
 
       // 监听生成进度
       const progressListener = (_event: unknown, data: { progress?: string; image?: string }) => {
@@ -755,15 +809,35 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
       </Card>
 
       {/* CLI 输出窗口 - 在第二个位置 */}
-      <Card className={styles.cliOutputCard}>
+      <Card className={!cliOutputExpanded && unreadCount > 0 ? styles.cliOutputCardWithNewMessage : styles.cliOutputCard}>
         <div className={styles.cliOutputHeader}>
           <div 
             className={styles.cliOutputHeaderLeft}
-            onClick={() => setCliOutputExpanded(!cliOutputExpanded)}
+            onClick={() => {
+              const newExpanded = !cliOutputExpanded;
+              setCliOutputExpanded(newExpanded);
+              // 如果用户手动收起，记录这个状态
+              if (!newExpanded) {
+                setHasUserCollapsed(true);
+              } else {
+                // 展开时更新已查看数量
+                setLastViewedOutputCount(cliOutput.length);
+              }
+            }}
           >
-            <Title2 style={{ fontSize: tokens.fontSizeBase400, margin: 0, whiteSpace: 'nowrap' }}>
-              CLI 输出
-            </Title2>
+            <div className={styles.cliOutputTitleContainer}>
+              <Title2 style={{ fontSize: tokens.fontSizeBase400, margin: 0, whiteSpace: 'nowrap' }} className={styles.cliOutputTitle}>
+                CLI 输出
+              </Title2>
+              {!cliOutputExpanded && unreadCount > 0 && (
+                <CounterBadge 
+                  count={unreadCount} 
+                  color="brand" 
+                  size="small"
+                  style={{ position: 'absolute', top: '-4px', right: '-8px' }}
+                />
+              )}
+            </div>
             {cliOutputExpanded ? <ChevronUpRegular /> : <ChevronDownRegular />}
           </div>
           <div className={styles.cliOutputHeaderActions}>
