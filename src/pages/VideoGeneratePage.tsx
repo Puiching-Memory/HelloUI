@@ -23,6 +23,7 @@ import {
   DialogBody,
   DialogActions,
   DialogContent,
+  CounterBadge,
 } from '@fluentui/react-components';
 import {
   VideoClipRegular,
@@ -109,6 +110,16 @@ const useStyles = makeStyles({
     flex: '0 0 auto',
     maxHeight: '300px',
   },
+  cliOutputCardWithNewMessage: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+    flex: '0 0 auto',
+    maxHeight: '300px',
+    border: `2px solid ${tokens.colorBrandStroke1}`,
+    boxShadow: `0 0 8px ${tokens.colorBrandStroke1}40`,
+    transition: 'all 0.3s ease-in-out',
+  },
   cliOutputHeader: {
     display: 'flex',
     alignItems: 'center',
@@ -127,9 +138,19 @@ const useStyles = makeStyles({
     padding: tokens.spacingVerticalXS,
     margin: `-${tokens.spacingVerticalXS}`,
     borderRadius: tokens.borderRadiusSmall,
+    position: 'relative',
     ':hover': {
       backgroundColor: tokens.colorNeutralBackground2,
     },
+  },
+  cliOutputTitleContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    position: 'relative',
+  },
+  cliOutputTitle: {
+    position: 'relative',
   },
   cliOutputHeaderActions: {
     display: 'flex',
@@ -351,6 +372,8 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
   const [generationProgress, setGenerationProgress] = useState<string>('');
   const [cliOutput, setCliOutput] = useState<Array<{ type: 'stdout' | 'stderr'; text: string; timestamp: number }>>([]);
   const [cliOutputExpanded, setCliOutputExpanded] = useState(false);
+  const [hasUserCollapsed, setHasUserCollapsed] = useState(false); // 跟踪用户是否手动收起过
+  const [lastViewedOutputCount, setLastViewedOutputCount] = useState(0); // 跟踪最后查看的输出行数
   const [copySuccess, setCopySuccess] = useState(false);
   const cliOutputRef = useRef<HTMLDivElement>(null);
   
@@ -436,12 +459,23 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
     handleCliOutput
   );
 
-  // 当 CLI 输出从无内容变为有内容时，自动展开
+  // 当 CLI 输出从无内容变为有内容时，自动展开（仅在初始状态下，即用户未手动收起过）
   useEffect(() => {
-    if (cliOutput.length > 0 && !cliOutputExpanded) {
+    if (cliOutput.length > 0 && !cliOutputExpanded && !hasUserCollapsed) {
       setCliOutputExpanded(true);
+      setLastViewedOutputCount(cliOutput.length); // 自动展开时更新已查看数量
     }
-  }, [cliOutput.length, cliOutputExpanded]);
+  }, [cliOutput.length, cliOutputExpanded, hasUserCollapsed]);
+
+  // 当展开时，更新最后查看的输出数量
+  useEffect(() => {
+    if (cliOutputExpanded) {
+      setLastViewedOutputCount(cliOutput.length);
+    }
+  }, [cliOutputExpanded, cliOutput.length]);
+
+  // 计算未读消息数
+  const unreadCount = cliOutput.length - lastViewedOutputCount;
 
   // 自动滚动到底部
   useEffect(() => {
@@ -520,7 +554,9 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
       setVideoFrames([]);
       setSelectedFrameIndex(0);
       setGenerationProgress('');
-      setCliOutput([]);
+      setCliOutput([]); // 清空之前的输出
+      setHasUserCollapsed(false); // 重置用户收起状态，允许新的自动展开
+      setLastViewedOutputCount(0); // 重置已查看数量
 
       // 监听进度更新
       const progressListener = (data: { progress?: string; video?: string; frames?: string[] }) => {
@@ -738,15 +774,35 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
       </Card>
 
       {/* CLI 输出窗口 */}
-      <Card className={styles.cliOutputCard}>
+      <Card className={!cliOutputExpanded && unreadCount > 0 ? styles.cliOutputCardWithNewMessage : styles.cliOutputCard}>
         <div className={styles.cliOutputHeader}>
           <div 
             className={styles.cliOutputHeaderLeft}
-            onClick={() => setCliOutputExpanded(!cliOutputExpanded)}
+            onClick={() => {
+              const newExpanded = !cliOutputExpanded;
+              setCliOutputExpanded(newExpanded);
+              // 如果用户手动收起，记录这个状态
+              if (!newExpanded) {
+                setHasUserCollapsed(true);
+              } else {
+                // 展开时更新已查看数量
+                setLastViewedOutputCount(cliOutput.length);
+              }
+            }}
           >
-            <Title2 style={{ fontSize: tokens.fontSizeBase400, margin: 0, whiteSpace: 'nowrap' }}>
-              CLI 输出
-            </Title2>
+            <div className={styles.cliOutputTitleContainer}>
+              <Title2 style={{ fontSize: tokens.fontSizeBase400, margin: 0, whiteSpace: 'nowrap' }} className={styles.cliOutputTitle}>
+                CLI 输出
+              </Title2>
+              {!cliOutputExpanded && unreadCount > 0 && (
+                <CounterBadge 
+                  count={unreadCount} 
+                  color="brand" 
+                  size="small"
+                  style={{ position: 'absolute', top: '-4px', right: '-8px' }}
+                />
+              )}
+            </div>
             {cliOutputExpanded ? <ChevronUpRegular /> : <ChevronDownRegular />}
           </div>
           <div className={styles.cliOutputHeaderActions}>

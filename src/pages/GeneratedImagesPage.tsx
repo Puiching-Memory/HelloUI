@@ -34,7 +34,7 @@ import {
   ListRegular,
 } from '@fluentui/react-icons';
 import { PhotoView } from 'react-photo-view';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { GeneratedImage } from '../types/generatedImage';
 import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
 
@@ -82,21 +82,15 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusMedium,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground1,
-    transition: 'all 0.2s ease',
     cursor: 'pointer',
     position: 'relative',
-    ':hover': {
-      border: `1px solid ${tokens.colorNeutralStroke1}`,
-      boxShadow: tokens.shadow4,
-    },
+    boxSizing: 'border-box',
   },
   listItemSelected: {
-    border: `2px solid ${tokens.colorBrandStroke1}`,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    outline: `2px solid ${tokens.colorBrandStroke1}`,
+    outlineOffset: '-1px', // 让 outline 与 border 重叠，形成 2px 的视觉效果
     boxShadow: tokens.shadow8,
-    ':hover': {
-      border: `2px solid ${tokens.colorBrandStroke1}`,
-      boxShadow: tokens.shadow16,
-    },
   },
   listItemThumbnail: {
     width: '120px',
@@ -147,23 +141,15 @@ const useStyles = makeStyles({
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground1,
     overflow: 'hidden',
-    transition: 'all 0.2s ease',
     cursor: 'pointer',
     position: 'relative',
-    ':hover': {
-      border: `1px solid ${tokens.colorNeutralStroke1}`,
-      boxShadow: tokens.shadow8,
-      transform: 'translateY(-2px)',
-    },
+    boxSizing: 'border-box',
   },
   imageCardSelected: {
-    border: `2px solid ${tokens.colorBrandStroke1}`,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    outline: `2px solid ${tokens.colorBrandStroke1}`,
+    outlineOffset: '-1px', // 让 outline 与 border 重叠，形成 2px 的视觉效果
     boxShadow: tokens.shadow8,
-    ':hover': {
-      border: `2px solid ${tokens.colorBrandStroke1}`,
-      boxShadow: tokens.shadow16,
-      transform: 'translateY(-2px)',
-    },
   },
   imageCardCheckbox: {
     position: 'absolute',
@@ -188,10 +174,6 @@ const useStyles = makeStyles({
     width: '100%',
     height: '100%',
     objectFit: 'cover',
-    transition: 'transform 0.3s ease',
-    ':hover': {
-      transform: 'scale(1.05)',
-    },
   },
   imagePlaceholder: {
     width: '100%',
@@ -377,7 +359,6 @@ export const GeneratedImagesPage = () => {
   const [detailVideoSrc, setDetailVideoSrc] = useState<string | null>(null);
   const [detailVideoLoading, setDetailVideoLoading] = useState(false);
   const [detailVideoError, setDetailVideoError] = useState<string | null>(null);
-  const [hoveredImagePath, setHoveredImagePath] = useState<string | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [compareDialogOpen, setCompareDialogOpen] = useState(false);
   const [compareImage1, setCompareImage1] = useState<GeneratedImage | null>(null);
@@ -389,6 +370,9 @@ export const GeneratedImagesPage = () => {
     const saved = localStorage.getItem('generated-images-view-mode');
     return (saved === 'grid' || saved === 'list') ? saved : 'grid';
   });
+  // 存储已加载的预览图（按需加载）
+  const [loadedPreviews, setLoadedPreviews] = useState<Map<string, string>>(new Map());
+  const [loadingPreviews, setLoadingPreviews] = useState<Set<string>>(new Set());
 
   // 加载图片列表
   useEffect(() => {
@@ -412,6 +396,15 @@ export const GeneratedImagesPage = () => {
       setImages(imageList || []);
       // 清空选择状态
       setSelectedImages(new Set());
+      
+      // 直接加载所有图片的预览图
+      if (imageList && imageList.length > 0) {
+        const imagePromises = imageList
+          .filter((image: GeneratedImage) => image.mediaType !== 'video')
+          .map((image: GeneratedImage) => loadPreview(image.path));
+        // 并行加载所有预览图
+        await Promise.all(imagePromises);
+      }
     } catch (error) {
       console.error('Failed to load images:', error);
       setImages([]);
@@ -420,8 +413,8 @@ export const GeneratedImagesPage = () => {
     }
   };
 
-  // 切换单个图片的选择状态
-  const handleToggleSelect = (imagePath: string) => {
+  // 切换单个图片的选择状态（使用 useCallback 优化性能）
+  const handleToggleSelect = useCallback((imagePath: string) => {
     setSelectedImages(prev => {
       const newSet = new Set(prev);
       if (newSet.has(imagePath)) {
@@ -431,7 +424,7 @@ export const GeneratedImagesPage = () => {
       }
       return newSet;
     });
-  };
+  }, []);
 
   // 全选/取消全选
   const handleSelectAll = (checked: boolean) => {
@@ -580,7 +573,8 @@ export const GeneratedImagesPage = () => {
     }
   };
 
-  const getImageMimeType = (filename: string): string => {
+  // 使用 useCallback 缓存函数，避免每次渲染都创建新函数
+  const getImageMimeType = useCallback((filename: string): string => {
     const ext = filename.toLowerCase().split('.').pop();
     const mimeTypes: { [key: string]: string } = {
       'png': 'image/png',
@@ -591,18 +585,19 @@ export const GeneratedImagesPage = () => {
       'webp': 'image/webp',
     };
     return mimeTypes[ext || ''] || 'image/png';
-  };
+  }, []);
 
 
-  const formatFileSize = (bytes: number): string => {
+  // 使用 useCallback 缓存格式化函数
+  const formatFileSize = useCallback((bytes: number): string => {
     if (bytes === 0) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
-  };
+  }, []);
 
-  const formatDate = (timestamp: number): string => {
+  const formatDate = useCallback((timestamp: number): string => {
     const date = new Date(timestamp);
     return date.toLocaleString('zh-CN', {
       year: 'numeric',
@@ -612,9 +607,9 @@ export const GeneratedImagesPage = () => {
       minute: '2-digit',
       second: '2-digit',
     });
-  };
+  }, []);
 
-  const formatDuration = (durationMs?: number): string => {
+  const formatDuration = useCallback((durationMs?: number): string => {
     if (!durationMs) return '';
     const seconds = durationMs / 1000;
     if (seconds < 60) {
@@ -629,7 +624,7 @@ export const GeneratedImagesPage = () => {
       const remainingSeconds = (seconds % 60).toFixed(0);
       return `${hours}小时${minutes}分${remainingSeconds}秒`;
     }
-  };
+  }, []);
 
   const handleCopyToClipboard = async (text: string, fieldName: string) => {
     try {
@@ -659,10 +654,18 @@ export const GeneratedImagesPage = () => {
     setCompareImage1(image1);
     setCompareImage2(image2);
     setCompareDialogOpen(true);
+    
+    // 打开对比对话框时，自动加载预览图
+    if (image1.mediaType !== 'video' && !loadedPreviews.has(image1.path) && !loadingPreviews.has(image1.path)) {
+      loadPreview(image1.path);
+    }
+    if (image2.mediaType !== 'video' && !loadedPreviews.has(image2.path) && !loadingPreviews.has(image2.path)) {
+      loadPreview(image2.path);
+    }
   };
 
-  // 获取类型标签和图标
-  const getTypeInfo = (image: GeneratedImage) => {
+  // 获取类型标签和图标（使用 useCallback 缓存）
+  const getTypeInfo = useCallback((image: GeneratedImage) => {
     const type = image.type || 'generate'
     const mediaType = image.mediaType || 'image'
     
@@ -695,7 +698,61 @@ export const GeneratedImagesPage = () => {
           color: 'brand' as const,
         }
     }
-  }
+  }, [])
+  
+  // 按需加载预览图
+  const loadPreview = useCallback(async (imagePath: string) => {
+    // 如果已经加载或正在加载，直接返回
+    if (loadedPreviews.has(imagePath) || loadingPreviews.has(imagePath)) {
+      return;
+    }
+    
+    if (!window.ipcRenderer) {
+      return;
+    }
+    
+    setLoadingPreviews(prev => new Set(prev).add(imagePath));
+    
+    try {
+      const base64 = await window.ipcRenderer.invoke('generated-images:get-preview', imagePath);
+      setLoadedPreviews(prev => {
+        const newMap = new Map(prev);
+        newMap.set(imagePath, base64);
+        return newMap;
+      });
+    } catch (error) {
+      console.error(`Failed to load preview for ${imagePath}:`, error);
+    } finally {
+      setLoadingPreviews(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(imagePath);
+        return newSet;
+      });
+    }
+  }, [loadedPreviews, loadingPreviews]);
+  
+  // 使用 useMemo 预处理图片数据，避免在渲染时重复计算
+  const processedImages = useMemo(() => {
+    return images.map((image) => {
+      const isVideo = image.mediaType === 'video';
+      const mimeType = getImageMimeType(image.name);
+      // 使用按需加载的预览图
+      const previewBase64 = loadedPreviews.get(image.path);
+      const imageSrc = previewBase64 
+        ? `data:${mimeType};base64,${previewBase64}`
+        : null;
+      const hasImage = !!previewBase64 && !isVideo;
+      
+      return {
+        ...image,
+        isVideo,
+        mimeType,
+        imageSrc,
+        hasImage,
+        typeInfo: getTypeInfo(image),
+      };
+    });
+  }, [images, getTypeInfo, getImageMimeType, loadedPreviews]);
 
   return (
     <div className={styles.container}>
@@ -806,14 +863,9 @@ export const GeneratedImagesPage = () => {
             {/* 结果列表/网格 */}
             {viewMode === 'grid' ? (
               <div className={styles.gridContainer}>
-                {images.map((image) => {
+                {processedImages.map((image) => {
                   const isSelected = selectedImages.has(image.path);
-                  const typeInfo = getTypeInfo(image);
-                  const isVideo = image.mediaType === 'video';
-                  const imageSrc = image.previewImage 
-                    ? `data:${getImageMimeType(image.name)};base64,${image.previewImage}`
-                    : null;
-                  const hasImage = !!image.previewImage && !isVideo;
+                  const { typeInfo, isVideo, imageSrc, hasImage } = image;
                   
                   return (
                     <div
@@ -821,19 +873,37 @@ export const GeneratedImagesPage = () => {
                       className={`${styles.imageCard} ${isSelected ? styles.imageCardSelected : ''}`}
                       onClick={(e) => {
                         const target = e.target as HTMLElement;
-                        if (target.closest('button') || target.closest('input[type="checkbox"]')) {
+                        // 如果点击的是按钮、复选框或操作按钮区域，不触发选择
+                        if (target.closest('button') || 
+                            target.closest('input[type="checkbox"]') || 
+                            target.closest(`.${styles.imageCardActions}`)) {
                           return;
                         }
+                        // 使用事件委托，立即更新状态
+                        e.stopPropagation();
                         handleToggleSelect(image.path);
                       }}
-                      onMouseEnter={() => setHoveredImagePath(image.path)}
-                      onMouseLeave={() => setHoveredImagePath(null)}
                     >
                       {/* 复选框 */}
                       <div className={styles.imageCardCheckbox} onClick={(e) => e.stopPropagation()}>
                         <Checkbox
                           checked={isSelected}
-                          onChange={() => handleToggleSelect(image.path)}
+                          onChange={(_, data) => {
+                            // 直接使用 data.checked 状态，避免重复调用
+                            if (data.checked === true) {
+                              setSelectedImages(prev => {
+                                const newSet = new Set(prev);
+                                newSet.add(image.path);
+                                return newSet;
+                              });
+                            } else {
+                              setSelectedImages(prev => {
+                                const newSet = new Set(prev);
+                                newSet.delete(image.path);
+                                return newSet;
+                              });
+                            }
+                          }}
                         />
                       </div>
 
@@ -879,6 +949,10 @@ export const GeneratedImagesPage = () => {
                               <ImageRegular />
                             </div>
                           </>
+                        ) : loadingPreviews.has(image.path) ? (
+                          <div className={styles.imagePlaceholder}>
+                            <Spinner size="small" />
+                          </div>
                         ) : (
                           <div className={styles.imagePlaceholder}>
                             <ImageRegular />
@@ -971,7 +1045,7 @@ export const GeneratedImagesPage = () => {
                         <div 
                           className={styles.imageCardActions} 
                           onClick={(e) => e.stopPropagation()}
-                          style={{ opacity: hoveredImagePath === image.path ? 1 : 0 }}
+                          style={{ opacity: 1 }}
                         >
                           <Button
                             icon={<InfoRegular />}
@@ -1026,14 +1100,9 @@ export const GeneratedImagesPage = () => {
               </div>
             ) : (
               <div className={styles.listContainer}>
-                {images.map((image) => {
+                {processedImages.map((image) => {
                   const isSelected = selectedImages.has(image.path);
-                  const typeInfo = getTypeInfo(image);
-                  const isVideo = image.mediaType === 'video';
-                  const imageSrc = image.previewImage 
-                    ? `data:${getImageMimeType(image.name)};base64,${image.previewImage}`
-                    : null;
-                  const hasImage = !!image.previewImage && !isVideo;
+                  const { typeInfo, isVideo, imageSrc, hasImage } = image;
                   
                   return (
                     <div
@@ -1041,16 +1110,36 @@ export const GeneratedImagesPage = () => {
                       className={`${styles.listItem} ${isSelected ? styles.listItemSelected : ''}`}
                       onClick={(e) => {
                         const target = e.target as HTMLElement;
-                        if (target.closest('button') || target.closest('input[type="checkbox"]')) {
+                        // 如果点击的是按钮、复选框或操作按钮区域，不触发选择
+                        if (target.closest('button') || 
+                            target.closest('input[type="checkbox"]') || 
+                            target.closest(`.${styles.imageCardActions}`)) {
                           return;
                         }
+                        // 使用事件委托，立即更新状态
+                        e.stopPropagation();
                         handleToggleSelect(image.path);
                       }}
                     >
                       {/* 复选框 */}
                       <Checkbox
                         checked={isSelected}
-                        onChange={() => handleToggleSelect(image.path)}
+                        onChange={(_, data) => {
+                          // 直接使用 data.checked 状态，避免重复调用，提升响应速度
+                          if (data.checked === true) {
+                            setSelectedImages(prev => {
+                              const newSet = new Set(prev);
+                              newSet.add(image.path);
+                              return newSet;
+                            });
+                          } else {
+                            setSelectedImages(prev => {
+                              const newSet = new Set(prev);
+                              newSet.delete(image.path);
+                              return newSet;
+                            });
+                          }
+                        }}
                         onClick={(e) => e.stopPropagation()}
                       />
 
@@ -1066,6 +1155,8 @@ export const GeneratedImagesPage = () => {
                               className={styles.listItemThumbnailImage}
                             />
                           </PhotoView>
+                        ) : loadingPreviews.has(image.path) ? (
+                          <Spinner size="small" />
                         ) : (
                           <ImageRegular style={{ fontSize: '48px', color: tokens.colorNeutralForeground3 }} />
                         )}
@@ -1147,6 +1238,11 @@ export const GeneratedImagesPage = () => {
                                 setDetailVideoError('加载视频失败，请尝试下载后使用系统播放器打开。');
                               } finally {
                                 setDetailVideoLoading(false);
+                              }
+                            } else if (mediaType === 'image') {
+                              // 打开详情对话框时，自动加载预览图
+                              if (!loadedPreviews.has(image.path) && !loadingPreviews.has(image.path)) {
+                                loadPreview(image.path);
                               }
                             }
                             setDetailDialogOpen(true);
@@ -1303,7 +1399,10 @@ export const GeneratedImagesPage = () => {
                       );
                     }
 
-                    if (selectedImageForDetail.previewImage) {
+                    // 详情对话框打开时，按需加载预览图
+                    const detailPreviewBase64 = loadedPreviews.get(selectedImageForDetail.path);
+                    if (detailPreviewBase64) {
+                      const detailMimeType = getImageMimeType(selectedImageForDetail.name);
                       return (
                         <div style={{ 
                           width: '100%', 
@@ -1314,9 +1413,9 @@ export const GeneratedImagesPage = () => {
                           alignItems: 'center',
                           borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
                         }}>
-                          <PhotoView src={`data:${getImageMimeType(selectedImageForDetail.name)};base64,${selectedImageForDetail.previewImage}`}>
+                          <PhotoView src={`data:${detailMimeType};base64,${detailPreviewBase64}`}>
                             <img
-                              src={`data:${getImageMimeType(selectedImageForDetail.name)};base64,${selectedImageForDetail.previewImage}`}
+                              src={`data:${detailMimeType};base64,${detailPreviewBase64}`}
                               alt={selectedImageForDetail.name}
                               style={{
                                 maxWidth: '100%',
@@ -1328,6 +1427,23 @@ export const GeneratedImagesPage = () => {
                               }}
                             />
                           </PhotoView>
+                        </div>
+                      );
+                    } else if (loadingPreviews.has(selectedImageForDetail.path)) {
+                      return (
+                        <div style={{ 
+                          width: '100%', 
+                          backgroundColor: tokens.colorNeutralBackground2,
+                          padding: tokens.spacingVerticalL,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          gap: tokens.spacingVerticalS,
+                          borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+                        }}>
+                          <Spinner />
+                          <Body1>正在加载预览图...</Body1>
                         </div>
                       );
                     }
@@ -1677,23 +1793,50 @@ export const GeneratedImagesPage = () => {
                     </div>
                   </div>
                   <div className={styles.compareSliderContainer}>
-                    <ReactCompareSlider
-                      itemOne={
-                        <ReactCompareSliderImage 
-                          src={`data:${getImageMimeType(compareImage1.name)};base64,${compareImage1.previewImage}`} 
-                          alt={compareImage1.name} 
-                        />
+                    {(() => {
+                      const preview1 = loadedPreviews.get(compareImage1.path);
+                      const preview2 = loadedPreviews.get(compareImage2.path);
+                      const mimeType1 = getImageMimeType(compareImage1.name);
+                      const mimeType2 = getImageMimeType(compareImage2.name);
+                      
+                      if (preview1 && preview2) {
+                        return (
+                          <ReactCompareSlider
+                            itemOne={
+                              <ReactCompareSliderImage 
+                                src={`data:${mimeType1};base64,${preview1}`} 
+                                alt={compareImage1.name} 
+                              />
+                            }
+                            itemTwo={
+                              <ReactCompareSliderImage 
+                                src={`data:${mimeType2};base64,${preview2}`} 
+                                alt={compareImage2.name} 
+                              />
+                            }
+                            style={{ width: '100%', height: '100%' }}
+                            position={50}
+                            keyboardIncrement="5%"
+                          />
+                        );
+                      } else {
+                        return (
+                          <div style={{ 
+                            display: 'flex', 
+                            flexDirection: 'column', 
+                            justifyContent: 'center', 
+                            alignItems: 'center', 
+                            gap: tokens.spacingVerticalM,
+                            width: '100%',
+                            height: '100%',
+                            minHeight: '400px'
+                          }}>
+                            <Spinner size="large" />
+                            <Body1>正在加载预览图...</Body1>
+                          </div>
+                        );
                       }
-                      itemTwo={
-                        <ReactCompareSliderImage 
-                          src={`data:${getImageMimeType(compareImage2.name)};base64,${compareImage2.previewImage}`} 
-                          alt={compareImage2.name} 
-                        />
-                      }
-                      style={{ width: '100%', height: '100%' }}
-                      position={50}
-                      keyboardIncrement="5%"
-                    />
+                    })()}
                   </div>
                 </>
               )}

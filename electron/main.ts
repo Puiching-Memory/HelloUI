@@ -2009,42 +2009,29 @@ async function findAllGeneratedImages(): Promise<GeneratedImageInfo[]> {
   
   const entries = await fs.readdir(outputsFolder, { withFileTypes: true })
   
-  for (const entry of entries) {
-    if (entry.isFile()) {
-      const ext = extname(entry.name).toLowerCase()
-      const fileName = entry.name.toLowerCase()
-      
-      // 判断是否为图片或视频
-      const isImage = imageExtensions.includes(ext)
-      const isVideo = videoExtensions.includes(ext)
-      
-      if (isImage || isVideo) {
-        const filePath = join(outputsFolder, entry.name)
-        const stats = await fs.stat(filePath)
-        
-        // 根据文件名判断生成类型
-        let generationType: 'generate' | 'edit' | 'video' | undefined = undefined
-        if (fileName.startsWith('generated_')) {
-          generationType = 'generate'
-        } else if (fileName.startsWith('edited_') || fileName.startsWith('edit_')) {
-          generationType = 'edit'
-        } else if (fileName.startsWith('video_')) {
-          generationType = 'video'
-        }
-        
-        // 如果没有从文件名判断出类型，根据媒体类型推断
-        if (!generationType) {
-          if (isVideo) {
-            generationType = 'video'
-          } else {
-            generationType = 'generate'  // 默认为图片生成
-          }
-        }
-        
-        // 确定媒体类型
-        const mediaType: 'image' | 'video' = isVideo ? 'video' : 'image'
-        
-        // 查找元数据文件
+  // 优化：并行处理文件，而不是串行
+  const filePromises = entries.map(async (entry) => {
+    if (!entry.isFile()) {
+      return null
+    }
+    
+    const ext = extname(entry.name).toLowerCase()
+    const fileName = entry.name.toLowerCase()
+    
+    // 判断是否为图片或视频
+    const isImage = imageExtensions.includes(ext)
+    const isVideo = videoExtensions.includes(ext)
+    
+    if (!isImage && !isVideo) {
+      return null
+    }
+    
+    const filePath = join(outputsFolder, entry.name)
+    
+    // 并行获取文件信息和元数据
+    const [stats, metadata] = await Promise.all([
+      fs.stat(filePath),
+      (async () => {
         let metadata: any = {}
         if (isImage) {
           const metadataPath = filePath.replace(/\.(png|jpg|jpeg|gif|bmp|webp)$/i, '.json')
@@ -2067,17 +2054,47 @@ async function findAllGeneratedImages(): Promise<GeneratedImageInfo[]> {
             }
           }
         }
-        
-        images.push({
-          name: entry.name,
-          path: filePath,
-          size: stats.size,
-          modified: stats.mtimeMs,
-          type: generationType,
-          mediaType: mediaType,
-          ...metadata,
-        })
+        return metadata
+      })()
+    ])
+    
+    // 根据文件名判断生成类型
+    let generationType: 'generate' | 'edit' | 'video' | undefined = undefined
+    if (fileName.startsWith('generated_')) {
+      generationType = 'generate'
+    } else if (fileName.startsWith('edited_') || fileName.startsWith('edit_')) {
+      generationType = 'edit'
+    } else if (fileName.startsWith('video_')) {
+      generationType = 'video'
+    }
+    
+    // 如果没有从文件名判断出类型，根据媒体类型推断
+    if (!generationType) {
+      if (isVideo) {
+        generationType = 'video'
+      } else {
+        generationType = 'generate'  // 默认为图片生成
       }
+    }
+    
+    // 确定媒体类型
+    const mediaType: 'image' | 'video' = isVideo ? 'video' : 'image'
+    
+    return {
+      name: entry.name,
+      path: filePath,
+      size: stats.size,
+      modified: stats.mtimeMs,
+      type: generationType,
+      mediaType: mediaType,
+      ...metadata,
+    }
+  })
+  
+  const results = await Promise.all(filePromises)
+  for (const result of results) {
+    if (result) {
+      images.push(result)
     }
   }
   
@@ -2089,32 +2106,13 @@ async function findAllGeneratedImages(): Promise<GeneratedImageInfo[]> {
 
 // IPC 处理程序：列出所有已生成的图片和视频
 ipcMain.handle('generated-images:list', async () => {
+  const startTime = Date.now()
   const images = await findAllGeneratedImages()
-  const imagesWithPreview = await Promise.all(
-    images.map(async (image) => {
-      // 只对图片生成预览，视频不生成预览
-      if (image.mediaType === 'video') {
-        return image
-      }
-      
-      const stats = await fs.stat(image.path)
-      if (stats.size > 5 * 1024 * 1024) {
-        return image
-      }
-      
-      try {
-        const imageBuffer = await fs.readFile(image.path)
-        return {
-          ...image,
-          previewImage: imageBuffer.toString('base64'),
-        }
-      } catch (error) {
-        console.error(`Failed to read preview for ${image.name}:`, error)
-        return image
-      }
-    })
-  )
-  return imagesWithPreview
+  const totalTime = Date.now() - startTime
+  console.log(`[GeneratedImages] Found ${images.length} files, scanning took ${totalTime}ms`)
+  
+  // 不再生成预览图，所有预览图都通过 generated-images:get-preview 按需加载
+  return images
 })
 
 // IPC 处理程序：下载图片或视频
