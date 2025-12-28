@@ -490,15 +490,15 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
     if (selectedGroupId) {
       const group = modelGroups.find(g => g.id === selectedGroupId);
       if (group) {
-        if (group.defaultSteps) setSteps(parseInt(group.defaultSteps));
-        if (group.defaultCfgScale) setCfgScale(parseFloat(group.defaultCfgScale));
+        if (group.defaultSteps) setSteps(group.defaultSteps);
+        if (group.defaultCfgScale) setCfgScale(group.defaultCfgScale);
         if (group.defaultWidth) {
-          setWidth(parseInt(group.defaultWidth));
-          setWidthInput(group.defaultWidth);
+          setWidth(group.defaultWidth);
+          setWidthInput(group.defaultWidth.toString());
         }
         if (group.defaultHeight) {
-          setHeight(parseInt(group.defaultHeight));
-          setHeightInput(group.defaultHeight);
+          setHeight(group.defaultHeight);
+          setHeightInput(group.defaultHeight.toString());
         }
       }
     }

@@ -27,10 +27,8 @@ import {
 } from '@fluentui/react-components';
 import {
   VideoClipRegular,
-  SettingsRegular,
   ArrowSyncRegular,
   DocumentArrowDownRegular,
-  InfoRegular,
 } from '@fluentui/react-icons';
 import { useState, useEffect, useRef } from 'react';
 
@@ -353,7 +351,7 @@ export const AliyunTongyiVideoPage = () => {
               onOptionSelect={(_, data) => setModel(data.optionValue || 'wan2.6-t2v')}
             >
               {MODELS.map(m => (
-                <Option key={m.id} value={m.id}>
+                <Option key={m.id} value={m.id} text={`${m.name} (${m.specs})`}>
                   {m.name} ({m.specs})
                 </Option>
               ))}
