@@ -72,7 +72,7 @@ export interface IPCRequestMap {
   'model-groups:list': { request: void; response: ModelGroup[] };
   'model-groups:create': { request: Omit<ModelGroup, 'id' | 'createdAt' | 'updatedAt'>; response: ModelGroup };
   'model-groups:update': { request: { id: string; updates: Partial<Omit<ModelGroup, 'id' | 'createdAt'>> }; response: ModelGroup };
-  'model-groups:delete': { request: string; response: boolean };
+  'model-groups:delete': { request: { id: string; deleteFiles?: boolean }; response: boolean };
   'model-groups:get': { request: string; response: ModelGroup | null };
   'model-groups:select-folder': { request: void; response: string | null };
   'model-groups:import': { request: { folderPath: string; targetFolder: string }; response: { success: boolean; message?: string; group?: ModelGroup } };

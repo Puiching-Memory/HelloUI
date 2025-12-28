@@ -279,6 +279,8 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [messageDialogOpen, setMessageDialogOpen] = useState(false);
   const [messageDialogContent, setMessageDialogContent] = useState<{ title: string; message: string } | null>(null);
+  const [groupDeleteConfirmOpen, setGroupDeleteConfirmOpen] = useState(false);
+  const [groupToDelete, setGroupToDelete] = useState<ModelGroup | null>(null);
 
   // 加载权重文件夹路径
   useEffect(() => {
@@ -513,24 +515,27 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     setLoading(true);
     try {
       if (editingGroup) {
-        await window.ipcRenderer.invoke('model-groups:update', editingGroup.id, {
-          name: groupName.trim(),
-          taskType: groupTaskType,
-          sdModel: groupSdModel || undefined,
-          highNoiseSdModel: groupHighNoiseSdModel || undefined,
-          vaeModel: groupVaeModel || undefined,
-          llmModel: groupLlmModel || undefined,
-          clipLModel: groupClipLModel || undefined,
-          t5xxlModel: groupT5xxlModel || undefined,
-          clipVisionModel: groupClipVisionModel || undefined,
-          defaultSteps: groupDefaultSteps ? parseFloat(groupDefaultSteps) : undefined,
-          defaultCfgScale: groupDefaultCfgScale ? parseFloat(groupDefaultCfgScale) : undefined,
-          defaultWidth: groupDefaultWidth ? parseInt(groupDefaultWidth) : undefined,
-          defaultHeight: groupDefaultHeight ? parseInt(groupDefaultHeight) : undefined,
-          defaultSamplingMethod: groupDefaultSamplingMethod || undefined,
-          defaultScheduler: groupDefaultScheduler || undefined,
-          defaultSeed: groupDefaultSeed ? parseInt(groupDefaultSeed) : undefined,
-          defaultFlowShift: groupDefaultFlowShift ? parseFloat(groupDefaultFlowShift) : undefined,
+        await window.ipcRenderer.invoke('model-groups:update', {
+          id: editingGroup.id,
+          updates: {
+            name: groupName.trim(),
+            taskType: groupTaskType,
+            sdModel: groupSdModel || undefined,
+            highNoiseSdModel: groupHighNoiseSdModel || undefined,
+            vaeModel: groupVaeModel || undefined,
+            llmModel: groupLlmModel || undefined,
+            clipLModel: groupClipLModel || undefined,
+            t5xxlModel: groupT5xxlModel || undefined,
+            clipVisionModel: groupClipVisionModel || undefined,
+            defaultSteps: groupDefaultSteps ? parseFloat(groupDefaultSteps) : undefined,
+            defaultCfgScale: groupDefaultCfgScale ? parseFloat(groupDefaultCfgScale) : undefined,
+            defaultWidth: groupDefaultWidth ? parseInt(groupDefaultWidth) : undefined,
+            defaultHeight: groupDefaultHeight ? parseInt(groupDefaultHeight) : undefined,
+            defaultSamplingMethod: groupDefaultSamplingMethod || undefined,
+            defaultScheduler: groupDefaultScheduler || undefined,
+            defaultSeed: groupDefaultSeed ? parseInt(groupDefaultSeed) : undefined,
+            defaultFlowShift: groupDefaultFlowShift ? parseFloat(groupDefaultFlowShift) : undefined,
+          }
         });
         await loadModelGroups();
         setGroupDialogOpen(false);
@@ -581,21 +586,33 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     }
   };
 
-  const handleDeleteGroup = async (group: ModelGroup) => {
-    if (!confirm(`确定要删除模型组 "${group.name}" 吗？`)) {
-      return;
-    }
+  const handleDeleteGroup = (group: ModelGroup) => {
+    setGroupToDelete(group);
+    setGroupDeleteConfirmOpen(true);
+  };
+
+  const handleConfirmDeleteGroup = async (deleteFiles: boolean) => {
+    if (!groupToDelete) return;
 
     setLoading(true);
+    setGroupDeleteConfirmOpen(false);
     try {
-      await window.ipcRenderer.invoke('model-groups:delete', group.id);
+      await window.ipcRenderer.invoke('model-groups:delete', { id: groupToDelete.id, deleteFiles });
       await loadModelGroups();
+      setMessageDialogContent({ 
+        title: '删除成功', 
+        message: deleteFiles 
+          ? `模型组 "${groupToDelete.name}" 及其物理文件已成功删除。` 
+          : `模型组 "${groupToDelete.name}" 已从列表中移除（物理文件已保留）。` 
+      });
+      setMessageDialogOpen(true);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       setMessageDialogContent({ title: '删除失败', message: `删除模型组失败: ${errorMessage}` });
       setMessageDialogOpen(true);
     } finally {
       setLoading(false);
+      setGroupToDelete(null);
     }
   };
 
@@ -1491,6 +1508,47 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                 disabled={loading}
               >
                 删除
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
+
+      {/* 模型组删除确认对话框 */}
+      <Dialog open={groupDeleteConfirmOpen} onOpenChange={(_, data) => setGroupDeleteConfirmOpen(data.open)}>
+        <DialogSurface>
+          <DialogTitle>删除模型组</DialogTitle>
+          <DialogBody>
+            <DialogContent>
+              <Body1>
+                确定要删除模型组 "{groupToDelete?.name}" 吗？
+                <br /><br />
+                您可以选择仅从列表中移除，或者同时删除磁盘上的模型文件。
+              </Body1>
+            </DialogContent>
+            <DialogActions>
+              <Button
+                appearance="secondary"
+                onClick={() => {
+                  setGroupDeleteConfirmOpen(false);
+                  setGroupToDelete(null);
+                }}
+              >
+                取消
+              </Button>
+              <Button
+                appearance="secondary"
+                onClick={() => handleConfirmDeleteGroup(false)}
+                disabled={loading}
+              >
+                仅从列表中移除
+              </Button>
+              <Button
+                appearance="primary"
+                onClick={() => handleConfirmDeleteGroup(true)}
+                disabled={loading}
+              >
+                同时删除物理文件
               </Button>
             </DialogActions>
           </DialogBody>
