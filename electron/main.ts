@@ -1542,7 +1542,7 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
         }, 1000)
       }
 
-      childProcess.on('error', (error) => {
+      childProcess.on('error', (error: any) => {
         console.error('[Generate] Failed to start process:', error)
         event.sender.send('generate:progress', { progress: `错误: ${error.message}` })
         safeReject(new Error(`无法启动 SD.cpp 引擎: ${error.message}`))
@@ -2546,7 +2546,7 @@ ipcMain.handle('generated-images:batch-download', async (_, filePaths: string[])
       }
 
       // 监听输出流的错误（例如权限拒绝、磁盘满等）
-      output.on('error', (err) => {
+      output.on('error', (err: any) => {
         console.error('Output stream error:', err)
         safeReject(new Error(`写入ZIP文件失败: ${err.message}`))
       })
@@ -2560,7 +2560,7 @@ ipcMain.handle('generated-images:batch-download', async (_, filePaths: string[])
       })
 
       // 监听警告（例如 stat 失败等）
-      archive.on('warning', (err) => {
+      archive.on('warning', (err: any) => {
         if (err.code === 'ENOENT') {
           console.warn('Archive warning:', err)
         } else {
@@ -2569,7 +2569,7 @@ ipcMain.handle('generated-images:batch-download', async (_, filePaths: string[])
       })
 
       // 监听归档错误
-      archive.on('error', (err) => {
+      archive.on('error', (err: any) => {
         console.error('Archive error:', err)
         safeReject(err)
       })

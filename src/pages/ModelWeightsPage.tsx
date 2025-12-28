@@ -31,7 +31,6 @@ import {
   ArrowUploadRegular,
   ArrowDownloadRegular,
   DeleteRegular,
-  DismissRegular,
   AddRegular,
   EditRegular,
   ChevronDownRegular,
@@ -234,12 +233,6 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
   const [loading, setLoading] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [fileToDelete, setFileToDelete] = useState<WeightFile | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<{
-    progress: number;
-    fileName: string;
-    copied: number;
-    total: number;
-  } | null>(null);
   const [importProgress, setImportProgress] = useState<{
     progress: number;
     fileName: string;
@@ -263,7 +256,6 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     setExportProgress(data);
   });
 
-  const [isUploading, setIsUploading] = useState(false);
   const [modelGroups, setModelGroups] = useState<ModelGroup[]>([]);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<ModelGroup | null>(null);
@@ -364,7 +356,6 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
       if (folderPath) {
         const folderName = folderPath.split(/[/\\]/).pop() || '模型组';
         setLoading(true);
-        setIsUploading(true);
         setImportProgress({ progress: 0, fileName: folderName, copied: 0, total: 0 });
         
         // 通知父组件开始上传，禁用导航
@@ -384,7 +375,6 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
           }
         } finally {
           setLoading(false);
-          setIsUploading(false);
           onUploadStateChange?.(false);
           setTimeout(() => setImportProgress(null), 1000);
         }
@@ -392,7 +382,6 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     } catch (error) {
       setImportProgress(null);
       setLoading(false);
-      setIsUploading(false);
       onUploadStateChange?.(false);
       
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -684,20 +673,6 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
             <ProgressBar value={importProgress.progress} max={100} />
             <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalXS }}>
               {formatFileSize(importProgress.copied)} / {formatFileSize(importProgress.total)}
-            </Body1>
-          </div>
-        )}
-        {/* 上传进度条 */}
-        {uploadProgress && (
-          <div style={{ marginTop: tokens.spacingVerticalM }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalXS }}>
-              <Body1>
-                正在上传: {uploadProgress.fileName || '文件'} ({uploadProgress.progress}%)
-              </Body1>
-            </div>
-            <ProgressBar value={uploadProgress.progress} max={100} />
-            <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalXS }}>
-              {formatFileSize(uploadProgress.copied)} / {formatFileSize(uploadProgress.total)}
             </Body1>
           </div>
         )}

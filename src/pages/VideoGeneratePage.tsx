@@ -14,9 +14,6 @@ import {
   Input,
   Checkbox,
   Text,
-  MessageBar,
-  MessageBarBody,
-  MessageBarTitle,
   Dialog,
   DialogSurface,
   DialogTitle,
@@ -26,7 +23,6 @@ import {
   CounterBadge,
   TabList,
   Tab,
-  TabValue,
 } from '@fluentui/react-components';
 import {
   VideoClipRegular,
@@ -422,6 +418,7 @@ interface ModelGroup {
   defaultSamplingMethod?: string;
   defaultScheduler?: string;
   defaultSeed?: number;
+  defaultFlowShift?: number;
   defaultHighNoiseSteps?: number;
   defaultHighNoiseCfgScale?: number;
   defaultHighNoiseSamplingMethod?: string;
@@ -600,17 +597,17 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
     if (selectedGroupId) {
       const group = modelGroups.find(g => g.id === selectedGroupId);
       if (group) {
-        if (group.defaultSteps) setSteps(parseInt(group.defaultSteps));
-        if (group.defaultCfgScale) setCfgScale(parseFloat(group.defaultCfgScale));
+        if (group.defaultSteps) setSteps(group.defaultSteps);
+        if (group.defaultCfgScale) setCfgScale(group.defaultCfgScale);
         if (group.defaultWidth) {
-          setWidth(parseInt(group.defaultWidth));
-          setWidthInput(group.defaultWidth);
+          setWidth(group.defaultWidth);
+          setWidthInput(group.defaultWidth.toString());
         }
         if (group.defaultHeight) {
-          setHeight(parseInt(group.defaultHeight));
-          setHeightInput(group.defaultHeight);
+          setHeight(group.defaultHeight);
+          setHeightInput(group.defaultHeight.toString());
         }
-        if (group.defaultFlowShift) setFlowShift(parseFloat(group.defaultFlowShift));
+        if (group.defaultFlowShift) setFlowShift(group.defaultFlowShift);
       }
     }
   }, [selectedGroupId, modelGroups]);
@@ -754,6 +751,9 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
           frames, // 视频帧数
           fps, // 帧率
           flowShift, // Flow Shift
+          highNoiseSteps,
+          highNoiseCfgScale,
+          highNoiseSamplingMethod,
         });
 
         if (result.success && (result.video || (result.frames && result.frames.length > 0))) {
@@ -1163,7 +1163,7 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
                 <div className={styles.uploadArea} onClick={handleImageUpload}>
                   <ImageAddRegular style={{ fontSize: '48px', color: tokens.colorNeutralForeground3 }} />
                   <div style={{ textAlign: 'center' }}>
-                    <Body1 block weight="semibold">点击上传参考图片</Body1>
+                    <Text block weight="semibold">点击上传参考图片</Text>
                     <Body1 block style={{ color: tokens.colorNeutralForeground3 }}>支持 JPG, PNG, WebP 格式</Body1>
                   </div>
                 </div>

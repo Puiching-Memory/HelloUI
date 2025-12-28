@@ -45,6 +45,9 @@ export interface ModelGroup {
   defaultSeed?: number;  // 推荐的默认种子（-1表示随机）
   // 视频生成特有默认参数（Wan2.2等）
   defaultFlowShift?: number;
+  defaultHighNoiseSteps?: number;
+  defaultHighNoiseCfgScale?: number;
+  defaultHighNoiseSamplingMethod?: string;
   createdAt: number;
   updatedAt: number;
 }
