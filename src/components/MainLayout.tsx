@@ -84,7 +84,7 @@ const useStyles = makeStyles({
   },
 });
 
-export type PageType = 'home' | 'components' | 'settings' | 'weights' | 'sdcpp' | 'generate' | 'edit-image' | 'images' | 'video-generate' | 'image-upscale';
+export type PageType = 'home' | 'components' | 'settings' | 'weights' | 'sdcpp' | 'generate' | 'edit-image' | 'images' | 'video-generate' | 'image-upscale' | 'aliyun-video';
 
 interface MainLayoutProps {
   currentPage: PageType;
@@ -134,6 +134,11 @@ export const MainLayout = ({ currentPage, onPageChange, children, navigationDisa
       icon: <ZoomInRegular />,
     },
     {
+      id: 'aliyun-video' as PageType,
+      label: '文生视频',
+      icon: <VideoClipRegular />,
+    },
+    {
       id: 'images' as PageType,
       label: '生成结果',
       icon: <ImageRegular />,
@@ -178,7 +183,25 @@ export const MainLayout = ({ currentPage, onPageChange, children, navigationDisa
         {/* SD.cpp引擎功能页面组 */}
         <div className={styles.navGroup}>
           <div className={styles.navGroupTitle}>SD.cpp引擎</div>
-          {navItems.filter(item => ['weights', 'sdcpp', 'generate', 'edit-image', 'images', 'video-generate', 'image-upscale'].includes(item.id)).map((item) => (
+          {navItems.filter(item => ['weights', 'sdcpp', 'generate', 'edit-image', 'video-generate', 'image-upscale', 'images'].includes(item.id)).map((item) => (
+            <Button
+              key={item.id}
+              appearance={currentPage === item.id ? 'primary' : 'subtle'}
+              icon={item.icon}
+              className={styles.navButton}
+              onClick={() => onPageChange(item.id)}
+              disabled={navigationDisabled && currentPage !== item.id}
+              title={navigationDisabled && currentPage !== item.id ? (navigationDisabledReason || '操作进行中，请稍候...') : undefined}
+            >
+              {item.label}
+            </Button>
+          ))}
+        </div>
+
+        {/* 阿里通义API页面组 */}
+        <div className={styles.navGroup}>
+          <div className={styles.navGroupTitle}>阿里通义API</div>
+          {navItems.filter(item => ['aliyun-video'].includes(item.id)).map((item) => (
             <Button
               key={item.id}
               appearance={currentPage === item.id ? 'primary' : 'subtle'}
@@ -194,7 +217,7 @@ export const MainLayout = ({ currentPage, onPageChange, children, navigationDisa
         </div>
 
         {/* 其他页面按钮 */}
-        {navItems.filter(item => !['home', 'weights', 'sdcpp', 'generate', 'edit-image', 'images', 'video-generate', 'image-upscale'].includes(item.id)).map((item) => (
+        {navItems.filter(item => !['home', 'weights', 'sdcpp', 'generate', 'edit-image', 'images', 'video-generate', 'image-upscale', 'aliyun-video'].includes(item.id)).map((item) => (
           <Button
             key={item.id}
             appearance={currentPage === item.id ? 'primary' : 'subtle'}

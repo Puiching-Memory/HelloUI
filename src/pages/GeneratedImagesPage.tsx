@@ -1056,20 +1056,9 @@ export const GeneratedImagesPage = () => {
                               setDetailVideoSrc(null);
                               setDetailVideoError(null);
                               const mediaType = image.mediaType || 'image';
-                              if (mediaType === 'video' && window.ipcRenderer) {
-                                try {
-                                  setDetailVideoLoading(true);
-                                  const result = await window.ipcRenderer.invoke('generated-images:get-video-data', image.path);
-                                  const uint8Array = new Uint8Array(result.data);
-                                  const blob = new Blob([uint8Array], { type: result.mimeType });
-                                  const blobUrl = URL.createObjectURL(blob);
-                                  setDetailVideoSrc(blobUrl);
-                                } catch (error) {
-                                  console.error('Failed to load video data:', error);
-                                  setDetailVideoError('加载视频失败，请尝试下载后使用系统播放器打开。');
-                                } finally {
-                                  setDetailVideoLoading(false);
-                                }
+                              if (mediaType === 'video') {
+                                // 使用 media:/// 协议直接加载本地视频，避免 Electron 安全限制且性能更好
+                                setDetailVideoSrc(`media:///${image.path.replace(/\\/g, '/')}`);
                               }
                               setDetailDialogOpen(true);
                             }}
@@ -1225,20 +1214,9 @@ export const GeneratedImagesPage = () => {
                             setDetailVideoSrc(null);
                             setDetailVideoError(null);
                             const mediaType = image.mediaType || 'image';
-                            if (mediaType === 'video' && window.ipcRenderer) {
-                              try {
-                                setDetailVideoLoading(true);
-                                const result = await window.ipcRenderer.invoke('generated-images:get-video-data', image.path);
-                                const uint8Array = new Uint8Array(result.data);
-                                const blob = new Blob([uint8Array], { type: result.mimeType });
-                                const blobUrl = URL.createObjectURL(blob);
-                                setDetailVideoSrc(blobUrl);
-                              } catch (error) {
-                                console.error('Failed to load video data:', error);
-                                setDetailVideoError('加载视频失败，请尝试下载后使用系统播放器打开。');
-                              } finally {
-                                setDetailVideoLoading(false);
-                              }
+                            if (mediaType === 'video') {
+                              // 使用 media:/// 协议直接加载本地视频，避免 Electron 安全限制且性能更好
+                              setDetailVideoSrc(`media:///${image.path.replace(/\\/g, '/')}`);
                             } else if (mediaType === 'image') {
                               // 打开详情对话框时，自动加载预览图
                               if (!loadedPreviews.has(image.path) && !loadingPreviews.has(image.path)) {

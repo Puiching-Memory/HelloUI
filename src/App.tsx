@@ -13,6 +13,7 @@ import { EditImagePage } from './pages/EditImagePage';
 import { GeneratedImagesPage } from './pages/GeneratedImagesPage';
 import { VideoGeneratePage } from './pages/VideoGeneratePage';
 import { ImageUpscalePage } from './pages/ImageUpscalePage';
+import { AliyunTongyiVideoPage } from './pages/AliyunTongyiVideoPage';
 import type { Theme } from '@fluentui/react-components';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -132,9 +133,11 @@ function App() {
           ) : currentPage === 'images' ? (
             <GeneratedImagesPage />
           ) : currentPage === 'video-generate' ? (
-            <VideoGeneratePage />
+            <VideoGeneratePage onGeneratingStateChange={setIsGenerating} />
           ) : currentPage === 'image-upscale' ? (
             <ImageUpscalePage />
+          ) : currentPage === 'aliyun-video' ? (
+            <AliyunTongyiVideoPage />
           ) : (
             renderPage()
           )}

@@ -41,6 +41,7 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalL,
     padding: tokens.spacingVerticalL,
+    paddingBottom: '120px', // 为浮动控制面板留出空间
     minHeight: '100%',
     maxWidth: '1600px',
     margin: '0 auto',
@@ -103,6 +104,42 @@ const useStyles = makeStyles({
     display: 'flex',
     gap: tokens.spacingHorizontalM,
     flexWrap: 'wrap',
+  },
+  floatingControlPanel: {
+    position: 'fixed',
+    bottom: tokens.spacingVerticalL,
+    // 与 container 对齐：container 在 mainContent 中（从 240px 开始）居中，maxWidth: 1600px
+    // 使用与 container 相同的布局逻辑
+    left: `calc(240px + ${tokens.spacingVerticalL})`,
+    right: tokens.spacingVerticalL,
+    maxWidth: '1600px',
+    width: 'auto',
+    margin: '0 auto',
+    zIndex: 1000,
+    boxShadow: tokens.shadow28,
+    borderRadius: tokens.borderRadiusLarge,
+    padding: tokens.spacingVerticalM,
+    // 云母 / 亚克力效果：使用伪元素实现半透明背景，保持内容不透明
+    backgroundColor: 'transparent',
+    backdropFilter: 'blur(20px) saturate(180%)',
+    WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    // 根据主题自动调整的高光描边
+    outline: `1px solid ${tokens.colorNeutralStroke1}`,
+    boxSizing: 'border-box',
+    // 使用伪元素创建半透明背景层
+    '::before': {
+      content: '""',
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: tokens.colorNeutralBackground1,
+      opacity: 0.7,
+      zIndex: -1,
+      borderRadius: tokens.borderRadiusLarge,
+    },
   },
   cliOutputCard: {
     display: 'flex',
@@ -291,9 +328,11 @@ const useStyles = makeStyles({
 interface ModelGroup {
   id: string;
   name: string;
+  taskType?: 'generate' | 'edit' | 'video' | 'upscale';
   sdModel?: string;
   vaeModel?: string;
   llmModel?: string;
+  clipVisionModel?: string;
   defaultSteps?: number;
   defaultCfgScale?: number;
   defaultWidth?: number;
@@ -301,6 +340,9 @@ interface ModelGroup {
   defaultSamplingMethod?: string;
   defaultScheduler?: string;
   defaultSeed?: number;
+  defaultHighNoiseSteps?: number;
+  defaultHighNoiseCfgScale?: number;
+  defaultHighNoiseSamplingMethod?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -335,6 +377,7 @@ export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePagePr
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  const [generatedImagePath, setGeneratedImagePath] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [generationProgress, setGenerationProgress] = useState<string>('');
   const [cliOutput, setCliOutput] = useState<Array<{ type: 'stdout' | 'stderr'; text: string; timestamp: number }>>([]);
@@ -603,6 +646,9 @@ export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePagePr
 
         if (result.success && result.image) {
           setGeneratedImage(result.image);
+          if (result.imagePath) {
+            setGeneratedImagePath(result.imagePath);
+          }
           setPreviewImage(null);
           setGenerationProgress('上采样完成');
         } else {
@@ -634,6 +680,15 @@ export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePagePr
       setGenerationProgress('正在取消...');
     } catch (error) {
       console.error('Failed to cancel upscale:', error);
+    }
+  };
+
+  const handleSaveGeneratedImage = async () => {
+    if (!generatedImagePath) return;
+    try {
+      await window.ipcRenderer.invoke('generated-images:download', generatedImagePath);
+    } catch (error) {
+      console.error('Failed to save image:', error);
     }
   };
 
@@ -681,9 +736,7 @@ export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePagePr
       if (filePath) {
         setInputImagePath(filePath);
         const normalizedPath = filePath.replace(/\\/g, '/');
-        const previewUrl = normalizedPath.match(/^[A-Za-z]:/) 
-          ? `file:///${normalizedPath}` 
-          : `file://${normalizedPath}`;
+        const previewUrl = `media:///${normalizedPath}`;
         setInputImagePreview(previewUrl);
         
         // 加载图片尺寸
@@ -711,6 +764,44 @@ export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePagePr
   return (
     <div className={styles.container}>
       <Title1>图像超分辨率</Title1>
+
+      {/* 浮动控制面板 - 固定在底部 */}
+      <div className={styles.floatingControlPanel}>
+        <div className={styles.actions}>
+          {generating ? (
+            <Button
+              onClick={handleCancelUpscale}
+              appearance="secondary"
+              size="large"
+            >
+              取消上采样
+            </Button>
+          ) : (
+            <Button
+              icon={<ImageAddRegular />}
+              onClick={handleUpscale}
+              disabled={!selectedGroupId || !inputImagePath || loading}
+              appearance="primary"
+              size="large"
+            >
+              开始上采样
+            </Button>
+          )}
+          <Button
+            icon={<DocumentArrowDownRegular />}
+            onClick={handleSaveGeneratedImage}
+            disabled={loading || generating || !generatedImagePath}
+          >
+            保存最新图片
+          </Button>
+          <Button
+            onClick={loadModelGroups}
+            disabled={loading || generating}
+          >
+            刷新模型组列表
+          </Button>
+        </div>
+      </div>
 
       {/* 预览区域 */}
       <Card className={styles.previewCard}>
@@ -1403,35 +1494,6 @@ export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePagePr
               </Field>
             </div>
           )}
-
-          {/* 上采样按钮 */}
-          <div className={styles.actions}>
-            {generating ? (
-              <Button
-                onClick={handleCancelUpscale}
-                appearance="secondary"
-                size="large"
-              >
-                取消上采样
-              </Button>
-            ) : (
-              <Button
-                icon={<ImageAddRegular />}
-                onClick={handleUpscale}
-                disabled={!selectedGroupId || !inputImagePath || loading}
-                appearance="primary"
-                size="large"
-              >
-                开始上采样
-              </Button>
-            )}
-            <Button
-              onClick={loadModelGroups}
-              disabled={loading || generating}
-            >
-              刷新模型组列表
-            </Button>
-          </div>
         </div>
       </Card>
 

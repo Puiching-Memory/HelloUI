@@ -292,16 +292,21 @@ const useStyles = makeStyles({
 interface ModelGroup {
   id: string;
   name: string;
+  taskType?: 'generate' | 'edit' | 'video' | 'upscale';
   sdModel?: string;
   vaeModel?: string;
   llmModel?: string;
-  defaultSteps?: number;  // 推荐的默认采样步数
-  defaultCfgScale?: number;  // 推荐的默认CFG Scale值
-  defaultWidth?: number;  // 推荐的默认图片宽度
-  defaultHeight?: number;  // 推荐的默认图片高度
-  defaultSamplingMethod?: string;  // 推荐的默认采样方法
-  defaultScheduler?: string;  // 推荐的默认调度器
-  defaultSeed?: number;  // 推荐的默认种子（-1表示随机）
+  clipVisionModel?: string;
+  defaultSteps?: number;
+  defaultCfgScale?: number;
+  defaultWidth?: number;
+  defaultHeight?: number;
+  defaultSamplingMethod?: string;
+  defaultScheduler?: string;
+  defaultSeed?: number;
+  defaultHighNoiseSteps?: number;
+  defaultHighNoiseCfgScale?: number;
+  defaultHighNoiseSamplingMethod?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -479,6 +484,25 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
       onGeneratingStateChange(generating);
     }
   }, [generating, onGeneratingStateChange]);
+
+  // 当选择的模型组变化时，更新默认参数
+  useEffect(() => {
+    if (selectedGroupId) {
+      const group = modelGroups.find(g => g.id === selectedGroupId);
+      if (group) {
+        if (group.defaultSteps) setSteps(parseInt(group.defaultSteps));
+        if (group.defaultCfgScale) setCfgScale(parseFloat(group.defaultCfgScale));
+        if (group.defaultWidth) {
+          setWidth(parseInt(group.defaultWidth));
+          setWidthInput(group.defaultWidth);
+        }
+        if (group.defaultHeight) {
+          setHeight(parseInt(group.defaultHeight));
+          setHeightInput(group.defaultHeight);
+        }
+      }
+    }
+  }, [selectedGroupId, modelGroups]);
 
   const loadModelGroups = async () => {
     try {
@@ -1223,15 +1247,15 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
                     setWidthInput('2048');
                     setWidth(2048);
                   } else {
-                    // 对齐到64的倍数
-                    const aligned = Math.round(val / 64) * 64;
+                    // 对齐到16的倍数
+                    const aligned = Math.round(val / 16) * 16;
                     setWidthInput(aligned.toString());
                     setWidth(aligned);
                   }
                 }}
                 min={64}
                 max={2048}
-                step={64}
+                step={16}
               />
             </Field>
             <Field label="图片高度" hint="默认: 512">
@@ -1258,15 +1282,15 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
                     setHeightInput('2048');
                     setHeight(2048);
                   } else {
-                    // 对齐到64的倍数
-                    const aligned = Math.round(val / 64) * 64;
+                    // 对齐到16的倍数
+                    const aligned = Math.round(val / 16) * 16;
                     setHeightInput(aligned.toString());
                     setHeight(aligned);
                   }
                 }}
                 min={64}
                 max={2048}
-                step={64}
+                step={16}
               />
             </Field>
             <Field label="采样方法" hint="默认: euler_a">

@@ -35,6 +35,7 @@ export interface ModelGroup {
   llmModel?: string;  // LLM/CLIP/T5 文本编码器模型路径
   clipLModel?: string;  // CLIP L模型路径（图片编辑任务用，可选）
   t5xxlModel?: string;  // T5XXL模型路径（图片编辑任务用，可选）
+  clipVisionModel?: string; // CLIP Vision模型路径（视频生成 I2V/FLF2V 用，可选）
   defaultSteps?: number;  // 推荐的默认采样步数
   defaultCfgScale?: number;  // 推荐的默认CFG Scale值
   defaultWidth?: number;  // 推荐的默认图片宽度
@@ -42,6 +43,8 @@ export interface ModelGroup {
   defaultSamplingMethod?: string;  // 推荐的默认采样方法
   defaultScheduler?: string;  // 推荐的默认调度器
   defaultSeed?: number;  // 推荐的默认种子（-1表示随机）
+  // 视频生成特有默认参数（Wan2.2等）
+  defaultFlowShift?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -76,6 +79,14 @@ export interface GenerateImageParams {
   vaeConvDirect?: boolean;  // 在VAE模型中使用ggml_conv2d_direct
   vaeTiling?: boolean;  // 分块处理VAE以减少内存使用
   inputImage?: string;  // 输入图片路径（用于图片编辑和上采样）
+  mode?: string;  // 生成模式（如 text2video, image2video）
+  initImage?: string;  // 初始图片路径（用于视频生成等）
+  // 视频/图片生成特有参数（Wan2.2, Qwen2511等）
+  flowShift?: number;
+  qwenImageZeroCondT?: boolean;
+  highNoiseSteps?: number;
+  highNoiseCfgScale?: number;
+  highNoiseSamplingMethod?: string;
 }
 
 /**
