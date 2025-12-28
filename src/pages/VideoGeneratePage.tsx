@@ -24,6 +24,9 @@ import {
   DialogActions,
   DialogContent,
   CounterBadge,
+  TabList,
+  Tab,
+  TabValue,
 } from '@fluentui/react-components';
 import {
   VideoClipRegular,
@@ -31,6 +34,9 @@ import {
   ChevronUpRegular,
   CopyRegular,
   DocumentArrowDownRegular,
+  ImageAddRegular,
+  ArrowUploadRegular,
+  DismissRegular,
 } from '@fluentui/react-icons';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
@@ -41,6 +47,7 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalL,
     padding: tokens.spacingVerticalL,
+    paddingBottom: '120px', // 为浮动控制面板留出空间
     minHeight: '100%',
     maxWidth: '1600px',
     margin: '0 auto',
@@ -102,6 +109,42 @@ const useStyles = makeStyles({
     display: 'flex',
     gap: tokens.spacingHorizontalM,
     flexWrap: 'wrap',
+  },
+  floatingControlPanel: {
+    position: 'fixed',
+    bottom: tokens.spacingVerticalL,
+    // 与 container 对齐：container 在 mainContent 中（从 240px 开始）居中，maxWidth: 1600px
+    // 使用与 container 相同的布局逻辑
+    left: `calc(240px + ${tokens.spacingVerticalL})`,
+    right: tokens.spacingVerticalL,
+    maxWidth: '1600px',
+    width: 'auto',
+    margin: '0 auto',
+    zIndex: 1000,
+    boxShadow: tokens.shadow28,
+    borderRadius: tokens.borderRadiusLarge,
+    padding: tokens.spacingVerticalM,
+    // 云母 / 亚克力效果：使用伪元素实现半透明背景，保持内容不透明
+    backgroundColor: 'transparent',
+    backdropFilter: 'blur(20px) saturate(180%)',
+    WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    // 根据主题自动调整的高光描边
+    outline: `1px solid ${tokens.colorNeutralStroke1}`,
+    boxSizing: 'border-box',
+    // 使用伪元素创建半透明背景层
+    '::before': {
+      content: '""',
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: tokens.colorNeutralBackground1,
+      opacity: 0.7,
+      zIndex: -1,
+      borderRadius: tokens.borderRadiusLarge,
+    },
   },
   cliOutputCard: {
     display: 'flex',
@@ -312,6 +355,56 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     textAlign: 'center',
   },
+  uploadSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: tokens.spacingVerticalM,
+    padding: tokens.spacingVerticalM,
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: tokens.borderRadiusMedium,
+    border: `2px dashed ${tokens.colorNeutralStroke2}`,
+  },
+  uploadArea: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: tokens.spacingVerticalM,
+    padding: tokens.spacingVerticalXXL,
+    cursor: 'pointer',
+    borderRadius: tokens.borderRadiusMedium,
+    transition: 'background-color 0.2s',
+    width: '100%',
+    boxSizing: 'border-box',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground3,
+    },
+  },
+  uploadedImageContainer: {
+    position: 'relative',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: tokens.spacingVerticalM,
+    width: '100%',
+  },
+  uploadedImage: {
+    maxWidth: '100%',
+    maxHeight: '300px',
+    objectFit: 'contain',
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: tokens.spacingVerticalXS,
+    right: tokens.spacingVerticalXS,
+    minWidth: 'auto',
+  },
+  modeSelector: {
+    marginBottom: tokens.spacingVerticalM,
+  },
 });
 
 interface ModelGroup {
@@ -321,6 +414,7 @@ interface ModelGroup {
   sdModel?: string;
   vaeModel?: string;
   llmModel?: string;
+  clipVisionModel?: string;
   defaultSteps?: number;
   defaultCfgScale?: number;
   defaultWidth?: number;
@@ -328,6 +422,9 @@ interface ModelGroup {
   defaultSamplingMethod?: string;
   defaultScheduler?: string;
   defaultSeed?: number;
+  defaultHighNoiseSteps?: number;
+  defaultHighNoiseCfgScale?: number;
+  defaultHighNoiseSamplingMethod?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -335,7 +432,7 @@ interface ModelGroup {
 type DeviceType = 'cpu' | 'vulkan' | 'cuda';
 
 // 默认负面提示词（针对视频生成优化）
-const DEFAULT_NEGATIVE_PROMPT = '低质量, 最差质量, 模糊, 低分辨率, 闪烁, 不连贯, 跳帧, 手部错误, 脚部错误, 比例错误, 多余肢体, 缺失肢体, 水印';
+const DEFAULT_NEGATIVE_PROMPT = '色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走';
 
 // 清理 ANSI 转义序列
 const stripAnsiCodes = (text: string): string => {
@@ -353,6 +450,8 @@ interface VideoGeneratePageProps {
 
 export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePageProps) => {
   const styles = useStyles();
+  const [generationMode, setGenerationMode] = useState<'text2video' | 'image2video'>('text2video');
+  const [initImage, setInitImage] = useState<string | null>(null);
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [deviceType, setDeviceType] = useState<DeviceType>('cuda');
   const [prompt, setPrompt] = useState<string>('');
@@ -367,6 +466,7 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generatedVideo, setGeneratedVideo] = useState<string | null>(null);
+  const [generatedVideoPath, setGeneratedVideoPath] = useState<string | null>(null);
   const [videoFrames, setVideoFrames] = useState<string[]>([]);
   const [selectedFrameIndex, setSelectedFrameIndex] = useState<number>(0);
   const [generationProgress, setGenerationProgress] = useState<string>('');
@@ -378,13 +478,17 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
   const cliOutputRef = useRef<HTMLDivElement>(null);
   
   // 视频生成特有参数
-  const [frames, setFrames] = useState<number>(16); // 视频帧数
+  const [frames, setFrames] = useState<number>(33); // 视频帧数 (Wan2.2 默认 33)
   const [fps, setFps] = useState<number>(8); // 帧率
+  const [flowShift, setFlowShift] = useState<number>(3.0); // Flow Shift (Wan2.2 默认 3.0)
   const [messageDialogOpen, setMessageDialogOpen] = useState(false);
   const [messageDialogContent, setMessageDialogContent] = useState<{ title: string; message: string } | null>(null);
   
   // 其他参数
   const [samplingMethod, setSamplingMethod] = useState<string>('euler_a');
+  const [highNoiseSteps, setHighNoiseSteps] = useState<number | undefined>(undefined);
+  const [highNoiseCfgScale, setHighNoiseCfgScale] = useState<number | undefined>(undefined);
+  const [highNoiseSamplingMethod, setHighNoiseSamplingMethod] = useState<string | undefined>(undefined);
   const [scheduler, setScheduler] = useState<string>('discrete');
   const [seed, setSeed] = useState<number>(-1);
   const [seedInput, setSeedInput] = useState<string>('');
@@ -491,6 +595,26 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
     }
   }, [generating, onGeneratingStateChange]);
 
+  // 当选择的模型组变化时，更新默认参数
+  useEffect(() => {
+    if (selectedGroupId) {
+      const group = modelGroups.find(g => g.id === selectedGroupId);
+      if (group) {
+        if (group.defaultSteps) setSteps(parseInt(group.defaultSteps));
+        if (group.defaultCfgScale) setCfgScale(parseFloat(group.defaultCfgScale));
+        if (group.defaultWidth) {
+          setWidth(parseInt(group.defaultWidth));
+          setWidthInput(group.defaultWidth);
+        }
+        if (group.defaultHeight) {
+          setHeight(parseInt(group.defaultHeight));
+          setHeightInput(group.defaultHeight);
+        }
+        if (group.defaultFlowShift) setFlowShift(parseFloat(group.defaultFlowShift));
+      }
+    }
+  }, [selectedGroupId, modelGroups]);
+
   const loadModelGroups = async () => {
     try {
       if (!window.ipcRenderer) {
@@ -533,6 +657,23 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
     } catch (error) {
       console.error('Failed to set device type:', error);
     }
+  };
+
+  const handleImageUpload = async () => {
+    try {
+      if (!window.ipcRenderer) return;
+      const result = await window.ipcRenderer.invoke('dialog:open-image');
+      if (result) {
+        // 使用 media:/// 协议加载本地图片，避免 Electron 安全限制
+        setInitImage(`media:///${result.replace(/\\/g, '/')}`);
+      }
+    } catch (error) {
+      console.error('Failed to upload image:', error);
+    }
+  };
+
+  const handleRemoveImage = () => {
+    setInitImage(null);
   };
 
   const handleGenerate = async () => {
@@ -585,6 +726,8 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
         const result = await window.ipcRenderer.invoke('generate-video:start', {
           groupId: selectedGroupId,
           deviceType,
+          mode: generationMode,
+          initImage: generationMode === 'image2video' ? initImage : undefined,
           prompt,
           negativePrompt: negativePrompt || undefined,
           steps,
@@ -610,11 +753,15 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
           vaeTiling,
           frames, // 视频帧数
           fps, // 帧率
+          flowShift, // Flow Shift
         });
 
         if (result.success && (result.video || (result.frames && result.frames.length > 0))) {
           if (result.video) {
             setGeneratedVideo(result.video);
+            if (result.videoPath) {
+              setGeneratedVideoPath(result.videoPath);
+            }
           }
           if (result.frames && Array.isArray(result.frames) && result.frames.length > 0) {
             setVideoFrames(result.frames);
@@ -653,6 +800,15 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
     }
   };
 
+  const handleSaveGeneratedVideo = async () => {
+    if (!generatedVideoPath) return;
+    try {
+      await window.ipcRenderer.invoke('generated-images:download', generatedVideoPath);
+    } catch (error) {
+      console.error('Failed to save video:', error);
+    }
+  };
+
   const getDeviceLabel = (device: DeviceType): string => {
     switch (device) {
       case 'cpu':
@@ -682,6 +838,10 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
       const llmName = group.llmModel.split(/[/\\]/).pop() || 'LLM模型';
       parts.push(`LLM: ${llmName}`);
     }
+    if (group.clipVisionModel) {
+      const clipVisionName = group.clipVisionModel.split(/[/\\]/).pop() || 'CLIP Vision';
+      parts.push(`CLIP Vision: ${clipVisionName}`);
+    }
     return parts.join(' | ');
   };
 
@@ -689,13 +849,43 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
     <div className={styles.container}>
       <Title1>视频生成</Title1>
 
-      {/* 警告提示 */}
-      <MessageBar intent="warning">
-        <MessageBarTitle>功能尚未准备好</MessageBarTitle>
-        <MessageBarBody>
-          视频生成功能目前仍在开发中，可能存在不稳定的情况。生成的视频文件可能无法在浏览器中直接播放，建议使用系统播放器打开查看。
-        </MessageBarBody>
-      </MessageBar>
+      {/* 浮动控制面板 - 固定在底部 */}
+      <div className={styles.floatingControlPanel}>
+        <div className={styles.actions}>
+          {generating ? (
+            <Button
+              onClick={handleCancelGenerate}
+              appearance="secondary"
+              size="large"
+            >
+              取消生成
+            </Button>
+          ) : (
+            <Button
+              icon={<VideoClipRegular />}
+              onClick={handleGenerate}
+              disabled={!selectedGroupId || !prompt.trim() || loading}
+              appearance="primary"
+              size="large"
+            >
+              开始生成
+            </Button>
+          )}
+          <Button
+            icon={<DocumentArrowDownRegular />}
+            onClick={handleSaveGeneratedVideo}
+            disabled={loading || generating || !generatedVideoPath}
+          >
+            保存最新视频
+          </Button>
+          <Button
+            onClick={loadModelGroups}
+            disabled={loading || generating}
+          >
+            刷新模型组列表
+          </Button>
+        </div>
+      </div>
 
       {/* 预览区域 */}
       <Card className={styles.previewCard}>
@@ -909,6 +1099,21 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
                     if (selectedGroup.defaultSamplingMethod !== undefined) {
                       setSamplingMethod(selectedGroup.defaultSamplingMethod);
                     }
+                    if (selectedGroup.defaultHighNoiseSteps !== undefined) {
+                      setHighNoiseSteps(selectedGroup.defaultHighNoiseSteps);
+                    } else {
+                      setHighNoiseSteps(undefined);
+                    }
+                    if (selectedGroup.defaultHighNoiseCfgScale !== undefined) {
+                      setHighNoiseCfgScale(selectedGroup.defaultHighNoiseCfgScale);
+                    } else {
+                      setHighNoiseCfgScale(undefined);
+                    }
+                    if (selectedGroup.defaultHighNoiseSamplingMethod !== undefined) {
+                      setHighNoiseSamplingMethod(selectedGroup.defaultHighNoiseSamplingMethod);
+                    } else {
+                      setHighNoiseSamplingMethod(undefined);
+                    }
                     if (selectedGroup.defaultScheduler !== undefined) {
                       setScheduler(selectedGroup.defaultScheduler);
                     }
@@ -939,6 +1144,52 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
               ? `已选择: ${selectedGroup.name}${getModelInfo(selectedGroup) ? ` (${getModelInfo(selectedGroup)})` : ''}`
               : '未选择'}
           </Body1>
+
+          {/* 生成模式选择 */}
+          <div className={styles.modeSelector}>
+            <TabList
+              selectedValue={generationMode}
+              onTabSelect={(_, data) => setGenerationMode(data.value as 'text2video' | 'image2video')}
+            >
+              <Tab value="text2video">文字生成视频 (Text to Video)</Tab>
+              <Tab value="image2video">图片生成视频 (Image to Video)</Tab>
+            </TabList>
+          </div>
+
+          {/* 图片上传区域 (仅在 image2video 模式下显示) */}
+          {generationMode === 'image2video' && (
+            <div className={styles.uploadSection}>
+              {!initImage ? (
+                <div className={styles.uploadArea} onClick={handleImageUpload}>
+                  <ImageAddRegular style={{ fontSize: '48px', color: tokens.colorNeutralForeground3 }} />
+                  <div style={{ textAlign: 'center' }}>
+                    <Body1 block weight="semibold">点击上传参考图片</Body1>
+                    <Body1 block style={{ color: tokens.colorNeutralForeground3 }}>支持 JPG, PNG, WebP 格式</Body1>
+                  </div>
+                </div>
+              ) : (
+                <div className={styles.uploadedImageContainer}>
+                  <img src={initImage} alt="参考图片" className={styles.uploadedImage} />
+                  <Button
+                    className={styles.removeImageButton}
+                    icon={<DismissRegular />}
+                    appearance="subtle"
+                    onClick={handleRemoveImage}
+                    title="移除图片"
+                  />
+                  <div style={{ position: 'absolute', bottom: tokens.spacingVerticalS, left: '50%', transform: 'translateX(-50%)' }}>
+                    <Button
+                      size="small"
+                      icon={<ArrowUploadRegular />}
+                      onClick={handleImageUpload}
+                    >
+                      更换图片
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 提示词输入 */}
           <Field label="提示词" required>
@@ -1169,14 +1420,14 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
                     setWidthInput('2048');
                     setWidth(2048);
                   } else {
-                    const aligned = Math.round(val / 64) * 64;
+                    const aligned = Math.round(val / 16) * 16;
                     setWidthInput(aligned.toString());
                     setWidth(aligned);
                   }
                 }}
                 min={64}
                 max={2048}
-                step={64}
+                step={16}
               />
             </Field>
             <Field label="视频高度" hint="默认: 512">
@@ -1199,17 +1450,17 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
                     setHeightInput('2048');
                     setHeight(2048);
                   } else {
-                    const aligned = Math.round(val / 64) * 64;
+                    const aligned = Math.round(val / 16) * 16;
                     setHeightInput(aligned.toString());
                     setHeight(aligned);
                   }
                 }}
                 min={64}
                 max={2048}
-                step={64}
+                step={16}
               />
             </Field>
-            <Field label="采样方法" hint="默认: euler_a">
+            <Field label="采样方法" hint="默认: euler">
               <Dropdown
                 value={samplingMethod}
                 selectedOptions={[samplingMethod]}
@@ -1233,6 +1484,19 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
                 <Option value="tcd">TCD</Option>
               </Dropdown>
             </Field>
+
+            <Field label="Flow Shift" hint="Wan2.2 默认: 3.0">
+              <Input
+                type="number"
+                value={flowShift.toString()}
+                onChange={(_, data) => {
+                  const val = parseFloat(data.value) || 3.0;
+                  setFlowShift(val);
+                }}
+                step={0.1}
+              />
+            </Field>
+
             <Field label="调度器" hint="默认: discrete">
               <Dropdown
                 value={scheduler}
@@ -1398,35 +1662,6 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
               </Field>
             </div>
           )}
-
-          {/* 生成按钮 */}
-          <div className={styles.actions}>
-            {generating ? (
-              <Button
-                onClick={handleCancelGenerate}
-                appearance="secondary"
-                size="large"
-              >
-                取消生成
-              </Button>
-            ) : (
-              <Button
-                icon={<VideoClipRegular />}
-                onClick={handleGenerate}
-                disabled={!selectedGroupId || !prompt.trim() || loading}
-                appearance="primary"
-                size="large"
-              >
-                开始生成
-              </Button>
-            )}
-            <Button
-              onClick={loadModelGroups}
-              disabled={loading || generating}
-            >
-              刷新模型组列表
-            </Button>
-          </div>
         </div>
       </Card>
 

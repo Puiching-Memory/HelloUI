@@ -41,6 +41,7 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalL,
     padding: tokens.spacingVerticalL,
+    paddingBottom: '120px', // 为浮动控制面板留出空间
     minHeight: '100%',
     maxWidth: '1600px',
     margin: '0 auto',
@@ -104,6 +105,42 @@ const useStyles = makeStyles({
     display: 'flex',
     gap: tokens.spacingHorizontalM,
     flexWrap: 'wrap',
+  },
+  floatingControlPanel: {
+    position: 'fixed',
+    bottom: tokens.spacingVerticalL,
+    // 与 container 对齐：container 在 mainContent 中（从 240px 开始）居中，maxWidth: 1600px
+    // 使用与 container 相同的布局逻辑
+    left: `calc(240px + ${tokens.spacingVerticalL})`,
+    right: tokens.spacingVerticalL,
+    maxWidth: '1600px',
+    width: 'auto',
+    margin: '0 auto',
+    zIndex: 1000,
+    boxShadow: tokens.shadow28,
+    borderRadius: tokens.borderRadiusLarge,
+    padding: tokens.spacingVerticalM,
+    // 云母 / 亚克力效果：使用伪元素实现半透明背景，保持内容不透明
+    backgroundColor: 'transparent',
+    backdropFilter: 'blur(20px) saturate(180%)',
+    WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    // 根据主题自动调整的高光描边
+    outline: `1px solid ${tokens.colorNeutralStroke1}`,
+    boxSizing: 'border-box',
+    // 使用伪元素创建半透明背景层
+    '::before': {
+      content: '""',
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: tokens.colorNeutralBackground1,
+      opacity: 0.7,
+      zIndex: -1,
+      borderRadius: tokens.borderRadiusLarge,
+    },
   },
   cliOutputCard: {
     display: 'flex',
@@ -296,16 +333,21 @@ const useStyles = makeStyles({
 interface ModelGroup {
   id: string;
   name: string;
+  taskType?: 'generate' | 'edit' | 'video' | 'upscale';
   sdModel?: string;
   vaeModel?: string;
   llmModel?: string;
-  defaultSteps?: number;  // 推荐的默认采样步数
-  defaultCfgScale?: number;  // 推荐的默认CFG Scale值
-  defaultWidth?: number;  // 推荐的默认图片宽度
-  defaultHeight?: number;  // 推荐的默认图片高度
-  defaultSamplingMethod?: string;  // 推荐的默认采样方法
-  defaultScheduler?: string;  // 推荐的默认调度器
-  defaultSeed?: number;  // 推荐的默认种子（-1表示随机）
+  clipVisionModel?: string;
+  defaultSteps?: number;
+  defaultCfgScale?: number;
+  defaultWidth?: number;
+  defaultHeight?: number;
+  defaultSamplingMethod?: string;
+  defaultScheduler?: string;
+  defaultSeed?: number;
+  defaultHighNoiseSteps?: number;
+  defaultHighNoiseCfgScale?: number;
+  defaultHighNoiseSamplingMethod?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -347,6 +389,7 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  const [generatedImagePath, setGeneratedImagePath] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [generationProgress, setGenerationProgress] = useState<string>('');
   const [cliOutput, setCliOutput] = useState<Array<{ type: 'stdout' | 'stderr'; text: string; timestamp: number }>>([]);
@@ -378,6 +421,7 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
   const [diffusionConvDirect, setDiffusionConvDirect] = useState<boolean>(false);
   const [vaeConvDirect, setVaeConvDirect] = useState<boolean>(false);
   const [vaeTiling, setVaeTiling] = useState<boolean>(true);
+  const [flowShift, setFlowShift] = useState<number>(3.0); // 默认 3.0
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
   const [inputImagePath, setInputImagePath] = useState<string | null>(null);
   const [inputImagePreview, setInputImagePreview] = useState<string | null>(null);
@@ -677,11 +721,15 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
           diffusionConvDirect,
           vaeConvDirect,
           vaeTiling,
+          flowShift,
           inputImage: inputImagePath, // 添加输入图片路径
         });
 
         if (result.success && result.image) {
           setGeneratedImage(result.image);
+          if (result.imagePath) {
+            setGeneratedImagePath(result.imagePath);
+          }
           setPreviewImage(null); // 清除预览图片，显示最终图片
           setGenerationProgress('生成完成');
         } else {
@@ -714,6 +762,15 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
       setGenerationProgress('正在取消...');
     } catch (error) {
       console.error('Failed to cancel generation:', error);
+    }
+  };
+
+  const handleSaveGeneratedImage = async () => {
+    if (!generatedImagePath) return;
+    try {
+      await window.ipcRenderer.invoke('generated-images:download', generatedImagePath);
+    } catch (error) {
+      console.error('Failed to save image:', error);
     }
   };
 
@@ -760,9 +817,9 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
       const filePath = await window.ipcRenderer.invoke('edit-image:select-file');
       if (filePath) {
         setInputImagePath(filePath);
-        // 读取图片文件并转换为 base64 数据 URL
-        const dataUrl = await window.ipcRenderer.invoke('edit-image:read-image-base64', filePath);
-        setInputImagePreview(dataUrl);
+        // 使用 media:/// 协议加载本地图片，避免 Electron 安全限制且性能更好
+        const normalizedPath = filePath.replace(/\\/g, '/');
+        setInputImagePreview(`media:///${normalizedPath}`);
       }
     } catch (error) {
       console.error('Failed to select image:', error);
@@ -779,6 +836,44 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
   return (
     <div className={styles.container}>
       <Title1>图片编辑</Title1>
+
+      {/* 浮动控制面板 - 固定在底部 */}
+      <div className={styles.floatingControlPanel}>
+        <div className={styles.actions}>
+          {generating ? (
+            <Button
+              onClick={handleCancelGenerate}
+              appearance="secondary"
+              size="large"
+            >
+              取消生成
+            </Button>
+          ) : (
+            <Button
+              icon={<ImageAddRegular />}
+              onClick={handleGenerate}
+              disabled={!selectedGroupId || !inputImagePath || !prompt.trim() || loading}
+              appearance="primary"
+              size="large"
+            >
+              开始编辑
+            </Button>
+          )}
+          <Button
+            icon={<DocumentArrowDownRegular />}
+            onClick={handleSaveGeneratedImage}
+            disabled={loading || generating || !generatedImagePath}
+          >
+            保存最新图片
+          </Button>
+          <Button
+            onClick={loadModelGroups}
+            disabled={loading || generating}
+          >
+            刷新模型组列表
+          </Button>
+        </div>
+      </div>
 
       {/* 预览区域 - 在上方，占据主要区域 */}
       <Card className={styles.previewCard}>
@@ -1044,6 +1139,19 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
               ? `已选择: ${selectedGroup.name}${getModelInfo(selectedGroup) ? ` (${getModelInfo(selectedGroup)})` : ''}`
               : '未选择'}
           </Body1>
+          {selectedGroup?.sdModel?.toLowerCase().includes('qwen-image-edit-2511') && (
+            <div style={{ 
+              marginTop: tokens.spacingVerticalS, 
+              padding: tokens.spacingVerticalS, 
+              backgroundColor: tokens.colorBrandBackground2, 
+              borderRadius: tokens.borderRadiusMedium,
+              border: `1px solid ${tokens.colorBrandStroke2}`
+            }}>
+              <Text style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorBrandForeground2 }}>
+                ✨ 检测到 Qwen Image Edit 2511 模型。已自动启用优化参数：参考图模式 (-r)、零条件 T 标志 (--qwen-image-zero-cond-t) 和 Flow Shift (3.0)。
+              </Text>
+            </div>
+          )}
 
           {/* 提示词输入 */}
           <Field label="提示词" required>
@@ -1268,6 +1376,19 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
                 step={0.1}
               />
             </Field>
+            <Field label="Flow Shift" hint="默认: 3.0 (仅适用于 Qwen 2511)">
+              <Input
+                type="number"
+                value={flowShift.toString()}
+                onChange={(_, data) => {
+                  const val = parseFloat(data.value) || 3.0;
+                  setFlowShift(Math.max(0.1, Math.min(10, val)));
+                }}
+                min={0.1}
+                max={10}
+                step={0.1}
+              />
+            </Field>
             <Field label="图片宽度" hint="默认: 512">
               <Input
                 type="number"
@@ -1292,15 +1413,15 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
                     setWidthInput('2048');
                     setWidth(2048);
                   } else {
-                    // 对齐到64的倍数
-                    const aligned = Math.round(val / 64) * 64;
+                    // 对齐到16的倍数
+                    const aligned = Math.round(val / 16) * 16;
                     setWidthInput(aligned.toString());
                     setWidth(aligned);
                   }
                 }}
                 min={64}
                 max={2048}
-                step={64}
+                step={16}
               />
             </Field>
             <Field label="图片高度" hint="默认: 512">
@@ -1327,15 +1448,15 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
                     setHeightInput('2048');
                     setHeight(2048);
                   } else {
-                    // 对齐到64的倍数
-                    const aligned = Math.round(val / 64) * 64;
+                    // 对齐到16的倍数
+                    const aligned = Math.round(val / 16) * 16;
                     setHeightInput(aligned.toString());
                     setHeight(aligned);
                   }
                 }}
                 min={64}
                 max={2048}
-                step={64}
+                step={16}
               />
             </Field>
             <Field label="采样方法" hint="默认: euler_a">
@@ -1531,35 +1652,6 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
               </Field>
             </div>
           )}
-
-          {/* 生成按钮 */}
-          <div className={styles.actions}>
-            {generating ? (
-              <Button
-                onClick={handleCancelGenerate}
-                appearance="secondary"
-                size="large"
-              >
-                取消生成
-              </Button>
-            ) : (
-              <Button
-                icon={<ImageAddRegular />}
-                onClick={handleGenerate}
-                disabled={!selectedGroupId || !inputImagePath || !prompt.trim() || loading}
-                appearance="primary"
-                size="large"
-              >
-                开始编辑
-              </Button>
-            )}
-            <Button
-              onClick={loadModelGroups}
-              disabled={loading || generating}
-            >
-              刷新模型组列表
-            </Button>
-          </div>
         </div>
       </Card>
 

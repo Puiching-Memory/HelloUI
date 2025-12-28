@@ -25,6 +25,7 @@ import {
   Tooltip,
   Dropdown,
   Option,
+  Text,
 } from '@fluentui/react-components';
 import {
   ArrowUploadRegular,
@@ -41,6 +42,7 @@ import {
   ZoomInRegular,
 } from '@fluentui/react-icons';
 import { useState, useEffect } from 'react';
+import { useIpcListener } from '../hooks/useIpcListener';
 import type { TaskType, ModelGroup, WeightFile } from '../../electron/types/index';
 
 const useStyles = makeStyles({
@@ -130,6 +132,7 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
     flex: 1,
+    minWidth: 0,
   },
   modelGroupActions: {
     display: 'flex',
@@ -146,6 +149,8 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
     backgroundColor: tokens.colorBrandBackground2,
     color: tokens.colorBrandForeground1,
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
   },
   modelList: {
     display: 'flex',
@@ -235,6 +240,29 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     copied: number;
     total: number;
   } | null>(null);
+  const [importProgress, setImportProgress] = useState<{
+    progress: number;
+    fileName: string;
+    copied: number;
+    total: number;
+  } | null>(null);
+  const [exportProgress, setExportProgress] = useState<{
+    progress: number;
+    fileName: string;
+    copied: number;
+    total: number;
+  } | null>(null);
+
+  // 监听导入进度
+  useIpcListener('model-groups:import-progress', (data) => {
+    setImportProgress(data);
+  });
+
+  // 监听导出进度
+  useIpcListener('model-groups:export-progress', (data) => {
+    setExportProgress(data);
+  });
+
   const [isUploading, setIsUploading] = useState(false);
   const [modelGroups, setModelGroups] = useState<ModelGroup[]>([]);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
@@ -246,6 +274,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
   const [groupLlmModel, setGroupLlmModel] = useState<string>('');
   const [groupClipLModel, setGroupClipLModel] = useState<string>('');
   const [groupT5xxlModel, setGroupT5xxlModel] = useState<string>('');
+  const [groupClipVisionModel, setGroupClipVisionModel] = useState<string>('');
   const [groupDefaultSteps, setGroupDefaultSteps] = useState<string>('20');
   const [groupDefaultCfgScale, setGroupDefaultCfgScale] = useState<string>('7.0');
   const [groupDefaultWidth, setGroupDefaultWidth] = useState<string>('512');
@@ -253,6 +282,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
   const [groupDefaultSamplingMethod, setGroupDefaultSamplingMethod] = useState<string>('euler_a');
   const [groupDefaultScheduler, setGroupDefaultScheduler] = useState<string>('discrete');
   const [groupDefaultSeed, setGroupDefaultSeed] = useState<string>('');
+  const [groupDefaultFlowShift, setGroupDefaultFlowShift] = useState<string>('3.0');
   const [groupTaskType, setGroupTaskType] = useState<TaskType>('generate');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [messageDialogOpen, setMessageDialogOpen] = useState(false);
@@ -327,72 +357,47 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     setWeightsFolder(value);
   };
 
-  const handleCancelUpload = async () => {
-    if (!window.ipcRenderer) return;
-    
-    await window.ipcRenderer.invoke('weights:cancel-upload');
-    
-    setUploadProgress(null);
-    setLoading(false);
-    setIsUploading(false);
-    onUploadStateChange?.(false);
-  };
-
   const handleUpload = async () => {
     if (!weightsFolder || !window.ipcRenderer) return;
     try {
-      const filePath = await window.ipcRenderer.invoke('weights:select-file');
-      if (filePath) {
-        const fileName = filePath.split(/[/\\]/).pop() || '文件';
+      const folderPath = await window.ipcRenderer.invoke('model-groups:select-folder');
+      if (folderPath) {
+        const folderName = folderPath.split(/[/\\]/).pop() || '模型组';
         setLoading(true);
         setIsUploading(true);
-        setUploadProgress({ progress: 0, fileName, copied: 0, total: 0 });
+        setImportProgress({ progress: 0, fileName: folderName, copied: 0, total: 0 });
         
         // 通知父组件开始上传，禁用导航
         onUploadStateChange?.(true);
         
-        // 监听上传进度
-        const progressListener = (_: any, data: { progress: number; fileName: string; copied: number; total: number }) => {
-          setUploadProgress(data);
-        };
-        
-        window.ipcRenderer.on('weights:upload-progress', progressListener);
-        
         try {
-          const result = await window.ipcRenderer.invoke('weights:upload-file', filePath, weightsFolder);
+          const result = await window.ipcRenderer.invoke('model-groups:import', { folderPath, targetFolder: weightsFolder });
           
-          if (result?.cancelled) {
-            return;
-          }
-          
-          if (result?.skipped && result.reason === 'duplicate') {
-            setMessageDialogContent({ title: '文件已存在', message: `文件已存在，跳过上传。\n\n已存在的文件: ${result.existingFile}\n当前文件: ${fileName}\n\n这两个文件的内容完全相同（哈希值一致）。` });
-            setMessageDialogOpen(true);
+          if (result?.success) {
+            setImportProgress((prev) => prev ? { ...prev, progress: 100 } : null);
             await loadFiles();
-            return;
+            await loadModelGroups();
+            setMessageDialogContent({ title: '导入成功', message: `模型组 "${result.group?.name}" 已成功导入并注册。` });
+            setMessageDialogOpen(true);
+          } else {
+            throw new Error(result?.message || '导入失败');
           }
-          
-          setUploadProgress((prev) => prev ? { ...prev, progress: 100 } : null);
-          await loadFiles();
         } finally {
-          window.ipcRenderer.off('weights:upload-progress', progressListener);
           setLoading(false);
           setIsUploading(false);
           onUploadStateChange?.(false);
-          setTimeout(() => setUploadProgress(null), 1000);
+          setTimeout(() => setImportProgress(null), 1000);
         }
       }
     } catch (error) {
-      setUploadProgress(null);
+      setImportProgress(null);
       setLoading(false);
       setIsUploading(false);
       onUploadStateChange?.(false);
       
       const errorMessage = error instanceof Error ? error.message : String(error);
-      if (!errorMessage.includes('上传已取消')) {
-        setMessageDialogContent({ title: '上传失败', message: `上传文件失败: ${errorMessage}` });
-        setMessageDialogOpen(true);
-      }
+      setMessageDialogContent({ title: '导入失败', message: `导入模型组失败: ${errorMessage}` });
+      setMessageDialogOpen(true);
     }
   };
 
@@ -450,6 +455,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     setGroupLlmModel('');
     setGroupClipLModel('');
     setGroupT5xxlModel('');
+    setGroupClipVisionModel('');
     setGroupDefaultSteps('20');
     setGroupDefaultCfgScale('7.0');
     setGroupDefaultWidth('512');
@@ -457,6 +463,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     setGroupDefaultSamplingMethod('euler_a');
     setGroupDefaultScheduler('discrete');
     setGroupDefaultSeed('');
+    setGroupDefaultFlowShift('3.0');
     setGroupTaskType('generate');
     setGroupDialogOpen(true);
   };
@@ -470,6 +477,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     setGroupLlmModel(group.llmModel || '');
     setGroupClipLModel(group.clipLModel || '');
     setGroupT5xxlModel(group.t5xxlModel || '');
+    setGroupClipVisionModel(group.clipVisionModel || '');
     setGroupDefaultSteps(group.defaultSteps?.toString() || '20');
     setGroupDefaultCfgScale(group.defaultCfgScale?.toString() || '7.0');
     setGroupDefaultWidth(group.defaultWidth?.toString() || '512');
@@ -477,6 +485,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
     setGroupDefaultSamplingMethod(group.defaultSamplingMethod || 'euler_a');
     setGroupDefaultScheduler(group.defaultScheduler || 'discrete');
     setGroupDefaultSeed(group.defaultSeed !== undefined && group.defaultSeed >= 0 ? group.defaultSeed.toString() : '');
+    setGroupDefaultFlowShift(group.defaultFlowShift?.toString() || '3.0');
     setGroupTaskType(group.taskType || 'generate');
     setGroupDialogOpen(true);
   };
@@ -500,25 +509,15 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
         setMessageDialogOpen(true);
         return;
       }
-      if (groupTaskType === 'edit') {
-        // 图片编辑任务需要 CLIP L 和 T5XXL 模型
-        if (!groupClipLModel || !groupClipLModel.trim()) {
-          setMessageDialogContent({ title: '提示', message: '创建图片编辑模型组时，必须选择CLIP L模型' });
-          setMessageDialogOpen(true);
-          return;
-        }
-        if (!groupT5xxlModel || !groupT5xxlModel.trim()) {
-          setMessageDialogContent({ title: '提示', message: '创建图片编辑模型组时，必须选择T5XXL模型' });
-          setMessageDialogOpen(true);
-          return;
-        }
-      } else {
-        // 其他任务类型需要 LLM/CLIP 模型
-        if (!groupLlmModel || !groupLlmModel.trim()) {
-          setMessageDialogContent({ title: '提示', message: '创建新模型组时，必须选择LLM/CLIP模型' });
-          setMessageDialogOpen(true);
-          return;
-        }
+      if (!groupLlmModel || !groupLlmModel.trim()) {
+        setMessageDialogContent({ 
+          title: '提示', 
+          message: groupTaskType === 'edit' 
+            ? '创建图片编辑模型组时，必须选择 LLM 模型 (Qwen 2511)' 
+            : '创建新模型组时，必须选择LLM/CLIP模型' 
+        });
+        setMessageDialogOpen(true);
+        return;
       }
     }
 
@@ -534,6 +533,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
           llmModel: groupLlmModel || undefined,
           clipLModel: groupClipLModel || undefined,
           t5xxlModel: groupT5xxlModel || undefined,
+          clipVisionModel: groupClipVisionModel || undefined,
           defaultSteps: groupDefaultSteps ? parseFloat(groupDefaultSteps) : undefined,
           defaultCfgScale: groupDefaultCfgScale ? parseFloat(groupDefaultCfgScale) : undefined,
           defaultWidth: groupDefaultWidth ? parseInt(groupDefaultWidth) : undefined,
@@ -541,10 +541,15 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
           defaultSamplingMethod: groupDefaultSamplingMethod || undefined,
           defaultScheduler: groupDefaultScheduler || undefined,
           defaultSeed: groupDefaultSeed ? parseInt(groupDefaultSeed) : undefined,
+          defaultFlowShift: groupDefaultFlowShift ? parseFloat(groupDefaultFlowShift) : undefined,
         });
+        await loadModelGroups();
+        setGroupDialogOpen(false);
+        setEditingGroup(null);
       } else {
-        // 创建新组
-        await window.ipcRenderer.invoke('model-groups:create', {
+        // 建立并导出模型组
+        setExportProgress({ progress: 0, fileName: '准备中...', copied: 0, total: 0 });
+        const result = await window.ipcRenderer.invoke('model-groups:build-and-export', {
           name: groupName.trim(),
           taskType: groupTaskType,
           sdModel: groupSdModel || undefined,
@@ -553,6 +558,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
           llmModel: groupLlmModel || undefined,
           clipLModel: groupClipLModel || undefined,
           t5xxlModel: groupT5xxlModel || undefined,
+          clipVisionModel: groupClipVisionModel || undefined,
           defaultSteps: groupDefaultSteps ? parseFloat(groupDefaultSteps) : undefined,
           defaultCfgScale: groupDefaultCfgScale ? parseFloat(groupDefaultCfgScale) : undefined,
           defaultWidth: groupDefaultWidth ? parseInt(groupDefaultWidth) : undefined,
@@ -560,11 +566,21 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
           defaultSamplingMethod: groupDefaultSamplingMethod || undefined,
           defaultScheduler: groupDefaultScheduler || undefined,
           defaultSeed: groupDefaultSeed ? parseInt(groupDefaultSeed) : undefined,
+          defaultFlowShift: groupDefaultFlowShift ? parseFloat(groupDefaultFlowShift) : undefined,
         });
+
+        if (result.success) {
+          setExportProgress((prev) => prev ? { ...prev, progress: 100 } : null);
+          setGroupDialogOpen(false);
+          setMessageDialogContent({ 
+            title: '导出成功', 
+            message: `模型组已成功导出至: ${result.exportPath}\n\n您可以点击“导入模型组文件夹”将其安装到应用中。` 
+          });
+          setMessageDialogOpen(true);
+        } else if (result.message !== '导出已取消') {
+          throw new Error(result.message);
+        }
       }
-      await loadModelGroups();
-      setGroupDialogOpen(false);
-      setEditingGroup(null);
     } catch (error) {
       console.error('Failed to save group:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -572,6 +588,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
       setMessageDialogOpen(true);
     } finally {
       setLoading(false);
+      setTimeout(() => setExportProgress(null), 1000);
     }
   };
 
@@ -633,7 +650,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
         </div>
         <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalXS }}>
           {weightsFolder 
-            ? `使用文件夹: ${weightsFolder}。权重文件将自动扫描并显示在下方，可以上传（复制）权重文件到此文件夹。支持格式：bin, safetensors, pt, pth, onnx, ckpt, gguf`
+            ? `使用文件夹: ${weightsFolder}。权重文件将自动扫描并显示在下方，可以导入模型组文件夹到此文件夹。支持格式：bin, safetensors, pt, pth, onnx, ckpt, gguf`
             : '默认使用应用数据目录下的 models 文件夹，也可以输入自定义路径。支持格式：bin, safetensors, pt, pth, onnx, ckpt, gguf'}
         </Body1>
       </Card>
@@ -647,7 +664,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
             disabled={!weightsFolder || loading}
             appearance="primary"
           >
-            上传权重
+            导入模型组文件夹
           </Button>
           <Button
             onClick={loadFiles}
@@ -656,6 +673,20 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
             刷新列表
           </Button>
         </div>
+        {/* 导入进度条 */}
+        {importProgress && (
+          <div style={{ marginTop: tokens.spacingVerticalM }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalXS }}>
+              <Body1>
+                正在导入: {importProgress.fileName || '文件'} ({importProgress.progress}%)
+              </Body1>
+            </div>
+            <ProgressBar value={importProgress.progress} max={100} />
+            <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalXS }}>
+              {formatFileSize(importProgress.copied)} / {formatFileSize(importProgress.total)}
+            </Body1>
+          </div>
+        )}
         {/* 上传进度条 */}
         {uploadProgress && (
           <div style={{ marginTop: tokens.spacingVerticalM }}>
@@ -663,16 +694,6 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
               <Body1>
                 正在上传: {uploadProgress.fileName || '文件'} ({uploadProgress.progress}%)
               </Body1>
-              {isUploading && (
-                <Button
-                  icon={<DismissRegular />}
-                  size="small"
-                  appearance="secondary"
-                  onClick={handleCancelUpload}
-                >
-                  取消
-                </Button>
-              )}
             </div>
             <ProgressBar value={uploadProgress.progress} max={100} />
             <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalXS }}>
@@ -692,7 +713,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
             disabled={loading || !weightsFolder || files.length === 0}
             appearance="primary"
           >
-            创建模型组
+            建立并导出模型组
           </Button>
         </div>
         <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginBottom: tokens.spacingVerticalM }}>
@@ -753,10 +774,19 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                 <Card key={group.id} className={styles.modelGroupCard}>
                   <div className={styles.modelGroupHeader}>
                     <div className={styles.modelGroupTitle}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
-                        <Title2 style={{ fontSize: tokens.fontSizeBase500, margin: 0 }}>
-                          {group.name}
-                        </Title2>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, minWidth: 0 }}>
+                        <Tooltip content={group.name} relationship="label">
+                          <Title2 style={{ 
+                            fontSize: tokens.fontSizeBase500, 
+                            margin: 0,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            flexShrink: 1
+                          }}>
+                            {group.name}
+                          </Title2>
+                        </Tooltip>
                         <span className={styles.taskTypeBadge}>
                           {getTaskTypeIcon(group.taskType)}
                           {getTaskTypeLabel(group.taskType)}
@@ -816,28 +846,16 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                       </div>
                     )}
                     {group.taskType === 'edit' ? (
-                      <>
-                        {group.clipLModel && (
-                          <div className={styles.modelItem}>
-                            <span className={styles.modelLabel}>CLIP L</span>
-                            <Tooltip content={getModelFileName(group.clipLModel)} relationship="label">
-                              <span className={styles.modelValue} title={getModelFileName(group.clipLModel)}>
-                                {getModelFileName(group.clipLModel)}
-                              </span>
-                            </Tooltip>
-                          </div>
-                        )}
-                        {group.t5xxlModel && (
-                          <div className={styles.modelItem}>
-                            <span className={styles.modelLabel}>T5XXL</span>
-                            <Tooltip content={getModelFileName(group.t5xxlModel)} relationship="label">
-                              <span className={styles.modelValue} title={getModelFileName(group.t5xxlModel)}>
-                                {getModelFileName(group.t5xxlModel)}
-                              </span>
-                            </Tooltip>
-                          </div>
-                        )}
-                      </>
+                      group.llmModel && (
+                        <div className={styles.modelItem}>
+                          <span className={styles.modelLabel}>LLM模型</span>
+                          <Tooltip content={getModelFileName(group.llmModel)} relationship="label">
+                            <span className={styles.modelValue} title={getModelFileName(group.llmModel)}>
+                              {getModelFileName(group.llmModel)}
+                            </span>
+                          </Tooltip>
+                        </div>
+                      )
                     ) : (
                       group.llmModel && (
                         <div className={styles.modelItem}>
@@ -852,10 +870,21 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                         </div>
                       )
                     )}
+                    {group.taskType === 'video' && group.clipVisionModel && (
+                      <div className={styles.modelItem}>
+                        <span className={styles.modelLabel}>CLIP Vision</span>
+                        <Tooltip content={getModelFileName(group.clipVisionModel)} relationship="label">
+                          <span className={styles.modelValue} title={getModelFileName(group.clipVisionModel)}>
+                            {getModelFileName(group.clipVisionModel)}
+                          </span>
+                        </Tooltip>
+                      </div>
+                    )}
                   </div>
 
                   {(group.defaultSteps || group.defaultCfgScale || group.defaultWidth || group.defaultHeight || 
-                    group.defaultSamplingMethod || group.defaultScheduler || group.defaultSeed) && (
+                    group.defaultSamplingMethod || group.defaultScheduler || group.defaultSeed ||
+                    group.defaultHighNoiseSteps || group.defaultHighNoiseCfgScale || group.defaultHighNoiseSamplingMethod) && (
                     <div className={styles.expandableSection}>
                       <div className={styles.expandableHeader} onClick={toggleExpand}>
                         <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>
@@ -868,31 +897,59 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                           <div className={styles.paramGrid}>
                             {group.defaultSteps && (
                               <div className={styles.paramItem}>
-                                <span className={styles.paramLabel}>采样步数</span>
+                                <span className={styles.paramLabel}>
+                                  {group.taskType === 'video' ? '采样步数 (主)' : '采样步数'}
+                                </span>
                                 <span className={styles.paramValue}>{group.defaultSteps}</span>
                               </div>
                             )}
                             {group.defaultCfgScale && (
                               <div className={styles.paramItem}>
-                                <span className={styles.paramLabel}>CFG Scale</span>
+                                <span className={styles.paramLabel}>
+                                  {group.taskType === 'video' ? 'CFG Scale (主)' : 'CFG Scale'}
+                                </span>
                                 <span className={styles.paramValue}>{group.defaultCfgScale}</span>
+                              </div>
+                            )}
+                            {group.taskType === 'video' && group.defaultHighNoiseSteps && (
+                              <div className={styles.paramItem}>
+                                <span className={styles.paramLabel}>采样步数 (高噪)</span>
+                                <span className={styles.paramValue}>{group.defaultHighNoiseSteps}</span>
+                              </div>
+                            )}
+                            {group.taskType === 'video' && group.defaultHighNoiseCfgScale && (
+                              <div className={styles.paramItem}>
+                                <span className={styles.paramLabel}>CFG Scale (高噪)</span>
+                                <span className={styles.paramValue}>{group.defaultHighNoiseCfgScale}</span>
+                              </div>
+                            )}
+                            {group.taskType === 'video' && group.defaultHighNoiseSamplingMethod && (
+                              <div className={styles.paramItem}>
+                                <span className={styles.paramLabel}>采样方法 (高噪)</span>
+                                <span className={styles.paramValue}>{group.defaultHighNoiseSamplingMethod}</span>
                               </div>
                             )}
                             {group.defaultWidth && (
                               <div className={styles.paramItem}>
-                                <span className={styles.paramLabel}>宽度</span>
+                                <span className={styles.paramLabel}>
+                                  {group.taskType === 'video' ? '视频宽度' : '图片宽度'}
+                                </span>
                                 <span className={styles.paramValue}>{group.defaultWidth}px</span>
                               </div>
                             )}
                             {group.defaultHeight && (
                               <div className={styles.paramItem}>
-                                <span className={styles.paramLabel}>高度</span>
+                                <span className={styles.paramLabel}>
+                                  {group.taskType === 'video' ? '视频高度' : '图片高度'}
+                                </span>
                                 <span className={styles.paramValue}>{group.defaultHeight}px</span>
                               </div>
                             )}
                             {group.defaultSamplingMethod && (
                               <div className={styles.paramItem}>
-                                <span className={styles.paramLabel}>采样方法</span>
+                                <span className={styles.paramLabel}>
+                                  {group.taskType === 'video' ? '采样方法 (主)' : '采样方法'}
+                                </span>
                                 <span className={styles.paramValue}>{group.defaultSamplingMethod}</span>
                               </div>
                             )}
@@ -1017,10 +1074,11 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
           setGroupDefaultSamplingMethod('euler_a');
           setGroupDefaultScheduler('discrete');
           setGroupDefaultSeed('');
+          setGroupDefaultFlowShift('3.0');
         }
       }}>
         <DialogSurface style={{ minWidth: '600px' }}>
-          <DialogTitle>{editingGroup ? '编辑模型组' : '创建模型组'}</DialogTitle>
+          <DialogTitle>{editingGroup ? '编辑模型组' : '建立并导出模型组'}</DialogTitle>
           <DialogBody>
             <DialogContent>
               <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM }}>
@@ -1031,6 +1089,11 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                     placeholder="请输入模型组名称"
                   />
                 </Field>
+                <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                  {editingGroup 
+                    ? '修改模型组的配置信息。' 
+                    : '选择模型文件并配置参数，系统将为您生成模型组文件夹并导出。'}
+                </Body1>
                 <Field label="任务类型" hint="选择此模型组可用于哪些任务" required>
                   <Dropdown
                     value={
@@ -1127,62 +1190,31 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                   </Dropdown>
                 </Field>
                 {groupTaskType === 'edit' ? (
-                  <>
-                    <Field label={editingGroup ? "CLIP L模型（可选）" : "CLIP L模型（必选）"}>
-                      <Dropdown
-                        placeholder={editingGroup ? "请选择CLIP L模型（可选）" : "请选择CLIP L模型（必选）"}
-                        value={getModelFileName(groupClipLModel)}
-                        selectedOptions={[groupClipLModel]}
-                        onOptionSelect={(_, data) => {
-                          if (data.optionValue) {
-                            setGroupClipLModel(data.optionValue);
-                          } else {
-                            setGroupClipLModel('');
-                          }
-                        }}
-                      >
-                        {editingGroup && <Option value="" text="无">无</Option>}
-                        {files.filter(file => {
-                          // 当前已选择的CLIP L模型可以显示（如果正在编辑）
-                          if (file.path === groupClipLModel) return true;
-                          // 过滤掉已被其他模型选择的文件
-                          return file.path !== groupSdModel && file.path !== groupVaeModel && 
-                                 file.path !== groupLlmModel && file.path !== groupT5xxlModel;
-                        }).map((file) => (
-                          <Option key={file.path} value={file.path} text={file.name}>
-                            {file.name}
-                          </Option>
-                        ))}
-                      </Dropdown>
-                    </Field>
-                    <Field label={editingGroup ? "T5XXL模型（可选）" : "T5XXL模型（必选）"}>
-                      <Dropdown
-                        placeholder={editingGroup ? "请选择T5XXL模型（可选）" : "请选择T5XXL模型（必选）"}
-                        value={getModelFileName(groupT5xxlModel)}
-                        selectedOptions={[groupT5xxlModel]}
-                        onOptionSelect={(_, data) => {
-                          if (data.optionValue) {
-                            setGroupT5xxlModel(data.optionValue);
-                          } else {
-                            setGroupT5xxlModel('');
-                          }
-                        }}
-                      >
-                        {editingGroup && <Option value="" text="无">无</Option>}
-                        {files.filter(file => {
-                          // 当前已选择的T5XXL模型可以显示（如果正在编辑）
-                          if (file.path === groupT5xxlModel) return true;
-                          // 过滤掉已被其他模型选择的文件
-                          return file.path !== groupSdModel && file.path !== groupVaeModel && 
-                                 file.path !== groupLlmModel && file.path !== groupClipLModel;
-                        }).map((file) => (
-                          <Option key={file.path} value={file.path} text={file.name}>
-                            {file.name}
-                          </Option>
-                        ))}
-                      </Dropdown>
-                    </Field>
-                  </>
+                  <Field label={editingGroup ? "LLM模型（可选）" : "LLM模型（必选）"}>
+                    <Dropdown
+                      placeholder={editingGroup ? "请选择LLM模型（可选）" : "请选择LLM模型（必选）"}
+                      value={getModelFileName(groupLlmModel)}
+                      selectedOptions={[groupLlmModel]}
+                      onOptionSelect={(_, data) => {
+                        if (data.optionValue) {
+                          setGroupLlmModel(data.optionValue);
+                        } else {
+                          setGroupLlmModel('');
+                        }
+                      }}
+                    >
+                      {editingGroup && <Option value="" text="无">无</Option>}
+                      {files.filter(file => {
+                        if (file.path === groupLlmModel) return true;
+                        return file.path !== groupSdModel && file.path !== groupVaeModel && 
+                               file.path !== groupClipLModel && file.path !== groupT5xxlModel;
+                      }).map((file) => (
+                        <Option key={file.path} value={file.path} text={file.name}>
+                          {file.name}
+                        </Option>
+                      ))}
+                    </Dropdown>
+                  </Field>
                 ) : (
                   <Field
                     label={
@@ -1221,11 +1253,38 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                     </Dropdown>
                   </Field>
                 )}
+                {groupTaskType === 'video' && (
+                  <Field label="CLIP Vision 模型（可选，I2V/FLF2V用）">
+                    <Dropdown
+                      placeholder="请选择 CLIP Vision 模型（可选）"
+                      value={getModelFileName(groupClipVisionModel)}
+                      selectedOptions={[groupClipVisionModel]}
+                      onOptionSelect={(_, data) => {
+                        if (data.optionValue) {
+                          setGroupClipVisionModel(data.optionValue);
+                        } else {
+                          setGroupClipVisionModel('');
+                        }
+                      }}
+                    >
+                      <Option value="" text="无">无</Option>
+                      {files.filter(file => {
+                        if (file.path === groupClipVisionModel) return true;
+                        return file.path !== groupSdModel && file.path !== groupVaeModel && 
+                               file.path !== groupLlmModel && file.path !== groupHighNoiseSdModel;
+                      }).map((file) => (
+                        <Option key={file.path} value={file.path} text={file.name}>
+                          {file.name}
+                        </Option>
+                      ))}
+                    </Dropdown>
+                  </Field>
+                )}
                 <Title2 style={{ fontSize: tokens.fontSizeBase400, marginTop: tokens.spacingVerticalM }}>
                   推荐默认设置（可选）
                 </Title2>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: tokens.spacingHorizontalM }}>
-                <Field label={groupTaskType === 'video' ? '采样步数（主路径）' : '采样步数'} hint="默认: 20">
+                  <Field label={groupTaskType === 'video' ? '采样步数' : '采样步数'} hint="默认: 20">
                     <Input
                       type="number"
                       value={groupDefaultSteps}
@@ -1237,7 +1296,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                       max={100}
                     />
                   </Field>
-                  <Field label="CFG Scale" hint="默认: 7.0">
+                  <Field label={groupTaskType === 'video' ? 'CFG Scale' : 'CFG Scale'} hint="默认: 7.0">
                     <Input
                       type="number"
                       value={groupDefaultCfgScale}
@@ -1250,7 +1309,20 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                       step={0.1}
                     />
                   </Field>
-                  <Field label="图片宽度" hint="默认: 512">
+                  {(groupTaskType === 'video' || groupTaskType === 'edit') && (
+                    <Field label="Flow Shift" hint={groupTaskType === 'video' ? "Wan2.2 默认: 3.0" : "Qwen 2511 默认: 3.0"}>
+                      <Input
+                        type="number"
+                        value={groupDefaultFlowShift}
+                        onChange={(_, data) => {
+                          const val = parseFloat(data.value) || 3.0;
+                          setGroupDefaultFlowShift(val.toString());
+                        }}
+                        step={0.1}
+                      />
+                    </Field>
+                  )}
+                  <Field label={groupTaskType === 'video' ? '视频宽度' : '图片宽度'} hint="默认: 512">
                     <Input
                       type="number"
                       value={groupDefaultWidth}
@@ -1260,24 +1332,24 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                       }}
                       onBlur={() => {
                         const val = parseInt(groupDefaultWidth);
-                        if (isNaN(val) || val < 64) {
+                        if (isNaN(val) || val < 16) {
                           // 无效值或小于最小值，重置为默认值
                           setGroupDefaultWidth('512');
                         } else if (val > 2048) {
                           // 超过最大值，设置为最大值
                           setGroupDefaultWidth('2048');
                         } else {
-                          // 对齐到64的倍数
-                          const aligned = Math.round(val / 64) * 64;
+                          // 对齐到16的倍数
+                          const aligned = Math.round(val / 16) * 16;
                           setGroupDefaultWidth(aligned.toString());
                         }
                       }}
-                      min={64}
+                      min={16}
                       max={2048}
-                      step={64}
+                      step={16}
                     />
                   </Field>
-                  <Field label="图片高度" hint="默认: 512">
+                  <Field label={groupTaskType === 'video' ? '视频高度' : '图片高度'} hint="默认: 512">
                     <Input
                       type="number"
                       value={groupDefaultHeight}
@@ -1287,21 +1359,21 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                       }}
                       onBlur={() => {
                         const val = parseInt(groupDefaultHeight);
-                        if (isNaN(val) || val < 64) {
+                        if (isNaN(val) || val < 16) {
                           // 无效值或小于最小值，重置为默认值
                           setGroupDefaultHeight('512');
                         } else if (val > 2048) {
                           // 超过最大值，设置为最大值
                           setGroupDefaultHeight('2048');
                         } else {
-                          // 对齐到64的倍数
-                          const aligned = Math.round(val / 64) * 64;
+                          // 对齐到16的倍数
+                          const aligned = Math.round(val / 16) * 16;
                           setGroupDefaultHeight(aligned.toString());
                         }
                       }}
-                      min={64}
+                      min={16}
                       max={2048}
-                      step={64}
+                      step={16}
                     />
                   </Field>
                   <Field label="采样方法" hint="默认: euler_a">
@@ -1371,7 +1443,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                 </div>
               </div>
             </DialogContent>
-            <DialogActions>
+            <DialogActions style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: tokens.spacingHorizontalM, width: '100%', boxSizing: 'border-box' }}>
               <Button
                 appearance="secondary"
                 onClick={() => {
@@ -1381,6 +1453,23 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
               >
                 取消
               </Button>
+
+              {exportProgress ? (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, padding: `0 ${tokens.spacingHorizontalS}` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text size={100} truncate style={{ color: tokens.colorNeutralForeground3 }}>
+                      正在导出: {exportProgress.fileName}
+                    </Text>
+                    <Text size={100} style={{ color: tokens.colorNeutralForeground3, whiteSpace: 'nowrap' }}>
+                      {exportProgress.progress}%
+                    </Text>
+                  </div>
+                  <ProgressBar value={exportProgress.progress} max={100} />
+                </div>
+              ) : (
+                <div style={{ flex: 1 }} /> // 占位符，确保“保存”按钮始终在右侧
+              )}
+
               <Button
                 appearance="primary"
                 onClick={handleSaveGroup}
@@ -1390,14 +1479,11 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
                   (!editingGroup && (
                     !groupSdModel || !groupSdModel.trim() || 
                     !groupVaeModel || !groupVaeModel.trim() || 
-                    (groupTaskType === 'edit' 
-                      ? (!groupClipLModel || !groupClipLModel.trim() || !groupT5xxlModel || !groupT5xxlModel.trim())
-                      : (!groupLlmModel || !groupLlmModel.trim())
-                    )
+                    (!groupLlmModel || !groupLlmModel.trim())
                   ))
                 }
               >
-                保存
+                {editingGroup ? '保存' : '建立并导出'}
               </Button>
             </DialogActions>
           </DialogBody>

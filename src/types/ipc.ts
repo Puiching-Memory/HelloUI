@@ -18,8 +18,6 @@ export type IPCChannel =
   | 'weights:get-folder'
   | 'weights:list-files'
   | 'weights:select-file'
-  | 'weights:upload-file'
-  | 'weights:cancel-upload'
   | 'weights:download-file'
   | 'weights:delete-file'
   | 'weights:upload-progress'
@@ -37,6 +35,9 @@ export type IPCChannel =
   | 'model-groups:update'
   | 'model-groups:delete'
   | 'model-groups:get'
+  | 'model-groups:select-folder'
+  | 'model-groups:import'
+  | 'model-groups:build-and-export'
   // 图片生成
   | 'generate:start'
   | 'generate:progress'
@@ -59,8 +60,6 @@ export interface IPCRequestMap {
   'weights:get-folder': { request: void; response: string | null };
   'weights:list-files': { request: string; response: WeightFile[] };
   'weights:select-file': { request: void; response: string | null };
-  'weights:upload-file': { request: { sourcePath: string; targetFolder: string }; response: { success: boolean; targetPath?: string; skipped?: boolean; reason?: string; existingFile?: string; message?: string; cancelled?: boolean } };
-  'weights:cancel-upload': { request: void; response: { success: boolean; message?: string } };
   'weights:download-file': { request: string; response: boolean };
   'weights:delete-file': { request: string; response: boolean };
   'sdcpp:init-default-folder': { request: void; response: string };
@@ -75,6 +74,9 @@ export interface IPCRequestMap {
   'model-groups:update': { request: { id: string; updates: Partial<Omit<ModelGroup, 'id' | 'createdAt'>> }; response: ModelGroup };
   'model-groups:delete': { request: string; response: boolean };
   'model-groups:get': { request: string; response: ModelGroup | null };
+  'model-groups:select-folder': { request: void; response: string | null };
+  'model-groups:import': { request: { folderPath: string; targetFolder: string }; response: { success: boolean; message?: string; group?: ModelGroup } };
+  'model-groups:build-and-export': { request: Omit<ModelGroup, 'id' | 'createdAt' | 'updatedAt'>; response: { success: boolean; message?: string; exportPath?: string } };
   'generate:start': { request: GenerateImageParams; response: { success: boolean; image?: string; imagePath?: string; duration?: number } };
   'generated-images:list': { request: void; response: GeneratedImageInfo[] };
   'generated-images:download': { request: string; response: boolean };
@@ -88,6 +90,8 @@ export interface IPCRequestMap {
  */
 export interface IPCEventMap {
   'weights:upload-progress': { progress: number; copied: number; total: number; fileName: string };
+  'model-groups:import-progress': { progress: number; copied: number; total: number; fileName: string };
+  'model-groups:export-progress': { progress: number; copied: number; total: number; fileName: string };
   'generate:progress': { progress: string | number; image?: string };
   'generate:cli-output': { type: 'stdout' | 'stderr'; text: string };
   'generate:preview-update': { previewImage: string };

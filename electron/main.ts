@@ -1,13 +1,15 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, protocol, net } from 'electron'
 import { join, basename, extname, resolve, dirname, isAbsolute, relative, sep } from 'path'
-import { fileURLToPath } from 'url'
+import { fileURLToPath, pathToFileURL } from 'url'
 import { promises as fs } from 'fs'
 import { existsSync, createReadStream, createWriteStream, watchFile, unwatchFile } from 'fs'
 import { pipeline } from 'stream/promises'
 import { createHash } from 'crypto'
 import { spawn, exec } from 'child_process'
+import { createRequire } from 'module'
+const require = createRequire(import.meta.url)
+const archiver = require('archiver')
 import { execa } from 'execa'
-import archiver from 'archiver'
 import { AsyncOperationGuard } from './utils/AsyncOperationGuard.js'
 import { ResourceManager } from './utils/ResourceManager.js'
 import type { DeviceType, ModelGroup, GenerateImageParams, GeneratedImageInfo } from './types/index.js'
@@ -75,16 +77,6 @@ let weightsFolderPath: string | null = null
 let sdcppFolderPath: string | null = null
 let sdcppDeviceType: DeviceType = 'cuda'
 
-// 存储当前上传的流引用，用于取消上传
-interface UploadState {
-  readStream: ReturnType<typeof createReadStream> | null
-  writeStream: ReturnType<typeof createWriteStream> | null
-  targetPath: string
-  cancelled: boolean
-}
-
-let currentUpload: UploadState | null = null
-
 // 存储当前正在运行的生成进程，用于取消生成
 let currentGenerateProcess: ReturnType<typeof spawn> | null = null
 let currentGenerateKill: (() => void) | null = null
@@ -92,6 +84,12 @@ let currentGenerateKill: (() => void) | null = null
 // 获取运行位置目录（可执行文件所在目录）
 function getRunPath(): string {
   return app.isPackaged ? dirname(process.execPath) : join(__dirname, '..')
+}
+
+// 获取 FFmpeg 可执行文件路径
+function getFFmpegPath(): string {
+  const runPath = getRunPath()
+  return join(runPath, 'engines', 'ffmpeg', 'bin', 'ffmpeg.exe')
 }
 
 // 注意：不再需要手动转义函数，现在使用 execa 库自动处理参数转义
@@ -111,14 +109,64 @@ function resolveModelPath(modelPath: string | undefined): string | undefined {
   // 如果路径以 "models/" 开头，移除该前缀
   let normalizedPath = modelPath.replace(/^models[\/\\]/, '')
   
-  // 如果路径包含路径分隔符，说明是相对路径，基于运行路径解析
-  // 否则，假设文件在 models 文件夹中
+  // 优先尝试在当前权重文件夹中解析
+  const modelsFolder = weightsFolderPath || getDefaultModelsFolder()
+  const pathInModels = resolve(modelsFolder, normalizedPath)
+  if (existsSync(pathInModels)) {
+    return pathInModels
+  }
+  
+  // 如果路径包含路径分隔符，说明是相对路径，基于运行路径解析（用于引擎等）
   if (normalizedPath.includes('/') || normalizedPath.includes('\\')) {
     return resolve(getRunPath(), normalizedPath)
   } else {
-    // 纯文件名，假设在 models 文件夹中
+    // 纯文件名，假设在默认 models 文件夹中
     return join(getDefaultModelsFolder(), normalizedPath)
   }
+}
+
+/**
+ * 带有进度报告的文件复制函数
+ */
+async function copyFileWithProgress(
+  src: string,
+  dest: string,
+  onProgress: (chunkLength: number) => void
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const readStream = createReadStream(src)
+    const writeStream = createWriteStream(dest)
+
+    readStream.on('data', (chunk) => {
+      onProgress(chunk.length)
+    })
+
+    readStream.on('error', reject)
+    writeStream.on('error', reject)
+    writeStream.on('finish', resolve)
+
+    readStream.pipe(writeStream)
+  })
+}
+
+/**
+ * 递归获取文件夹总大小
+ */
+async function getFolderSize(folderPath: string): Promise<number> {
+  let totalSize = 0
+  const entries = await fs.readdir(folderPath, { withFileTypes: true })
+  
+  for (const entry of entries) {
+    const fullPath = join(folderPath, entry.name)
+    if (entry.isDirectory()) {
+      totalSize += await getFolderSize(fullPath)
+    } else {
+      const stats = await fs.stat(fullPath)
+      totalSize += stats.size
+    }
+  }
+  
+  return totalSize
 }
 
 // 获取默认的 models 文件夹路径
@@ -204,26 +252,31 @@ ipcMain.handle('weights:list-files', async (_, folder: string) => {
     return []
   }
   
-  const entries = await fs.readdir(folder, { withFileTypes: true })
   const files: Array<{ name: string; size: number; path: string; modified: number }> = []
   
-  for (const entry of entries) {
-    if (entry.isFile()) {
-      // 排除配置文件 model-groups.json，避免在权重列表中显示，防止用户误删/误操作
-      if (entry.name === 'model-groups.json') {
-        continue
+  async function scanDir(currentDir: string) {
+    const entries = await fs.readdir(currentDir, { withFileTypes: true })
+    for (const entry of entries) {
+      const fullPath = join(currentDir, entry.name)
+      if (entry.isDirectory()) {
+        await scanDir(fullPath)
+      } else if (entry.isFile()) {
+        // 排除 JSON 配置文件，避免在权重列表中显示
+        if (entry.name.toLowerCase().endsWith('.json')) {
+          continue
+        }
+        const stats = await fs.stat(fullPath)
+        files.push({
+          name: relative(folder, fullPath).replace(/\\/g, '/'),
+          size: stats.size,
+          path: fullPath,
+          modified: stats.mtimeMs,
+        })
       }
-      const filePath = join(folder, entry.name)
-      const stats = await fs.stat(filePath)
-      files.push({
-        name: entry.name,
-        size: stats.size,
-        path: filePath,
-        modified: stats.mtimeMs,
-      })
     }
   }
   
+  await scanDir(folder)
   files.sort((a, b) => b.modified - a.modified)
   return files
 })
@@ -261,6 +314,28 @@ ipcMain.handle('edit-image:select-file', async () => {
   const result = await dialog.showOpenDialog(window, {
     properties: ['openFile'],
     title: '选择要编辑的图片',
+    filters: [
+      { name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'bmp', 'webp', 'gif'] },
+      { name: '所有文件', extensions: ['*'] },
+    ],
+  })
+  
+  if (!result.canceled && result.filePaths.length > 0) {
+    return result.filePaths[0]
+  }
+  return null
+})
+
+// 别名，用于视频生成页面
+ipcMain.handle('dialog:open-image', async () => {
+  const window = win || BrowserWindow.getFocusedWindow()
+  if (!window) {
+    throw new Error('没有可用的窗口')
+  }
+  
+  const result = await dialog.showOpenDialog(window, {
+    properties: ['openFile'],
+    title: '选择图片',
     filters: [
       { name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'bmp', 'webp', 'gif'] },
       { name: '所有文件', extensions: ['*'] },
@@ -405,119 +480,6 @@ async function findDuplicateFile(targetFolder: string, sourcePath: string, sourc
   
   return null
 }
-
-// IPC 处理程序：取消上传
-ipcMain.handle('weights:cancel-upload', async () => {
-  if (currentUpload) {
-    currentUpload.cancelled = true
-    
-    // 停止流
-    if (currentUpload.readStream) {
-      currentUpload.readStream.destroy()
-    }
-    if (currentUpload.writeStream) {
-      currentUpload.writeStream.destroy()
-    }
-    
-    // 删除部分复制的文件
-    try {
-      if (existsSync(currentUpload.targetPath)) {
-        await fs.unlink(currentUpload.targetPath)
-      }
-    } catch (error) {
-      console.warn('Failed to delete partially copied file:', error)
-    }
-    
-    currentUpload = null
-    return { success: true }
-  }
-  return { success: false, message: '没有正在进行的上传' }
-})
-
-// IPC 处理程序：上传文件（复制到权重文件夹，带进度）
-ipcMain.handle('weights:upload-file', async (event, sourcePath: string, targetFolder: string) => {
-  if (!existsSync(targetFolder)) {
-    await fs.mkdir(targetFolder, { recursive: true })
-  }
-  
-  const fileName = basename(sourcePath)
-  const sourceStats = await fs.stat(sourcePath)
-  const sourceSize = sourceStats.size
-    
-    // 使用优化的快速检查算法查找重复文件
-    // 先比较文件大小，再使用采样哈希，最后完整哈希确认
-    const existingFile = await findDuplicateFile(targetFolder, sourcePath, sourceSize)
-    if (existingFile) {
-      const existingFileName = basename(existingFile)
-      return {
-        success: false,
-        skipped: true,
-        reason: 'duplicate',
-        existingFile: existingFileName,
-        message: `文件已存在: ${existingFileName}`,
-      }
-    }
-    
-    let targetPath = join(targetFolder, fileName)
-    
-    // 如果目标文件已存在（同名但不同哈希），添加时间戳
-    if (existsSync(targetPath)) {
-      const ext = extname(fileName)
-      const name = basename(fileName, ext)
-      const timestamp = Date.now()
-      const newFileName = `${name}_${timestamp}${ext}`
-      targetPath = join(targetFolder, newFileName)
-    }
-    
-    const totalSize = sourceStats.size
-    let copiedSize = 0
-    
-    const readStream = createReadStream(sourcePath)
-    const writeStream = createWriteStream(targetPath)
-    
-    currentUpload = {
-      readStream,
-      writeStream,
-      targetPath,
-      cancelled: false,
-    }
-    
-    readStream.on('data', (chunk: Buffer | string) => {
-      if (currentUpload?.cancelled) {
-        readStream.destroy()
-        writeStream.destroy()
-        return
-      }
-      
-      copiedSize += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk)
-      event.sender.send('weights:upload-progress', {
-        progress: Math.round((copiedSize / totalSize) * 100),
-        copied: copiedSize,
-        total: totalSize,
-        fileName: fileName,
-      })
-    })
-    
-    await pipeline(readStream, writeStream)
-    
-    if (currentUpload?.cancelled) {
-      if (existsSync(currentUpload.targetPath)) {
-        await fs.unlink(currentUpload.targetPath)
-      }
-      currentUpload = null
-      return { success: false, cancelled: true, message: '上传已取消' }
-    }
-    
-    event.sender.send('weights:upload-progress', {
-      progress: 100,
-      copied: totalSize,
-      total: totalSize,
-      fileName: fileName,
-    })
-    
-    currentUpload = null
-    return { success: true, targetPath, skipped: false }
-})
 
 // IPC 处理程序：下载文件（复制到用户选择的位置）
 ipcMain.handle('weights:download-file', async (_, filePath: string) => {
@@ -708,7 +670,7 @@ function toRelativePath(absolutePath: string | undefined): string | undefined {
     return undefined
   }
   
-  const modelsFolder = getDefaultModelsFolder()
+  const modelsFolder = weightsFolderPath || getDefaultModelsFolder()
   
   // 如果路径已经是相对路径（不以盘符或 / 开头），直接返回
   if (!isAbsolute(absolutePath)) {
@@ -720,6 +682,14 @@ function toRelativePath(absolutePath: string | undefined): string | undefined {
     const relativePath = relative(modelsFolder, absolutePath)
     // 如果 relative 返回的路径以 .. 开头，说明不在 models 文件夹内，保持原路径
     if (relativePath.startsWith('..')) {
+      // 尝试检查是否在默认 models 文件夹内
+      const defaultModelsFolder = getDefaultModelsFolder()
+      if (modelsFolder !== defaultModelsFolder) {
+        const relativeToDefault = relative(defaultModelsFolder, absolutePath)
+        if (!relativeToDefault.startsWith('..')) {
+          return relativeToDefault.replace(/\\/g, '/')
+        }
+      }
       console.warn(`[Main] Path ${absolutePath} is not within models folder, keeping as-is`)
       return absolutePath
     }
@@ -795,13 +765,53 @@ ipcMain.handle('model-groups:update', async (_, id: string, updates: Partial<Omi
   if (index === -1) {
     throw new Error(`模型组不存在: ${id}`)
   }
-  groups[index] = {
-    ...groups[index],
+
+  const oldGroup = groups[index]
+  const updatedGroup = {
+    ...oldGroup,
     ...updates,
     updatedAt: Date.now(),
   }
+  groups[index] = updatedGroup
+
   await saveModelGroups(groups)
-  return groups[index]
+
+  // 同时更新子文件夹内的 config.json
+  try {
+    // 尝试通过 sdModel 确定子文件夹
+    const modelPath = oldGroup.sdModel || updatedGroup.sdModel
+    if (modelPath) {
+      const modelsDir = weightsFolderPath || getDefaultModelsFolder()
+      const absoluteModelPath = resolve(modelsDir, modelPath)
+      const groupDir = dirname(absoluteModelPath)
+      const configJsonPath = join(groupDir, 'config.json')
+
+      if (existsSync(configJsonPath)) {
+        // 准备要写入 config.json 的数据
+        // 排除 id, createdAt, updatedAt 等内部字段
+        const { id: _id, createdAt: _ca, updatedAt: _ua, ...configData } = updatedGroup
+
+        // 将模型路径转换为相对于 groupDir 的路径
+        const modelFields = ['sdModel', 'highNoiseSdModel', 'vaeModel', 'llmModel', 'clipLModel', 't5xxlModel', 'clipVisionModel'] as const
+        for (const field of modelFields) {
+          const val = configData[field]
+          if (val && typeof val === 'string') {
+            const absPath = resolve(modelsDir, val)
+            // @ts-ignore
+            configData[field] = relative(groupDir, absPath).replace(/\\/g, '/')
+          }
+        }
+
+        await fs.writeFile(configJsonPath, JSON.stringify(configData, null, 2), 'utf-8')
+        console.log(`[Main] Updated config.json in ${groupDir}`)
+      }
+    }
+  } catch (err) {
+    console.error('[Main] Failed to update config.json in subfolder:', err)
+    // 不抛出错误，以免影响主流程
+  }
+
+  return updatedGroup
 })
 
 // IPC 处理程序：删除模型组
@@ -820,6 +830,190 @@ ipcMain.handle('model-groups:delete', async (_, id: string) => {
 ipcMain.handle('model-groups:get', async (_, id: string) => {
   const groups = await loadModelGroups()
   return groups.find(g => g.id === id) || null
+})
+
+// IPC 处理程序：选择模型组文件夹
+ipcMain.handle('model-groups:select-folder', async () => {
+  const window = win || BrowserWindow.getFocusedWindow()
+  if (!window) {
+    throw new Error('没有可用的窗口')
+  }
+  
+  const result = await dialog.showOpenDialog(window, {
+    properties: ['openDirectory'],
+    title: '选择模型组文件夹',
+  })
+  
+  if (!result.canceled && result.filePaths.length > 0) {
+    return result.filePaths[0]
+  }
+  return null
+})
+
+// IPC 处理程序：导入模型组（从文件夹导入并注册）
+ipcMain.handle('model-groups:import', async (event, { folderPath, targetFolder }) => {
+  try {
+    if (!existsSync(folderPath)) {
+      throw new Error('文件夹不存在')
+    }
+
+    if (!existsSync(targetFolder)) {
+      await fs.mkdir(targetFolder, { recursive: true })
+    }
+
+    // 查找 config.json
+    const configPath = join(folderPath, 'config.json')
+    if (!existsSync(configPath)) {
+      throw new Error('文件夹中未找到 config.json 配置文件')
+    }
+
+    const configContent = await fs.readFile(configPath, 'utf8')
+    const config = JSON.parse(configContent)
+    
+    if (!config.name) {
+      throw new Error('配置文件中缺少模型组名称 (name)')
+    }
+
+    // 为模型组创建独立的子文件夹
+    const groupSubFolder = join(targetFolder, config.name)
+    if (!existsSync(groupSubFolder)) {
+      await fs.mkdir(groupSubFolder, { recursive: true })
+    }
+
+    // 计算总大小以报告进度
+    const totalSize = await getFolderSize(folderPath)
+    let totalCopied = 0
+
+    // 将文件夹中的所有文件复制到 groupSubFolder
+    const filesToCopy = await fs.readdir(folderPath)
+    for (const file of filesToCopy) {
+      const srcPath = join(folderPath, file)
+      const destPath = join(groupSubFolder, file)
+      
+      const stats = await fs.stat(srcPath)
+      if (stats.isDirectory()) {
+        // 递归复制目录
+        await fs.cp(srcPath, destPath, { recursive: true })
+        totalCopied += await getFolderSize(srcPath)
+        const progress = Math.round((totalCopied / totalSize) * 100)
+        event.sender.send('model-groups:import-progress', { progress, copied: totalCopied, total: totalSize, fileName: file })
+      } else {
+        await copyFileWithProgress(srcPath, destPath, (chunkLength) => {
+          totalCopied += chunkLength
+          const progress = Math.round((totalCopied / totalSize) * 100)
+          event.sender.send('model-groups:import-progress', { progress, copied: totalCopied, total: totalSize, fileName: file })
+        })
+      }
+    }
+
+    // 注册模型组
+    const groups = await loadModelGroups()
+    const modelFields = ['sdModel', 'highNoiseSdModel', 'vaeModel', 'llmModel', 'clipLModel', 't5xxlModel', 'clipVisionModel'] as const
+    const updatedConfig = { ...config }
+    
+    // 更新模型路径为子文件夹中的绝对路径，以便后续 normalize
+    for (const field of modelFields) {
+      if (updatedConfig[field] && typeof updatedConfig[field] === 'string') {
+        if (!isAbsolute(updatedConfig[field])) {
+          updatedConfig[field] = join(groupSubFolder, updatedConfig[field])
+        }
+      }
+    }
+
+    const newGroup: ModelGroup = {
+      ...updatedConfig,
+      id: Date.now().toString(),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    
+    // 确保路径是相对于 models 文件夹的
+    const normalizedGroup = normalizeModelGroupPaths(newGroup)
+    
+    groups.push(normalizedGroup)
+    await saveModelGroups(groups)
+
+    return { success: true, group: normalizedGroup }
+  } catch (error) {
+    console.error('[Main] Failed to import model group:', error)
+    return { success: false, message: error instanceof Error ? error.message : String(error) }
+  }
+})
+
+// IPC 处理程序：建立并导出模型组（导出到文件夹）
+ipcMain.handle('model-groups:build-and-export', async (event, groupData: Omit<ModelGroup, 'id' | 'createdAt' | 'updatedAt'>) => {
+  const window = win || BrowserWindow.getFocusedWindow()
+  if (!window) {
+    throw new Error('没有可用的窗口')
+  }
+
+  try {
+    const result = await dialog.showOpenDialog(window, {
+      title: '选择导出目标文件夹',
+      properties: ['openDirectory', 'createDirectory'],
+    })
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, message: '导出已取消' }
+    }
+
+    const exportPath = result.filePaths[0]
+    const groupFolder = join(exportPath, groupData.name)
+    
+    if (!existsSync(groupFolder)) {
+      await fs.mkdir(groupFolder, { recursive: true })
+    }
+
+    // 1. 准备导出的配置
+    const exportedConfig = { ...groupData }
+    const modelFields = ['sdModel', 'highNoiseSdModel', 'vaeModel', 'llmModel', 'clipLModel', 't5xxlModel', 'clipVisionModel'] as const
+    
+    // 计算总大小以报告进度
+    let totalSize = 0
+    const validModels: { field: string, absolutePath: string, fileName: string }[] = []
+
+    for (const field of modelFields) {
+      const modelPath = groupData[field]
+      if (modelPath) {
+        const absolutePath = resolveModelPath(modelPath)
+        if (absolutePath && existsSync(absolutePath)) {
+          const stats = await fs.stat(absolutePath)
+          totalSize += stats.size
+          validModels.push({ field, absolutePath, fileName: basename(absolutePath) })
+        }
+      }
+    }
+
+    let totalCopied = 0
+
+    // 2. 复制模型文件到目标文件夹，并更新配置中的路径
+    for (const { field, absolutePath, fileName } of validModels) {
+      const destPath = join(groupFolder, fileName)
+      
+      // 复制文件并报告进度
+      await copyFileWithProgress(absolutePath, destPath, (chunkLength) => {
+        totalCopied += chunkLength
+        const progress = Math.round((totalCopied / totalSize) * 100)
+        event.sender.send('model-groups:export-progress', { progress, copied: totalCopied, total: totalSize, fileName })
+      })
+      
+      // 更新 config 中的路径为文件夹内部的相对路径（即文件名）
+      // @ts-ignore
+      exportedConfig[field] = fileName
+    }
+
+    // 3. 写入 config.json 到目标文件夹
+    await fs.writeFile(
+      join(groupFolder, 'config.json'),
+      JSON.stringify(exportedConfig, null, 2),
+      'utf8'
+    )
+
+    return { success: true, exportPath: groupFolder }
+  } catch (error) {
+    console.error('[Main] Failed to export model group:', error)
+    return { success: false, message: error instanceof Error ? error.message : String(error) }
+  }
 })
 
 // ========== 图片生成相关 IPC 处理程序 ==========
@@ -872,7 +1066,9 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
       diffusionConvDirect = false,
       vaeConvDirect = false,
       vaeTiling = false,
-      inputImage
+      inputImage,
+      flowShift,
+      qwenImageZeroCondT
     } = params
 
     // 确定使用的模型路径
@@ -902,6 +1098,9 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
     } else {
       throw new Error('必须提供模型组ID')
     }
+
+    // 检测是否为 Qwen Image Edit 2511 模型
+    const isQwenEdit2511 = sdModelPath.toLowerCase().includes('qwen-image-edit-2511')
 
     // 获取 SD.cpp 可执行文件路径
     const sdExePath = getSDCppExecutablePath(deviceType)
@@ -953,8 +1152,8 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
       }
       
       // 根据任务类型选择不同的文本编码器模型
-      if (taskType === 'edit') {
-        // 图片编辑任务：使用 CLIP L 和 T5XXL 模型
+      if (taskType === 'edit' && !isQwenEdit2511) {
+        // 普通图片编辑任务：使用 CLIP L 和 T5XXL 模型
         if (group?.clipLModel) {
           const clipLModelPath = resolveModelPath(group.clipLModel)
           if (clipLModelPath && existsSync(clipLModelPath)) {
@@ -970,7 +1169,7 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
           }
         }
       } else {
-        // 其他任务类型：使用 LLM 文本编码器支持（用于某些模型如 Z-Image 等）
+        // 其他任务类型或 Qwen 2511：使用 LLM 文本编码器支持
         if (group?.llmModel) {
           // 将相对路径转换为绝对路径
           const llmModelPath = resolveModelPath(group.llmModel)
@@ -986,16 +1185,33 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
     }
 
     // 添加输入图片（用于图片编辑和上采样）
-    // 统一使用 --init-img 参数（根据最新 CLI 文档，--input-image 已废弃，-r 是用于 Flux Kontext 模型的参考图片）
     if (inputImage) {
       const inputImagePath = resolve(inputImage)
       if (existsSync(inputImagePath)) {
-        // 统一使用 --init-img 参数
-        args.push('--init-img', inputImagePath)
+        if (isQwenEdit2511) {
+          // Qwen 2511 使用 -r 参数作为参考图片
+          args.push('-r', inputImagePath)
+          console.log(`[Generate] Qwen 2511 Reference image: ${inputImagePath}`)
+        } else {
+          // 统一使用 --init-img 参数
+          args.push('--init-img', inputImagePath)
           console.log(`[Generate] Input image: ${inputImagePath}`)
+        }
       } else {
         throw new Error(`输入图片文件不存在: ${inputImagePath}`)
       }
+    }
+
+    // Qwen Image Edit 2511 特有参数
+    if (isQwenEdit2511) {
+      // 必须启用 --qwen-image-zero-cond-t
+      args.push('--qwen-image-zero-cond-t')
+      console.log(`[Generate] Qwen 2511: Enabled --qwen-image-zero-cond-t`)
+      
+      // 默认使用 flow-shift 3
+      const finalFlowShift = flowShift !== undefined ? flowShift : 3
+      args.push('--flow-shift', finalFlowShift.toString())
+      console.log(`[Generate] Qwen 2511: Flow shift set to ${finalFlowShift}`)
     }
 
     args.push('--output', outputImagePath)
@@ -1501,6 +1717,8 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
     const { 
       groupId, 
       deviceType, 
+      mode,
+      initImage,
       prompt, 
       negativePrompt = '',
       steps = 20,
@@ -1524,13 +1742,18 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
       diffusionConvDirect = false,
       vaeConvDirect = false,
       vaeTiling = false,
-      frames = 16, // 视频帧数
-      fps = 8 // 帧率
+      frames = 33, // 视频帧数
+      fps = 8, // 帧率
+      flowShift = 3.0, // Flow Shift
+      highNoiseSteps,
+      highNoiseCfgScale,
+      highNoiseSamplingMethod
     } = params
 
     // 确定使用的模型路径
     let sdModelPath: string | undefined
     let highNoiseModelPath: string | undefined
+    let clipVisionModelPath: string | undefined
 
     if (groupId) {
       const groups = await loadModelGroups()
@@ -1561,6 +1784,14 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
         }
         highNoiseModelPath = candidate
       }
+
+      // 如果模型组配置了 CLIP Vision 模型，在此解析路径
+      if (group.clipVisionModel) {
+        const candidate = resolveModelPath(group.clipVisionModel)
+        if (candidate && existsSync(candidate)) {
+          clipVisionModelPath = candidate
+        }
+      }
     } else {
       throw new Error('必须提供模型组ID')
     }
@@ -1578,8 +1809,9 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
     }
 
     const timestamp = Date.now()
-    // 改为输出 MP4，便于在 HTML5 video 中直接播放
-    const outputVideoPath = join(outputsDir, `video_${timestamp}.mp4`)
+    // CLI 直接输出 AVI 视频文件，之后我们会用 ffmpeg 转换为 MP4
+    const outputAviPath = join(outputsDir, `video_${timestamp}.avi`)
+    const outputMp4Path = join(outputsDir, `video_${timestamp}.mp4`)
     const outputMetadataPath = join(outputsDir, `video_${timestamp}.json`)
 
     // 构建命令行参数
@@ -1589,6 +1821,11 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
       '--diffusion-model', sdModelPath,
       '--prompt', prompt,
     ]
+
+    // 如果是图片生成视频模式，添加初始图片
+    if (mode === 'image2video' && initImage) {
+      args.push('-i', initImage)
+    }
     
     // 添加 VAE 和 文本编码器（T5/LLM）模型支持
     if (groupId) {
@@ -1614,11 +1851,16 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
     args.push('--negative-prompt', finalNegativePrompt)
 
     // CLI 直接输出 AVI 视频文件
-    args.push('--output', outputVideoPath)
+    args.push('--output', outputAviPath)
 
     // 如果存在高噪声模型，则启用 --high-noise-diffusion-model
     if (highNoiseModelPath) {
       args.push('--high-noise-diffusion-model', highNoiseModelPath)
+    }
+
+    // 如果存在 CLIP Vision 模型，则启用 --clip_vision
+    if (clipVisionModelPath) {
+      args.push('--clip_vision', clipVisionModelPath)
     }
 
     // 视频帧数，对应示例命令中的 --video-frames
@@ -1626,35 +1868,48 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
       args.push('--video-frames', frames.toString())
     }
 
+    // Flow Shift 参数 (Wan2.2 特有)
+    if (flowShift !== undefined) {
+      args.push('--flow-shift', flowShift.toString())
+    }
+
     // 添加高级参数
     if (steps !== 20) {
       args.push('--steps', steps.toString())
-      // 高噪声路径的步数：先与主路径保持一致
-      if (highNoiseModelPath) {
-        args.push('--high-noise-steps', steps.toString())
-      }
     }
+    
+    // 高噪声路径的步数
+    if (highNoiseModelPath) {
+      const finalHighNoiseSteps = highNoiseSteps || steps
+      args.push('--high-noise-steps', finalHighNoiseSteps.toString())
+    }
+
     if (width !== 512) {
       args.push('--width', width.toString())
     }
     if (height !== 512) {
       args.push('--height', height.toString())
     }
+    
     if (Math.abs(cfgScale - 7.0) > 0.0001) {
       args.push('--cfg-scale', cfgScale.toString())
-      // 高噪声路径的 CFG scale：默认与主路径一致
-      if (highNoiseModelPath) {
-        args.push('--high-noise-cfg-scale', cfgScale.toString())
-      }
+    }
+
+    // 高噪声路径的 CFG scale
+    if (highNoiseModelPath) {
+      const finalHighNoiseCfgScale = highNoiseCfgScale || cfgScale
+      args.push('--high-noise-cfg-scale', finalHighNoiseCfgScale.toString())
     }
 
     if (samplingMethod && typeof samplingMethod === 'string' && samplingMethod.trim() !== '') {
       const method = samplingMethod.trim()
       args.push('--sampling-method', method)
-      // 高噪声路径的采样方法：默认与主路径一致
-      if (highNoiseModelPath) {
-        args.push('--high-noise-sampling-method', method)
-      }
+    }
+
+    // 高噪声路径的采样方法
+    if (highNoiseModelPath) {
+      const finalHighNoiseMethod = highNoiseSamplingMethod || samplingMethod || 'euler'
+      args.push('--high-noise-sampling-method', finalHighNoiseMethod)
     }
 
     if (scheduler && typeof scheduler === 'string' && scheduler.trim() !== '') {
@@ -1721,10 +1976,6 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
     if (vaeTiling === true) {
       args.push('--vae-tiling')
     }
-
-    // Wan 视频模型常用 flow-shift，可设置为一个合理默认值
-    const FLOW_SHIFT_DEFAULT = 3.0
-    args.push('--flow-shift', FLOW_SHIFT_DEFAULT.toString())
 
     console.log(`[Generate Video] Starting video generation: ${sdExePath}`)
     console.log(`[Generate Video] Command line arguments: ${args.join(' ')}`)
@@ -1876,7 +2127,6 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
 
         if (code === 0) {
           // 生成成功
-          // CLI 直接输出 AVI 视频文件
           try {
             const endTime = Date.now()
             const duration = endTime - startTime
@@ -1896,9 +2146,43 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
             }
 
             // 检查视频文件是否存在
-            if (!existsSync(outputVideoPath)) {
+            if (!existsSync(outputAviPath)) {
               safeReject(new Error('生成完成但未找到输出视频文件'))
               return
+            }
+
+            // 转换 AVI 到 MP4
+            try {
+              event.sender.send('generate-video:progress', { progress: '正在转换视频格式 (AVI -> MP4)...' })
+              const ffmpegPath = getFFmpegPath()
+              if (existsSync(ffmpegPath)) {
+                // 使用 ffmpeg 转换，libx264 编码，yuv420p 像素格式以确保浏览器兼容性
+                await execa(ffmpegPath, [
+                  '-i', outputAviPath,
+                  '-c:v', 'libx264',
+                  '-pix_fmt', 'yuv420p',
+                  '-y',
+                  outputMp4Path
+                ])
+                console.log(`[Generate Video] FFmpeg conversion completed: ${outputMp4Path}`)
+                
+                // 转换成功后删除原始 AVI 文件
+                await fs.unlink(outputAviPath).catch(err => console.warn(`[Generate Video] Failed to delete AVI: ${err.message}`))
+              } else {
+                console.warn(`[Generate Video] FFmpeg not found at ${ffmpegPath}, skipping conversion.`)
+                // 如果没有 ffmpeg，我们只能报错，因为用户明确要求转换
+                throw new Error(`未找到 FFmpeg 引擎: ${ffmpegPath}`)
+              }
+            } catch (convError) {
+              console.error('[Generate Video] FFmpeg conversion failed:', convError)
+              safeReject(new Error(`视频转换失败: ${convError instanceof Error ? convError.message : String(convError)}`))
+              return
+            }
+
+            // 自动删除可能存在的预览 AVI 文件
+            const previewAviPath = join(outputsDir, `preview_video_${timestamp}.avi`)
+            if (existsSync(previewAviPath)) {
+              await fs.unlink(previewAviPath).catch(() => {})
             }
 
             const durationSeconds = (duration / 1000).toFixed(2)
@@ -1947,8 +2231,8 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
 
             await fs.writeFile(outputMetadataPath, JSON.stringify(metadata, null, 2), 'utf-8')
 
-            // 发送完成消息（使用 file:// 协议 URL）
-            const videoFileUrl = `file:///${outputVideoPath.replace(/\\/g, '/')}`
+            // 发送完成消息（使用 media:/// 协议 URL）
+            const videoFileUrl = `media:///${outputMp4Path.replace(/\\/g, '/')}`
             event.sender.send('generate-video:progress', {
               progress: `生成完成（耗时: ${durationSeconds}秒）`,
               video: videoFileUrl,
@@ -1957,7 +2241,7 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
             safeResolve({
               success: true,
               video: videoFileUrl,
-              videoPath: outputVideoPath,
+              videoPath: outputMp4Path,
               duration,
             })
           } catch (error) {
@@ -2323,7 +2607,51 @@ ipcMain.handle('app:get-version', async () => {
   return app.getVersion()
 })
 
+// IPC 处理程序：阿里通义 API 调用
+ipcMain.handle('aliyun-api:call', async (_, { method, url, headers, body }) => {
+  try {
+    const response = await net.fetch(url, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    })
+    
+    const data = await response.json()
+    return {
+      status: response.status,
+      statusText: response.statusText,
+      data,
+    }
+  } catch (error) {
+    console.error('Aliyun API call failed:', error)
+    return {
+      status: 500,
+      statusText: 'Internal Server Error',
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+})
+
 app.whenReady().then(async () => {
+  // 注册 media 协议以允许加载本地资源
+  protocol.handle('media', (request) => {
+    let filePath = decodeURIComponent(request.url.slice('media://'.length))
+    
+    // 处理 Windows 路径
+    if (process.platform === 'win32') {
+      // 如果路径以 / 开头（例如 /C:/...），移除开头的 /
+      if (filePath.startsWith('/')) {
+        filePath = filePath.slice(1)
+      }
+      // 如果路径不包含 : 但第一个部分看起来像盘符（例如 C/Users/...），补回 :
+      if (!filePath.includes(':') && /^[a-zA-Z](\/|\\)/.test(filePath)) {
+        filePath = filePath[0] + ':' + filePath.slice(1)
+      }
+    }
+    
+    return net.fetch(pathToFileURL(filePath).toString())
+  })
+
   // 初始化默认 models 文件夹
   await initDefaultModelsFolder()
   // 初始化默认 SD.cpp 引擎文件夹
