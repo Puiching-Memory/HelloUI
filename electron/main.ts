@@ -660,7 +660,7 @@ ipcMain.handle('sdcpp:delete-file', async (_, filePath: string) => {
 
 // 获取模型组配置文件的路径
 function getModelGroupsFilePath(): string {
-  const modelsFolder = getDefaultModelsFolder()
+  const modelsFolder = weightsFolderPath || getDefaultModelsFolder()
   return join(modelsFolder, 'model-groups.json')
 }
 
@@ -737,6 +737,7 @@ async function saveModelGroups(groups: ModelGroup[]): Promise<void> {
   // 保存前规范化所有路径，确保只保存相对路径
   const normalizedGroups = groups.map(normalizeModelGroupPaths)
   await fs.writeFile(filePath, JSON.stringify(normalizedGroups, null, 2), 'utf-8')
+  console.log(`[Main] Saved ${normalizedGroups.length} model groups to ${filePath}`)
 }
 
 // IPC 处理程序：获取所有模型组
@@ -759,7 +760,7 @@ ipcMain.handle('model-groups:create', async (_, group: Omit<ModelGroup, 'id' | '
 })
 
 // IPC 处理程序：更新模型组
-ipcMain.handle('model-groups:update', async (_, id: string, updates: Partial<Omit<ModelGroup, 'id' | 'createdAt'>>) => {
+ipcMain.handle('model-groups:update', async (_, { id, updates }: { id: string, updates: Partial<Omit<ModelGroup, 'id' | 'createdAt'>> }) => {
   const groups = await loadModelGroups()
   const index = groups.findIndex(g => g.id === id)
   if (index === -1) {
@@ -815,14 +816,43 @@ ipcMain.handle('model-groups:update', async (_, id: string, updates: Partial<Omi
 })
 
 // IPC 处理程序：删除模型组
-ipcMain.handle('model-groups:delete', async (_, id: string) => {
+ipcMain.handle('model-groups:delete', async (_, { id, deleteFiles }: { id: string, deleteFiles?: boolean }) => {
+  console.log(`[Main] Deleting model group: ${id}, deleteFiles: ${deleteFiles}`)
   const groups = await loadModelGroups()
   const index = groups.findIndex(g => g.id === id)
   if (index === -1) {
+    console.error(`[Main] Model group not found: ${id}`)
     throw new Error(`模型组不存在: ${id}`)
   }
+  const deletedGroup = groups[index]
+
+  if (deleteFiles) {
+    try {
+      // 尝试通过 sdModel 确定子文件夹
+      const modelPath = deletedGroup.sdModel
+      if (modelPath) {
+        const modelsDir = weightsFolderPath || getDefaultModelsFolder()
+        const absoluteModelPath = resolve(modelsDir, modelPath)
+        const groupDir = dirname(absoluteModelPath)
+        
+        // 检查是否包含 config.json，确保这是一个模型组文件夹，避免误删
+        const configJsonPath = join(groupDir, 'config.json')
+        if (existsSync(configJsonPath)) {
+          console.log(`[Main] Deleting model group folder: ${groupDir}`)
+          await fs.rm(groupDir, { recursive: true, force: true })
+        } else {
+          console.warn(`[Main] Folder ${groupDir} does not contain config.json, skipping folder deletion to be safe`)
+        }
+      }
+    } catch (err) {
+      console.error('[Main] Failed to delete model group folder:', err)
+      // 继续删除配置，即使文件夹删除失败
+    }
+  }
+
   groups.splice(index, 1)
   await saveModelGroups(groups)
+  console.log(`[Main] Successfully deleted model group: ${deletedGroup.name} (${id})`)
   return true
 })
 
