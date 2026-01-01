@@ -53,6 +53,25 @@ export default defineConfig({
           },
         },
       },
+      {
+        entry: 'electron/worker.ts',
+        vite: {
+          build: {
+            sourcemap: true,
+            minify: process.env.NODE_ENV === 'production',
+            outDir: 'dist-electron',
+            rollupOptions: {
+              external: ['electron'],
+              output: [
+                {
+                  format: 'cjs',
+                  entryFileNames: 'worker.js',
+                },
+              ],
+            },
+          },
+        },
+      },
     ]),
     // Use Node.js API in the Renderer-process
     renderer(),

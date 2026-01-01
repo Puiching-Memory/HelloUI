@@ -53,7 +53,8 @@
     },
     "files": [
       "dist/**/*",
-      "dist-electron/**/*"
+      "dist-electron/**/*",
+      "worker.html"
     ],
     "win": {
       "target": "nsis"

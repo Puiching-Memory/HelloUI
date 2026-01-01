@@ -426,7 +426,7 @@ interface ModelGroup {
   updatedAt: number;
 }
 
-type DeviceType = 'cpu' | 'vulkan' | 'cuda';
+type DeviceType = 'cpu' | 'vulkan' | 'cuda' | 'webgpu';
 
 // 默认负面提示词（针对视频生成优化）
 const DEFAULT_NEGATIVE_PROMPT = '色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走';
@@ -817,6 +817,8 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
         return 'Vulkan';
       case 'cuda':
         return 'CUDA';
+      case 'webgpu':
+        return 'WebGPU';
       default:
         return device;
     }
@@ -1264,7 +1266,7 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
               </Text>
             </div>
             <div style={{ marginBottom: tokens.spacingVerticalM }}>
-              <Field label="推理引擎" hint="选择主要的推理引擎（CUDA/Vulkan/CPU）">
+              <Field label="推理引擎" hint="选择主要的推理引擎（CUDA/Vulkan/CPU/WebGPU）">
                 <Dropdown
                   value={getDeviceLabel(deviceType)}
                   selectedOptions={[deviceType]}
@@ -1277,6 +1279,7 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
                   <Option value="cpu">CPU</Option>
                   <Option value="vulkan">Vulkan</Option>
                   <Option value="cuda">CUDA</Option>
+                  <Option value="webgpu">WebGPU</Option>
                 </Dropdown>
               </Field>
             </div>

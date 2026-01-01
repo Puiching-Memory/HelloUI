@@ -5,7 +5,7 @@
 /**
  * 设备类型
  */
-export type DeviceType = 'cpu' | 'vulkan' | 'cuda';
+export type DeviceType = 'cpu' | 'vulkan' | 'cuda' | 'webgpu';
 
 /**
  * 权重文件接口

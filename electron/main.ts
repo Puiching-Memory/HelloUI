@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, protocol, net } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, protocol, net, utilityProcess } from 'electron'
 import { join, basename, extname, resolve, dirname, isAbsolute, relative, sep } from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
 import { promises as fs } from 'fs'
@@ -13,6 +13,13 @@ import { execa } from 'execa'
 import { AsyncOperationGuard } from './utils/AsyncOperationGuard.js'
 import { ResourceManager } from './utils/ResourceManager.js'
 import type { DeviceType, ModelGroup, GenerateImageParams, GeneratedImageInfo } from './types/index.js'
+
+// 启用 WebGPU 相关命令行开关
+app.commandLine.appendSwitch('enable-webgpu')
+app.commandLine.appendSwitch('enable-unsafe-webgpu')
+app.commandLine.appendSwitch('enable-features', 'WebGPU')
+app.commandLine.appendSwitch('ignore-gpu-blocklist')
+app.commandLine.appendSwitch('enable-webgpu-developer-features')
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
@@ -31,6 +38,8 @@ process.env.VITE_PUBLIC = app.isPackaged
   : join(process.env.DIST, '../public')
 
 let win: BrowserWindow | null = null
+let workerWin: BrowserWindow | null = null
+
 // 使用绝对路径确保 preload 脚本正确加载
 const preload = resolve(__dirname, 'preload.js')
 const url = process.env.VITE_DEV_SERVER_URL
@@ -57,6 +66,34 @@ function createWindow() {
     const distPath = process.env.DIST || join(__dirname, '../dist')
     win.loadFile(join(distPath, 'index.html'))
   }
+}
+
+function createWorkerWindow() {
+  workerWin = new BrowserWindow({
+    show: false,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+      webSecurity: false, // 允许加载本地文件
+      experimentalFeatures: true, // 启用实验性功能
+    },
+  })
+
+  // 将 worker 窗口的控制台输出转发到主进程控制台
+  workerWin.webContents.on('console-message', (event) => {
+    console.log(`[Worker Console] ${event.message}`)
+  })
+
+  const workerHtmlPath = join(__dirname, '../worker.html')
+  if (existsSync(workerHtmlPath)) {
+    console.log(`[Main] Loading worker from: ${workerHtmlPath}`)
+    workerWin.loadFile(workerHtmlPath)
+  } else {
+    console.error(`[Main] Worker HTML not found at: ${workerHtmlPath}`)
+  }
+  
+  // 如果需要调试，可以取消注释下面这行
+  // workerWin.webContents.openDevTools({ mode: 'detach' })
 }
 
 app.on('window-all-closed', () => {
@@ -197,7 +234,7 @@ async function initDefaultSDCppFolder(): Promise<string> {
     console.log(`[Main] Created default SD.cpp engine folder: ${defaultFolder}`)
   }
   // 创建设备子文件夹
-  const deviceFolders = ['cpu', 'vulkan', 'cuda']
+  const deviceFolders = ['cpu', 'vulkan', 'cuda', 'webgpu']
   for (const device of deviceFolders) {
     const deviceFolder = join(defaultFolder, device)
     if (!existsSync(deviceFolder)) {
@@ -533,7 +570,7 @@ ipcMain.handle('sdcpp:get-folder', async () => {
 })
 
 // IPC 处理程序：设置设备类型
-ipcMain.handle('sdcpp:set-device', async (_, device: 'cpu' | 'vulkan' | 'cuda') => {
+ipcMain.handle('sdcpp:set-device', async (_, device: DeviceType) => {
   sdcppDeviceType = device
   return true
 })
@@ -546,40 +583,110 @@ ipcMain.handle('sdcpp:get-device', async () => {
 // IPC 处理程序：列出文件夹中的文件（根据设备类型）
 // 获取可执行文件的版本号
 async function getExecutableVersion(exePath: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    // sd-cli.exe 已经内置 UTF-8 支持（PR 1101），无需手动设置代码页
-    const command = `"${exePath}" --version`
-    exec(command, { timeout: 5000 }, (error, stdout, stderr) => {
-      if (error) {
-        // 如果命令执行失败，返回 null
-        resolve(null)
-        return
+  const isJs = exePath.endsWith('.js')
+  const cwd = dirname(exePath)
+  
+  try {
+    let output = ''
+    if (isJs) {
+      // 对于 WebGPU 版本，使用 worker 窗口获取版本号以获得真实的 WebGPU 环境
+      if (!workerWin) {
+        createWorkerWindow()
       }
       
-      // 解析版本信息
-      const output = (stdout || stderr || '').trim()
-      if (output) {
-        // 提取版本信息，例如：stable-diffusion.cpp version unknown, commit bda7fab
-        // 尝试提取 commit hash 或版本号
-        const commitMatch = output.match(/commit\s+([a-f0-9]+)/i)
-        const versionMatch = output.match(/version\s+([^\s,]+)/i)
+      output = await new Promise<string>((resolve) => {
+        const taskId = `ver_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+        let version = ''
+        let isFinished = false
         
-        if (versionMatch && versionMatch[1] !== 'unknown') {
-          resolve(versionMatch[1])
-        } else if (commitMatch) {
-          resolve(`commit ${commitMatch[1]}`)
-        } else {
-          // 如果无法解析，返回原始输出的前100个字符
-          resolve(output.length > 100 ? output.substring(0, 100) + '...' : output)
+        const onStdout = (_: any, text: string) => {
+          console.log(`[Main] Received version stdout for ${taskId}: ${text}`)
+          version += text
         }
+
+        const onStderr = (_: any, text: string) => {
+          console.log(`[Main] Received version stderr for ${taskId}: ${text}`)
+          // 有时版本信息会打印到 stderr
+          version += text
+        }
+        
+        const onExit = (_: any, code: number) => {
+          console.log(`[Main] Version process exited for ${taskId} with code ${code}`)
+          finish()
+        }
+
+        const onError = (_: any, msg: string) => {
+          console.error(`[Main] Version check error for ${taskId}: ${msg}`)
+          finish()
+        }
+        
+        const finish = () => {
+          if (isFinished) return
+          isFinished = true
+          cleanup()
+          // 延迟一小会儿再 reload，确保消息处理完
+          setTimeout(() => {
+            if (workerWin && !workerWin.isDestroyed()) {
+              console.log(`[Main] Reloading worker window after version check ${taskId}`)
+              workerWin.webContents.reload()
+            }
+          }, 100)
+          resolve(version.trim())
+        }
+        
+        const cleanup = () => {
+          ipcMain.removeListener(`sdcpp:stdout:${taskId}`, onStdout)
+          ipcMain.removeListener(`sdcpp:stderr:${taskId}`, onStderr)
+          ipcMain.removeListener(`sdcpp:exit:${taskId}`, onExit)
+          ipcMain.removeListener(`sdcpp:error:${taskId}`, onError)
+        }
+        
+        ipcMain.on(`sdcpp:stdout:${taskId}`, onStdout)
+        ipcMain.on(`sdcpp:stderr:${taskId}`, onStderr)
+        ipcMain.on(`sdcpp:exit:${taskId}`, onExit)
+        ipcMain.on(`sdcpp:error:${taskId}`, onError)
+        
+        console.log(`[Main] Requesting version from worker, taskId: ${taskId}`)
+        workerWin!.webContents.send('sdcpp:run', { exePath, args: ['--version'], id: taskId })
+        
+        // 设置超时
+        setTimeout(() => {
+          if (!isFinished) {
+            console.log(`[Main] Version detection timeout for ${taskId}, current output: ${version.substring(0, 50)}...`)
+            finish()
+          }
+        }, 8000)
+      })
+    } else {
+      // 对于原生可执行文件
+      const { stdout, stderr } = await execa(exePath, ['--version'], {
+        cwd,
+        timeout: 5000
+      })
+      output = (stdout || stderr || '').trim()
+    }
+
+    if (output) {
+      // 提取版本信息，例如：stable-diffusion.cpp version unknown, commit bda7fab
+      const commitMatch = output.match(/commit\s+([a-f0-9]+)/i)
+      const versionMatch = output.match(/version\s+([^\s,]+)/i)
+      
+      if (versionMatch && versionMatch[1] !== 'unknown') {
+        return versionMatch[1]
+      } else if (commitMatch) {
+        return `commit ${commitMatch[1]}`
       } else {
-        resolve(null)
+        // 如果无法解析，返回原始输出的前100个字符
+        return output.length > 100 ? output.substring(0, 100) + '...' : output
       }
-    })
-  })
+    }
+  } catch (error: any) {
+    console.error(`[Main] Failed to get engine version for ${exePath}:`, error.message)
+  }
+  return null
 }
 
-ipcMain.handle('sdcpp:list-files', async (_, folder: string, deviceType: 'cpu' | 'vulkan' | 'cuda') => {
+ipcMain.handle('sdcpp:list-files', async (_, folder: string, deviceType: DeviceType) => {
   const deviceFolder = join(folder, deviceType)
   if (!existsSync(deviceFolder)) {
     return { files: [], version: null }
@@ -589,11 +696,11 @@ ipcMain.handle('sdcpp:list-files', async (_, folder: string, deviceType: 'cpu' |
   const files: Array<{ name: string; size: number; path: string; modified: number }> = []
   // 目前仅支持 Windows 平台
   // TODO: 未来如需支持其他平台，可在此处添加对应的文件扩展名（如 .so 用于 Linux，.dylib 用于 macOS）
-  const engineExtensions = ['.exe', '.dll', '.bin', '.txt']
+  const engineExtensions = ['.exe', '.dll', '.bin', '.txt', '.js', '.wasm']
   
-  // 查找 sd-cli.exe 以获取引擎版本号
+  // 查找 sd-cli.exe 或 sd-cli.js 以获取引擎版本号
   let engineVersion: string | null = null
-  const executableName = 'sd-cli.exe'
+  const executableName = deviceType === 'webgpu' ? 'sd-cli.js' : 'sd-cli.exe'
   const executablePath = join(deviceFolder, executableName)
   
   // 收集所有文件信息
@@ -1054,7 +1161,7 @@ function getSDCppExecutablePath(deviceType: DeviceType): string {
   const deviceFolder = join(engineFolder, deviceType)
   // 目前仅支持 Windows 平台
   // TODO: 未来如需支持其他平台，可在此处添加平台检测逻辑
-  const executableName = 'sd-cli.exe'
+  const executableName = deviceType === 'webgpu' ? 'sd-cli.js' : 'sd-cli.exe'
   return join(deviceFolder, executableName)
 }
 
@@ -1071,657 +1178,290 @@ ipcMain.handle('generate:cancel', async () => {
 ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
   try {
     const { 
-      groupId, 
-      deviceType, 
-      prompt, 
-      negativePrompt = '',
-      steps = 20,
-      width = 512,
-      height = 512,
-      cfgScale = 7.0,
-      samplingMethod,
-      scheduler,
-      seed,
-      batchCount = 1,
-      threads,
-      preview,
-      previewInterval = 1,
-      verbose = false,
-      color = false,
-      offloadToCpu = false,
-      diffusionFa = false,
-      controlNetCpu = false,
-      clipOnCpu = false,
-      vaeOnCpu = false,
-      diffusionConvDirect = false,
-      vaeConvDirect = false,
-      vaeTiling = false,
-      inputImage,
-      flowShift,
-      qwenImageZeroCondT
+      groupId, deviceType, prompt, negativePrompt = '',
+      steps = 20, width = 512, height = 512, cfgScale = 7.0,
+      samplingMethod, scheduler, seed, batchCount = 1, threads,
+      preview, previewInterval = 1, verbose = false, color = false,
+      offloadToCpu = false, diffusionFa = false, controlNetCpu = false,
+      clipOnCpu = false, vaeOnCpu = false, diffusionConvDirect = false,
+      vaeConvDirect = false, vaeTiling = false, inputImage,
+      flowShift, qwenImageZeroCondT
     } = params
 
-    // 确定使用的模型路径
     let sdModelPath: string | undefined
-
     if (groupId) {
-      // 使用模型组
       const groups = await loadModelGroups()
       const group = groups.find(g => g.id === groupId)
-      if (!group) {
-        throw new Error(`模型组不存在: ${groupId}`)
-      }
-      if (!group.sdModel) {
-        throw new Error('模型组中未配置SD模型')
-      }
-      // 将相对路径转换为绝对路径
-      const resolvedSdModelPath = resolveModelPath(group.sdModel)
-      if (!resolvedSdModelPath) {
-        throw new Error('无法解析SD模型路径')
-      }
-      sdModelPath = resolvedSdModelPath
-      
-      // 检查模型文件是否存在
-      if (!existsSync(sdModelPath)) {
-        throw new Error(`SD模型文件不存在: ${sdModelPath}`)
-      }
+      if (!group || !group.sdModel) throw new Error('模型组配置错误')
+      sdModelPath = resolveModelPath(group.sdModel)
+      if (!sdModelPath || !existsSync(sdModelPath)) throw new Error(`模型文件不存在: ${sdModelPath}`)
     } else {
       throw new Error('必须提供模型组ID')
     }
 
-    // 检测是否为 Qwen Image Edit 2511 模型
     const isQwenEdit2511 = sdModelPath.toLowerCase().includes('qwen-image-edit-2511')
-
-    // 获取 SD.cpp 可执行文件路径
     const sdExePath = getSDCppExecutablePath(deviceType)
-    if (!existsSync(sdExePath)) {
-      throw new Error(`SD.cpp 引擎文件不存在: ${sdExePath}\n请确保已正确安装 ${deviceType.toUpperCase()} 版本的 SD.cpp 引擎`)
-    }
+    if (!existsSync(sdExePath)) throw new Error(`引擎文件不存在: ${sdExePath}`)
 
-    // 生成输出图片路径（保存在运行路径下的 outputs 目录）
     const outputsDir = getDefaultOutputsFolder()
-    if (!existsSync(outputsDir)) {
-      await fs.mkdir(outputsDir, { recursive: true })
-    }
+    if (!existsSync(outputsDir)) await fs.mkdir(outputsDir, { recursive: true })
 
     const timestamp = Date.now()
     const outputImagePath = join(outputsDir, `generated_${timestamp}.png`)
     const outputMetadataPath = join(outputsDir, `generated_${timestamp}.json`)
     const previewImagePath = join(outputsDir, `preview_${timestamp}.png`)
-    // 不再需要日志文件，直接通过 stdout/stderr 捕获输出
 
-    // 构建命令行参数
-    // 根据 sd-cli.exe 的参数要求：
-    // 必需参数：model_path/diffusion_model (位置参数) 或 --diffusion-model <string>
-    // 使用 --diffusion-model 参数指定扩散模型路径
-    const args: string[] = [
-      '--diffusion-model', sdModelPath,
-      '--prompt', prompt,
-    ]
+    const args: string[] = ['--diffusion-model', sdModelPath, '--prompt', prompt]
     
-    // 添加 VAE 和 LLM 模型支持
     if (groupId) {
       const groups = await loadModelGroups()
       const group = groups.find(g => g.id === groupId)
-      
-      // 根据任务类型添加 mode 参数
       const taskType = group?.taskType
-      if (taskType === 'upscale') {
-        args.push('-M', 'upscale')
-      } else {
-        // generate 和 edit 都使用 img_gen
-        args.push('-M', 'img_gen')
-      }
-      
+      args.push('-M', taskType === 'upscale' ? 'upscale' : 'img_gen')
       if (group?.vaeModel) {
-        // 将相对路径转换为绝对路径
-        const vaeModelPath = resolveModelPath(group.vaeModel)
-        if (vaeModelPath && existsSync(vaeModelPath)) {
-          args.push('--vae', vaeModelPath)
-        }
+        const p = resolveModelPath(group.vaeModel)
+        if (p && existsSync(p)) args.push('--vae', p)
       }
-      
-      // 根据任务类型选择不同的文本编码器模型
       if (taskType === 'edit' && !isQwenEdit2511) {
-        // 普通图片编辑任务：使用 CLIP L 和 T5XXL 模型
         if (group?.clipLModel) {
-          const clipLModelPath = resolveModelPath(group.clipLModel)
-          if (clipLModelPath && existsSync(clipLModelPath)) {
-            args.push('--clip_l', clipLModelPath)
-            console.log(`[Generate] CLIP L model: ${clipLModelPath}`)
-          }
+          const p = resolveModelPath(group.clipLModel)
+          if (p && existsSync(p)) args.push('--clip_l', p)
         }
         if (group?.t5xxlModel) {
-          const t5xxlModelPath = resolveModelPath(group.t5xxlModel)
-          if (t5xxlModelPath && existsSync(t5xxlModelPath)) {
-            args.push('--t5xxl', t5xxlModelPath)
-            console.log(`[Generate] T5XXL model: ${t5xxlModelPath}`)
-          }
+          const p = resolveModelPath(group.t5xxlModel)
+          if (p && existsSync(p)) args.push('--t5xxl', p)
         }
-      } else {
-        // 其他任务类型或 Qwen 2511：使用 LLM 文本编码器支持
-        if (group?.llmModel) {
-          // 将相对路径转换为绝对路径
-          const llmModelPath = resolveModelPath(group.llmModel)
-          if (llmModelPath && existsSync(llmModelPath)) {
-            args.push('--llm', llmModelPath)
-          }
-        }
+      } else if (group?.llmModel) {
+        const p = resolveModelPath(group.llmModel)
+        if (p && existsSync(p)) args.push('--llm', p)
       }
     }
 
-    if (negativePrompt) {
-      args.push('--negative-prompt', negativePrompt)
-    }
-
-    // 添加输入图片（用于图片编辑和上采样）
+    if (negativePrompt) args.push('--negative-prompt', negativePrompt)
     if (inputImage) {
-      const inputImagePath = resolve(inputImage)
-      if (existsSync(inputImagePath)) {
-        if (isQwenEdit2511) {
-          // Qwen 2511 使用 -r 参数作为参考图片
-          args.push('-r', inputImagePath)
-          console.log(`[Generate] Qwen 2511 Reference image: ${inputImagePath}`)
-        } else {
-          // 统一使用 --init-img 参数
-          args.push('--init-img', inputImagePath)
-          console.log(`[Generate] Input image: ${inputImagePath}`)
-        }
-      } else {
-        throw new Error(`输入图片文件不存在: ${inputImagePath}`)
-      }
+      const p = resolve(inputImage)
+      if (existsSync(p)) args.push(isQwenEdit2511 ? '-r' : '--init-img', p)
     }
-
-    // Qwen Image Edit 2511 特有参数
     if (isQwenEdit2511) {
-      // 必须启用 --qwen-image-zero-cond-t
       args.push('--qwen-image-zero-cond-t')
-      console.log(`[Generate] Qwen 2511: Enabled --qwen-image-zero-cond-t`)
-      
-      // 默认使用 flow-shift 3
-      const finalFlowShift = flowShift !== undefined ? flowShift : 3
-      args.push('--flow-shift', finalFlowShift.toString())
-      console.log(`[Generate] Qwen 2511: Flow shift set to ${finalFlowShift}`)
+      args.push('--flow-shift', (flowShift !== undefined ? flowShift : 3).toString())
     }
 
     args.push('--output', outputImagePath)
-
-    // 添加高级参数
-    if (steps !== 20) {
-      args.push('--steps', steps.toString())
-    }
-    if (width !== 512) {
-      args.push('--width', width.toString())
-    }
-    if (height !== 512) {
-      args.push('--height', height.toString())
-    }
-    // 使用浮点数比较而非严格相等，避免精度问题
-    if (Math.abs(cfgScale - 7.0) > 0.0001) {
-      args.push('--cfg-scale', cfgScale.toString())
-    }
-
-    // 添加采样方法（如果指定了）
-    if (samplingMethod && typeof samplingMethod === 'string' && samplingMethod.trim() !== '') {
-      args.push('--sampling-method', samplingMethod.trim())
-      console.log(`[Generate] Sampling method: ${samplingMethod}`)
-    }
-
-    // 添加调度器（如果指定了）
-    if (scheduler && typeof scheduler === 'string' && scheduler.trim() !== '') {
-      args.push('--scheduler', scheduler.trim())
-      console.log(`[Generate] Scheduler: ${scheduler}`)
-    }
-
-    // 添加种子（如果指定了且 >= 0）
-    if (seed !== undefined && seed >= 0) {
-      args.push('--seed', seed.toString())
-      console.log(`[Generate] Seed: ${seed}`)
-    }
-
-    // 添加批次数量（如果 > 1）
-    if (batchCount !== undefined && batchCount > 1) {
-      args.push('--batch-count', batchCount.toString())
-      console.log(`[Generate] Batch count: ${batchCount}`)
-    }
-
-    // 添加线程数（如果指定了且 > 0）
-    if (threads !== undefined && threads > 0) {
+    if (steps !== 20) args.push('--steps', steps.toString())
+    if (width !== 512) args.push('--width', width.toString())
+    if (height !== 512) args.push('--height', height.toString())
+    if (Math.abs(cfgScale - 7.0) > 0.0001) args.push('--cfg-scale', cfgScale.toString())
+    if (samplingMethod?.trim()) args.push('--sampling-method', samplingMethod.trim())
+    if (scheduler?.trim()) args.push('--scheduler', scheduler.trim())
+    if (seed !== undefined && seed >= 0) args.push('--seed', seed.toString())
+    if (batchCount > 1) args.push('--batch-count', batchCount.toString())
+    
+    if (deviceType === 'webgpu') {
+      // WebGPU 模式下限制线程数，减少 WASM 堆压力
+      const t = (threads !== undefined && threads > 0) ? Math.min(threads, 4) : 4
+      args.push('--threads', t.toString())
+    } else if (threads !== undefined && threads > 0) {
       args.push('--threads', threads.toString())
-      console.log(`[Generate] Threads: ${threads}`)
     }
 
-    // 添加预览选项（如果指定了且不是 'none'）
     if (preview && preview !== 'none' && preview.trim() !== '') {
       args.push('--preview', preview.trim())
-      // 使用绝对路径，确保 SD.cpp 能找到预览文件
-      const absolutePreviewPath: string = resolve(previewImagePath)
-      args.push('--preview-path', absolutePreviewPath)
-      console.log(`[Generate] Preview method: ${preview}`)
-      console.log(`[Generate] Preview path (absolute): ${absolutePreviewPath}`)
-      // 只有当预览间隔 > 1 时才添加参数（1 是默认值）
-      if (previewInterval !== undefined && previewInterval > 1) {
-        args.push('--preview-interval', previewInterval.toString())
-        console.log(`[Generate] Preview interval: ${previewInterval}`)
-      }
+      args.push('--preview-path', resolve(previewImagePath))
+      if (previewInterval > 1) args.push('--preview-interval', previewInterval.toString())
     }
 
-    // 添加详细输出（如果启用）
-    if (verbose === true) {
-      args.push('--verbose')
-      console.log(`[Generate] Verbose: enabled`)
-    }
+    if (verbose) args.push('--verbose')
+    if (color) args.push('--color')
+    if (offloadToCpu) args.push('--offload-to-cpu')
+    if (diffusionFa) args.push('--diffusion-fa')
+    if (controlNetCpu) args.push('--control-net-cpu')
+    if (clipOnCpu) args.push('--clip-on-cpu')
+    if (vaeOnCpu) args.push('--vae-on-cpu')
+    if (diffusionConvDirect) args.push('--diffusion-conv-direct')
+    if (vaeConvDirect) args.push('--vae-conv-direct')
+    if (vaeTiling) args.push('--vae-tiling')
 
-    // 添加彩色日志（如果启用）
-    if (color === true) {
-      args.push('--color')
-      console.log(`[Generate] Color: enabled`)
-    }
-
-    // 添加卸载到CPU（如果启用）
-    if (offloadToCpu === true) {
-      args.push('--offload-to-cpu')
-      console.log(`[Generate] Offload to CPU: enabled`)
-    }
-
-    // 添加 diffusion-fa 选项（如果启用）
-    if (diffusionFa === true) {
-      args.push('--diffusion-fa')
-      console.log(`[Generate] Diffusion FA: enabled`)
-    }
-
-    // 添加 control-net-cpu 选项（如果启用）
-    if (controlNetCpu === true) {
-      args.push('--control-net-cpu')
-      console.log(`[Generate] ControlNet CPU: enabled`)
-    }
-
-    // 添加 clip-on-cpu 选项（如果启用）
-    if (clipOnCpu === true) {
-      args.push('--clip-on-cpu')
-      console.log(`[Generate] CLIP on CPU: enabled`)
-    }
-
-    // 添加 vae-on-cpu 选项（如果启用）
-    if (vaeOnCpu === true) {
-      args.push('--vae-on-cpu')
-      console.log(`[Generate] VAE on CPU: enabled`)
-    }
-
-    // 添加 diffusion-conv-direct 选项（如果启用）
-    if (diffusionConvDirect === true) {
-      args.push('--diffusion-conv-direct')
-      console.log(`[Generate] Diffusion Conv Direct: enabled`)
-    }
-
-    // 添加 vae-conv-direct 选项（如果启用）
-    if (vaeConvDirect === true) {
-      args.push('--vae-conv-direct')
-      console.log(`[Generate] VAE Conv Direct: enabled`)
-    }
-
-    // 添加 vae-tiling 选项（如果启用）
-    if (vaeTiling === true) {
-      args.push('--vae-tiling')
-      console.log(`[Generate] VAE Tiling: enabled`)
-    }
-
-    console.log(`[Generate] Starting image generation: ${sdExePath}`)
-    console.log(`[Generate] Command line arguments: ${args.join(' ')}`)
-
-    // 记录生成开始时间
+    console.log(`[Generate] Starting image generation (${deviceType}): ${sdExePath}`)
     const startTime = Date.now()
-
-    // 发送进度更新
     event.sender.send('generate:progress', { progress: '正在启动 SD.cpp 引擎...' })
 
     return new Promise((resolvePromise, reject) => {
-      // 使用 execa 库来执行命令，它自动处理参数转义，无需手动转义
-      // execa 会自动转义包含空格、引号等特殊字符的参数，更安全可靠
-      // 现在不再需要输出重定向到文件，可以直接捕获 stdout 和 stderr
-      
-      console.log(`[Generate] Starting image generation: ${sdExePath}`)
-      console.log(`[Generate] Command line arguments: ${args.join(' ')}`)
-      
-      // 使用 execa 执行命令，自动处理参数转义
-      const childProcess = execa(sdExePath, args, {
-        cwd: dirname(sdExePath),
-        // execa 会自动处理参数转义，无需手动转义
-        // 在 Windows 上，execa 会自动使用正确的转义规则
-      })
-
       let stdout = ''
       let stderr = ''
       let isResolved = false
-      let lastPreviewUpdate = 0
-      
-      // 使用资源管理器和异步操作保护器
-      const resourceManager = new ResourceManager()
       const operationGuard = new AsyncOperationGuard()
-
-      // 存储强制终止超时，不通过 resourceManager 管理，避免被过早清理
-      let killTimeout: NodeJS.Timeout | null = null
-
-      // 存储当前生成进程引用
-      currentGenerateProcess = childProcess
-
-      // 直接捕获 stdout 和 stderr（不再需要文件重定向）
-      if (childProcess.stdout) {
-        childProcess.stdout.on('data', (data: Buffer) => {
-          const text = data.toString('utf8')
-          stdout += text
-          
-          if (operationGuard.check() && !event.sender.isDestroyed()) {
-            // 发送输出
-            event.sender.send('generate:cli-output', { type: 'stdout', text })
-            
-            // 进度检测逻辑
-            const progressMatch = text.match(/progress[:\s]+(\d+)%/i)
-            if (progressMatch) {
-              event.sender.send('generate:progress', { progress: `生成中... ${progressMatch[1]}%` })
-            } else if (text.includes('Generating') || text.includes('generating')) {
-              event.sender.send('generate:progress', { progress: '正在生成图片...' })
-            } else if (text.includes('Loading') || text.includes('loading')) {
-              event.sender.send('generate:progress', { progress: '正在加载模型...' })
-            }
-          }
-        })
-      }
-      
-      if (childProcess.stderr) {
-        childProcess.stderr.on('data', (data: Buffer) => {
-          const text = data.toString('utf8')
-          stderr += text
-          
-          if (operationGuard.check() && !event.sender.isDestroyed()) {
-            // 发送错误输出
-            event.sender.send('generate:cli-output', { type: 'stderr', text })
-          }
-        })
-      }
+      const resourceManager = new ResourceManager()
+      let childProcess: any = null
 
       const killProcess = () => {
-        if (childProcess && !childProcess.killed && childProcess.pid) {
-          if (killTimeout) {
-            clearTimeout(killTimeout)
-            killTimeout = null
-          }
-
-          const pid = childProcess.pid
-          console.log(`[Generate] Attempting to kill process tree (PID: ${pid})`)
-          
-          // 在 Windows 上，使用 taskkill 来终止整个进程树（包括所有子进程）
-          // /F = 强制终止，/T = 终止进程树，/PID = 指定进程ID
-          // 这样可以确保 sdcpp 进程也被终止
-          if (process.platform === 'win32') {
-            // 首先尝试通过 PID 终止进程树
-            exec(`taskkill /F /T /PID ${pid}`, (error) => {
-              if (error) {
-                console.warn(`[Generate] Failed to kill process tree by PID: ${error.message}`)
-                // 如果通过 PID 失败，尝试通过进程名称终止 sdcpp
-                // 获取可执行文件名（不包含路径）
-                const exeName = basename(sdExePath)
-                console.log(`[Generate] Attempting to kill process by name: ${exeName}`)
-                exec(`taskkill /F /T /IM ${exeName}`, (nameError) => {
-                  if (nameError) {
-                    console.warn(`[Generate] Failed to kill process by name: ${nameError.message}`)
-                  } else {
-                    console.log(`[Generate] Successfully killed process by name: ${exeName}`)
-                  }
-                  // 无论成功与否，都尝试标准的 kill 方法作为最后手段
-                  try {
-                    childProcess.kill('SIGTERM')
-                  } catch (e) {
-                    console.warn(`[Generate] Failed to send SIGTERM: ${e}`)
-                  }
-                })
-              } else {
-                console.log(`[Generate] Successfully killed process tree (PID: ${pid})`)
-              }
-            })
-          } else {
-            // 非 Windows 平台使用标准方法
-            childProcess.kill('SIGTERM')
-            killTimeout = setTimeout(() => {
-              if (childProcess && !childProcess.killed && childProcess.pid) {
-                childProcess.kill('SIGKILL')
-              }
-              killTimeout = null
-            }, 3000)
-          }
+        if (isResolved) return
+        if (deviceType === 'webgpu') {
+          console.log(`[Generate] Killing WebGPU task by reloading worker window`)
+          workerWin?.webContents.reload()
+          isResolved = true
+          reject(new Error('生成已取消'))
+          return
+        }
+        if (childProcess && childProcess.pid) {
+          if (process.platform === 'win32') exec(`taskkill /F /T /PID ${childProcess.pid}`)
+          else childProcess.kill()
         }
       }
 
-      // 保存 killProcess 函数以便外部调用
       currentGenerateKill = killProcess
 
-      // 统一的清理函数
       const cleanup = () => {
         operationGuard.invalidate()
-        // 清理强制终止超时（如果存在）
-        if (killTimeout) {
-          clearTimeout(killTimeout)
-          killTimeout = null
-        }
         resourceManager.cleanupAll()
-        // 清除当前生成进程引用
         if (currentGenerateProcess === childProcess) {
           currentGenerateProcess = null
           currentGenerateKill = null
         }
       }
 
-      // 清理除 kill timeout 之外的所有资源（用于 safeReject）
-      const cleanupExceptKillTimeout = () => {
-        operationGuard.invalidate()
-        // 不清理 killTimeout，让它继续运行直到进程退出或超时
-        resourceManager.cleanupAll()
-      }
-
-      // 安全地拒绝 Promise 并终止进程
-      const safeReject = (error: Error) => {
-        if (!isResolved) {
-          isResolved = true
-          killProcess() // 先调用 killProcess，设置 timeout（不注册到 resourceManager）
-          cleanupExceptKillTimeout() // 清理其他资源，但保留 kill timeout 直到进程退出或超时
-          reject(error)
-        }
-      }
-
-      // 安全地解决 Promise
-      const safeResolve = (value: any) => {
-        if (!isResolved) {
-          isResolved = true
-          cleanup()
-          resolvePromise(value)
-        }
-      }
-
-      // 不再需要文件监听，直接通过 stdout/stderr 事件捕获输出
-
-      // 设置预览图片文件监听
-      if (preview && preview !== 'none' && preview.trim() !== '') {
-        const absolutePreviewPath = resolve(previewImagePath)
-        
-        const readPreviewImage = async () => {
-          if (!operationGuard.check() || event.sender.isDestroyed() || !existsSync(absolutePreviewPath)) {
-            return
+      const handleCompletion = async () => {
+        try {
+          if (!existsSync(outputImagePath)) throw new Error('未找到输出图片文件')
+          const duration = Date.now() - startTime
+          const metadata = {
+            prompt, negativePrompt, steps, width, height, cfgScale, deviceType,
+            groupId, timestamp, generatedAt: new Date().toISOString(),
+            samplingMethod, scheduler, seed, batchCount, threads,
+            commandLine: args.join(' '), duration, type: 'generate', mediaType: 'image'
           }
+          await fs.writeFile(outputMetadataPath, JSON.stringify(metadata, null, 2), 'utf-8')
           
-          const imageBuffer = await fs.readFile(absolutePreviewPath)
+          const imageBuffer = await fs.readFile(outputImagePath)
           const base64Image = `data:image/png;base64,${imageBuffer.toString('base64')}`
-          event.sender.send('generate:preview-update', { previewImage: base64Image })
-        }
-
-        setTimeout(() => {
-          if (!operationGuard.check()) return
-          
-          watchFile(absolutePreviewPath, { interval: 200 }, (curr, prev) => {
-            if (!operationGuard.check() || curr.mtimeMs === prev.mtimeMs && curr.size === prev.size) {
-              return
-            }
-            
-            const now = Date.now()
-            if (now - lastPreviewUpdate < 200) return
-            lastPreviewUpdate = now
-            
-            readPreviewImage()
-          })
-          
-          resourceManager.register(() => unwatchFile(absolutePreviewPath), 'watcher')
-        }, 1000)
-      }
-
-      childProcess.on('error', (error: any) => {
-        console.error('[Generate] Failed to start process:', error)
-        event.sender.send('generate:progress', { progress: `错误: ${error.message}` })
-        safeReject(new Error(`无法启动 SD.cpp 引擎: ${error.message}`))
-      })
-
-      childProcess.on('exit', async (code, signal) => {
-        // 使用统一的清理函数
-        cleanup()
-
-        if (isResolved) return
-
-        if (code === 0) {
-          // 生成成功
-          if (existsSync(outputImagePath)) {
-            try {
-              // 计算生成耗时（毫秒）
-              const endTime = Date.now()
-              const duration = endTime - startTime
-              
-              // 获取模型组信息（如果有）
-              let groupName: string | undefined
-              let vaeModelPath: string | undefined
-              let llmModelPath: string | undefined
-              
-              if (groupId) {
-                const groups = await loadModelGroups()
-                const group = groups.find(g => g.id === groupId)
-                if (group) {
-                  groupName = group.name
-                  vaeModelPath = group.vaeModel
-                  llmModelPath = group.llmModel
-                }
-              }
-              
-              // 保存生成参数元数据
-              const metadata = {
-                prompt,
-                negativePrompt,
-                steps,
-                width,
-                height,
-                cfgScale,
-                deviceType,
-                groupId: groupId || null,
-                groupName: groupName || null,
-                modelPath: sdModelPath,
-                vaeModelPath: vaeModelPath || null,
-                llmModelPath: llmModelPath || null,
-                timestamp,
-                generatedAt: new Date().toISOString(),
-                samplingMethod: samplingMethod || null,
-                scheduler: scheduler || null,
-                seed: seed !== undefined ? seed : null,
-                batchCount,
-                threads: threads !== undefined ? threads : null,
-                preview: preview || null,
-                previewInterval: previewInterval || null,
-                verbose,
-                color,
-                offloadToCpu,
-                diffusionFa,
-                controlNetCpu,
-                clipOnCpu,
-                vaeOnCpu,
-                diffusionConvDirect,
-                vaeConvDirect,
-                vaeTiling,
-                commandLine: args.join(' '), // 保存完整命令行用于重现
-                duration, // 生成耗时（毫秒）
-              }
-              
-              await fs.writeFile(outputMetadataPath, JSON.stringify(metadata, null, 2), 'utf-8')
-              
-              // 读取生成的图片并转换为 base64
-              const imageBuffer = await fs.readFile(outputImagePath)
-              const base64Image = `data:image/png;base64,${imageBuffer.toString('base64')}`
-              
-              // 删除预览图片文件
-              if (preview && preview !== 'none' && preview.trim() !== '') {
-                const absolutePreviewPath = resolve(previewImagePath)
-                if (existsSync(absolutePreviewPath)) {
-                  await fs.unlink(absolutePreviewPath)
-                }
-              }
-              
-              // 格式化耗时显示（秒，保留2位小数）
-              const durationSeconds = (duration / 1000).toFixed(2)
-              console.log(`[Generate] Image generation completed in ${durationSeconds}s (${duration}ms)`)
-              
-              event.sender.send('generate:progress', { 
-                progress: `生成完成（耗时: ${durationSeconds}秒）`,
-                image: base64Image 
-              })
-              
-              safeResolve({
-                success: true,
-                image: base64Image,
-                imagePath: outputImagePath,
-                duration, // 返回耗时（毫秒）
-              })
-            } catch (error) {
-              console.error('[Generate] Failed to read image:', error)
-              safeReject(new Error(`读取生成的图片失败: ${error instanceof Error ? error.message : String(error)}`))
-            }
-          } else {
-            safeReject(new Error('生成完成但未找到输出图片文件'))
-          }
-        } else {
-          // 计算生成耗时（毫秒）
-          const endTime = Date.now()
-          const duration = endTime - startTime
-          const durationSeconds = (duration / 1000).toFixed(2)
           
           if (preview && preview !== 'none' && preview.trim() !== '') {
-            const absolutePreviewPath = resolve(previewImagePath)
-            if (existsSync(absolutePreviewPath)) {
-              await fs.unlink(absolutePreviewPath)
-            }
+            await fs.unlink(resolve(previewImagePath)).catch(() => {})
           }
-          
-          // 检查是否是取消操作（信号为 SIGTERM 或 SIGKILL）
-          const wasCancelled = signal === 'SIGTERM' || signal === 'SIGKILL'
-          
-          if (wasCancelled) {
-            console.log(`[Generate] Image generation cancelled after ${durationSeconds}s (${duration}ms)`)
-            event.sender.send('generate:progress', { progress: `生成已取消（耗时: ${durationSeconds}秒）` })
-            safeReject(new Error('生成已取消'))
-          } else {
-            // 从日志文件读取错误信息
-            let errorMsg = stderr || stdout
-            // 使用捕获的 stderr 或 stdout 作为错误信息
-            // 不再需要读取日志文件，直接使用捕获的输出
-            if (!errorMsg) {
-              errorMsg = `进程退出，代码: ${code}, 信号: ${signal}`
-            }
-            console.log(`[Generate] Image generation failed after ${durationSeconds}s (${duration}ms)`)
-            const errorPreview = errorMsg.length > 100 ? errorMsg.slice(0, 100) + '...' : errorMsg
-            event.sender.send('generate:progress', { progress: `生成失败: ${errorPreview}（耗时: ${durationSeconds}秒）` })
-            safeReject(new Error(`图片生成失败: ${errorMsg.slice(0, 500)}`))
+
+          const durationSeconds = (duration / 1000).toFixed(2)
+          console.log(`[Generate] Image generation completed in ${durationSeconds}s (${duration}ms)`)
+          event.sender.send('generate:progress', { progress: `生成完成（耗时: ${durationSeconds}秒）`, image: base64Image })
+          resolvePromise({ success: true, image: base64Image, imagePath: outputImagePath, duration })
+        } catch (e: any) {
+          reject(e)
+        }
+      }
+
+      if (deviceType === 'webgpu') {
+        if (!workerWin) createWorkerWindow()
+        const taskId = `gen_${Date.now()}`
+        const onStdout = (_: any, text: string) => {
+          stdout += text
+          if (operationGuard.check() && !event.sender.isDestroyed()) {
+            event.sender.send('generate:cli-output', { type: 'stdout', text })
+            const m = text.match(/progress[:\s]+(\d+)%/i)
+            if (m) event.sender.send('generate:progress', { progress: `生成中... ${m[1]}%` })
           }
         }
-      })
+        const onStderr = (_: any, text: string) => {
+          stderr += text
+          if (operationGuard.check() && !event.sender.isDestroyed()) {
+            event.sender.send('generate:cli-output', { type: 'stderr', text })
+          }
+        }
+        const onExit = (_: any, code: number) => {
+          cleanup()
+          if (isResolved) return
+          isResolved = true
+          if (code === 0) handleCompletion()
+          else reject(new Error(`SD.cpp 退出，错误代码: ${code}`))
+        }
+        const onError = (_: any, msg: string) => {
+          cleanup()
+          if (isResolved) return
+          isResolved = true
+          reject(new Error(msg))
+        }
+
+        ipcMain.on(`sdcpp:stdout:${taskId}`, onStdout)
+        ipcMain.on(`sdcpp:stderr:${taskId}`, onStderr)
+        ipcMain.on(`sdcpp:exit:${taskId}`, onExit)
+        ipcMain.on(`sdcpp:error:${taskId}`, onError)
+        
+        resourceManager.register(() => {
+          ipcMain.removeListener(`sdcpp:stdout:${taskId}`, onStdout)
+          ipcMain.removeListener(`sdcpp:stderr:${taskId}`, onStderr)
+          ipcMain.removeListener(`sdcpp:exit:${taskId}`, onExit)
+          ipcMain.removeListener(`sdcpp:error:${taskId}`, onError)
+        }, 'listener')
+
+        workerWin!.webContents.send('sdcpp:run', { exePath: sdExePath, args, id: taskId })
+        childProcess = { taskId }
+        currentGenerateProcess = childProcess
+      } else {
+        childProcess = execa(sdExePath, args, { cwd: dirname(sdExePath) })
+        currentGenerateProcess = childProcess
+
+        childProcess.stdout?.on('data', (data: Buffer) => {
+          const text = data.toString('utf8')
+          stdout += text
+          if (operationGuard.check() && !event.sender.isDestroyed()) {
+            event.sender.send('generate:cli-output', { type: 'stdout', text })
+            const m = text.match(/progress[:\s]+(\d+)%/i)
+            if (m) event.sender.send('generate:progress', { progress: `生成中... ${m[1]}%` })
+          }
+        })
+
+        childProcess.stderr?.on('data', (data: Buffer) => {
+          const text = data.toString('utf8')
+          stderr += text
+          if (operationGuard.check() && !event.sender.isDestroyed()) {
+            event.sender.send('generate:cli-output', { type: 'stderr', text })
+          }
+        })
+
+        childProcess.on('close', (code: number, signal: string) => {
+          cleanup()
+          if (isResolved) return
+          isResolved = true
+          if (code === 0) {
+            handleCompletion()
+          } else {
+            const wasCancelled = signal === 'SIGTERM' || signal === 'SIGKILL'
+            if (wasCancelled) {
+              reject(new Error('生成已取消'))
+            } else {
+              const errorMsg = stderr || stdout || `进程退出，代码: ${code}, 信号: ${signal}`
+              reject(new Error(`图片生成失败: ${errorMsg}`))
+            }
+          }
+        })
+
+        childProcess.on('error', (err: Error) => {
+          cleanup()
+          if (isResolved) return
+          isResolved = true
+          reject(err)
+        })
+      }
+
+      if (preview && preview !== 'none' && preview.trim() !== '') {
+        const absPath = resolve(previewImagePath)
+        let lastUpdate = 0
+        const watch = () => {
+          if (!operationGuard.check() || !existsSync(absPath)) return
+          watchFile(absPath, { interval: 200 }, async (curr, prev) => {
+            if (!operationGuard.check() || (curr.mtimeMs === prev.mtimeMs && curr.size === prev.size)) return
+            const now = Date.now()
+            if (now - lastUpdate < 200) return
+            lastUpdate = now
+            const buf = await fs.readFile(absPath)
+            event.sender.send('generate:preview-update', { previewImage: `data:image/png;base64,${buf.toString('base64')}` })
+          })
+          resourceManager.register(() => unwatchFile(absPath), 'watcher')
+        }
+        setTimeout(watch, 1000)
+      }
     })
-  } catch (error) {
-    console.error('[Generate] Failed to generate image:', error)
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    // 注意：如果进程已经在 Promise 中启动，它会在 Promise 的 reject 处理中被终止
-    // 但如果错误发生在 spawn 之前，则不需要终止进程
-    throw new Error(`生成图片失败: ${errorMessage}`)
+  } catch (error: any) {
+    console.error('[Generate] Error:', error)
+    throw error
   }
 })
 
@@ -1745,42 +1485,16 @@ ipcMain.handle('generate-video:cancel', async () => {
 ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams & { frames?: number; fps?: number }) => {
   try {
     const { 
-      groupId, 
-      deviceType, 
-      mode,
-      initImage,
-      prompt, 
-      negativePrompt = '',
-      steps = 20,
-      width = 512,
-      height = 512,
-      cfgScale = 7.0,
-      samplingMethod,
-      scheduler,
-      seed,
-      batchCount = 1,
-      threads,
-      preview,
-      previewInterval = 1,
-      verbose = false,
-      color = false,
-      offloadToCpu = false,
-      diffusionFa = false,
-      controlNetCpu = false,
-      clipOnCpu = false,
-      vaeOnCpu = false,
-      diffusionConvDirect = false,
-      vaeConvDirect = false,
-      vaeTiling = false,
-      frames = 33, // 视频帧数
-      fps = 8, // 帧率
-      flowShift = 3.0, // Flow Shift
-      highNoiseSteps,
-      highNoiseCfgScale,
-      highNoiseSamplingMethod
+      groupId, deviceType, mode, initImage, prompt, negativePrompt = '',
+      steps = 20, width = 512, height = 512, cfgScale = 7.0,
+      samplingMethod, scheduler, seed, batchCount = 1, threads,
+      preview, previewInterval = 1, verbose = false, color = false,
+      offloadToCpu = false, diffusionFa = false, controlNetCpu = false,
+      clipOnCpu = false, vaeOnCpu = false, diffusionConvDirect = false,
+      vaeConvDirect = false, vaeTiling = false, frames = 33, fps = 8,
+      flowShift = 3.0, highNoiseSteps, highNoiseCfgScale, highNoiseSamplingMethod
     } = params
 
-    // 确定使用的模型路径
     let sdModelPath: string | undefined
     let highNoiseModelPath: string | undefined
     let clipVisionModelPath: string | undefined
@@ -1788,286 +1502,108 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
     if (groupId) {
       const groups = await loadModelGroups()
       const group = groups.find(g => g.id === groupId)
-      if (!group) {
-        throw new Error(`模型组不存在: ${groupId}`)
-      }
-      if (!group.sdModel) {
-        throw new Error('模型组中未配置SD模型')
-      }
-      const resolvedSdModelPath = resolveModelPath(group.sdModel)
-      if (!resolvedSdModelPath) {
-        throw new Error('无法解析SD模型路径')
-      }
-      sdModelPath = resolvedSdModelPath
-      if (!existsSync(sdModelPath)) {
-        throw new Error(`SD模型文件不存在: ${sdModelPath}`)
-      }
-
-      // 如果模型组配置了高噪声模型，在此解析路径
+      if (!group || !group.sdModel) throw new Error('模型组配置错误')
+      sdModelPath = resolveModelPath(group.sdModel)
+      if (!sdModelPath || !existsSync(sdModelPath)) throw new Error(`模型文件不存在: ${sdModelPath}`)
+      
       if (group.highNoiseSdModel) {
-        const candidate = resolveModelPath(group.highNoiseSdModel)
-        if (!candidate) {
-          throw new Error('无法解析高噪声SD模型路径')
-        }
-        if (!existsSync(candidate)) {
-          throw new Error(`高噪声SD模型文件不存在: ${candidate}`)
-        }
-        highNoiseModelPath = candidate
+        highNoiseModelPath = resolveModelPath(group.highNoiseSdModel)
       }
-
-      // 如果模型组配置了 CLIP Vision 模型，在此解析路径
       if (group.clipVisionModel) {
-        const candidate = resolveModelPath(group.clipVisionModel)
-        if (candidate && existsSync(candidate)) {
-          clipVisionModelPath = candidate
-        }
+        clipVisionModelPath = resolveModelPath(group.clipVisionModel)
       }
     } else {
       throw new Error('必须提供模型组ID')
     }
 
-    // 获取 SD.cpp 可执行文件路径
     const sdExePath = getSDCppExecutablePath(deviceType)
-    if (!existsSync(sdExePath)) {
-      throw new Error(`SD.cpp 引擎文件不存在: ${sdExePath}\n请确保已正确安装 ${deviceType.toUpperCase()} 版本的 SD.cpp 引擎`)
-    }
+    if (!existsSync(sdExePath)) throw new Error(`引擎文件不存在: ${sdExePath}`)
 
-    // 生成输出视频路径（保存在运行路径下的 outputs 目录）
     const outputsDir = getDefaultOutputsFolder()
-    if (!existsSync(outputsDir)) {
-      await fs.mkdir(outputsDir, { recursive: true })
-    }
+    if (!existsSync(outputsDir)) await fs.mkdir(outputsDir, { recursive: true })
 
     const timestamp = Date.now()
-    // CLI 直接输出 AVI 视频文件，之后我们会用 ffmpeg 转换为 MP4
     const outputAviPath = join(outputsDir, `video_${timestamp}.avi`)
     const outputMp4Path = join(outputsDir, `video_${timestamp}.mp4`)
     const outputMetadataPath = join(outputsDir, `video_${timestamp}.json`)
 
-    // 构建命令行参数
-    // 参考 sd-cli.exe 视频生成功能：使用模块 vid_gen
-    const args: string[] = [
-      '-M', 'vid_gen',
-      '--diffusion-model', sdModelPath,
-      '--prompt', prompt,
-    ]
-
-    // 如果是图片生成视频模式，添加初始图片
-    if (mode === 'image2video' && initImage) {
-      args.push('-i', initImage)
-    }
+    const args: string[] = ['-M', 'vid_gen', '--diffusion-model', sdModelPath, '--prompt', prompt]
+    if (mode === 'image2video' && initImage) args.push('-i', initImage)
     
-    // 添加 VAE 和 文本编码器（T5/LLM）模型支持
     if (groupId) {
       const groups = await loadModelGroups()
       const group = groups.find(g => g.id === groupId)
       if (group?.vaeModel) {
-        const vaeModelPath = resolveModelPath(group.vaeModel)
-        if (vaeModelPath && existsSync(vaeModelPath)) {
-          args.push('--vae', vaeModelPath)
-        }
+        const p = resolveModelPath(group.vaeModel)
+        if (p && existsSync(p)) args.push('--vae', p)
       }
       if (group?.llmModel) {
-        const llmModelPath = resolveModelPath(group.llmModel)
-        if (llmModelPath && existsSync(llmModelPath)) {
-          // 在视频任务中，我们将该字段视为文本编码器（如 T5），对应 --t5xxl
-          args.push('--t5xxl', llmModelPath)
-        }
+        const p = resolveModelPath(group.llmModel)
+        if (p && existsSync(p)) args.push('--t5xxl', p)
       }
     }
 
-    // 视频生成：如果用户提供了负面提示词，使用用户的；否则使用默认的
-    const finalNegativePrompt = negativePrompt || VIDEO_DEFAULT_NEGATIVE_PROMPT
-    args.push('--negative-prompt', finalNegativePrompt)
-
-    // CLI 直接输出 AVI 视频文件
+    args.push('--negative-prompt', negativePrompt || VIDEO_DEFAULT_NEGATIVE_PROMPT)
     args.push('--output', outputAviPath)
-
-    // 如果存在高噪声模型，则启用 --high-noise-diffusion-model
-    if (highNoiseModelPath) {
-      args.push('--high-noise-diffusion-model', highNoiseModelPath)
-    }
-
-    // 如果存在 CLIP Vision 模型，则启用 --clip_vision
-    if (clipVisionModelPath) {
-      args.push('--clip_vision', clipVisionModelPath)
-    }
-
-    // 视频帧数，对应示例命令中的 --video-frames
-    if (frames && frames > 0) {
-      args.push('--video-frames', frames.toString())
-    }
-
-    // Flow Shift 参数 (Wan2.2 特有)
-    if (flowShift !== undefined) {
-      args.push('--flow-shift', flowShift.toString())
-    }
-
-    // 添加高级参数
-    if (steps !== 20) {
-      args.push('--steps', steps.toString())
-    }
-    
-    // 高噪声路径的步数
-    if (highNoiseModelPath) {
-      const finalHighNoiseSteps = highNoiseSteps || steps
-      args.push('--high-noise-steps', finalHighNoiseSteps.toString())
-    }
-
-    if (width !== 512) {
-      args.push('--width', width.toString())
-    }
-    if (height !== 512) {
-      args.push('--height', height.toString())
-    }
-    
-    if (Math.abs(cfgScale - 7.0) > 0.0001) {
-      args.push('--cfg-scale', cfgScale.toString())
-    }
-
-    // 高噪声路径的 CFG scale
-    if (highNoiseModelPath) {
-      const finalHighNoiseCfgScale = highNoiseCfgScale || cfgScale
-      args.push('--high-noise-cfg-scale', finalHighNoiseCfgScale.toString())
-    }
-
-    if (samplingMethod && typeof samplingMethod === 'string' && samplingMethod.trim() !== '') {
-      const method = samplingMethod.trim()
-      args.push('--sampling-method', method)
-    }
-
-    // 高噪声路径的采样方法
-    if (highNoiseModelPath) {
-      const finalHighNoiseMethod = highNoiseSamplingMethod || samplingMethod || 'euler'
-      args.push('--high-noise-sampling-method', finalHighNoiseMethod)
-    }
-
-    if (scheduler && typeof scheduler === 'string' && scheduler.trim() !== '') {
-      args.push('--scheduler', scheduler.trim())
-    }
-
-    if (seed !== undefined && seed >= 0) {
-      args.push('--seed', seed.toString())
-    }
-
-    if (batchCount !== undefined && batchCount > 1) {
-      args.push('--batch-count', batchCount.toString())
-    }
-
-    if (threads !== undefined && threads > 0) {
-      args.push('--threads', threads.toString())
-    }
+    if (highNoiseModelPath) args.push('--high-noise-diffusion-model', highNoiseModelPath)
+    if (clipVisionModelPath) args.push('--clip_vision', clipVisionModelPath)
+    if (frames > 0) args.push('--video-frames', frames.toString())
+    if (flowShift !== undefined) args.push('--flow-shift', flowShift.toString())
+    if (steps !== 20) args.push('--steps', steps.toString())
+    if (highNoiseModelPath) args.push('--high-noise-steps', (highNoiseSteps || steps).toString())
+    if (width !== 512) args.push('--width', width.toString())
+    if (height !== 512) args.push('--height', height.toString())
+    if (Math.abs(cfgScale - 7.0) > 0.0001) args.push('--cfg-scale', cfgScale.toString())
+    if (highNoiseModelPath) args.push('--high-noise-cfg-scale', (highNoiseCfgScale || cfgScale).toString())
+    if (samplingMethod?.trim()) args.push('--sampling-method', samplingMethod.trim())
+    if (highNoiseModelPath) args.push('--high-noise-sampling-method', highNoiseSamplingMethod || samplingMethod || 'euler')
+    if (scheduler?.trim()) args.push('--scheduler', scheduler.trim())
+    if (seed !== undefined && seed >= 0) args.push('--seed', seed.toString())
+    if (batchCount > 1) args.push('--batch-count', batchCount.toString())
+    if (threads !== undefined && threads > 0) args.push('--threads', threads.toString())
 
     if (preview && preview !== 'none' && preview.trim() !== '') {
-      const previewImagePath = join(outputsDir, `preview_video_${timestamp}.png`)
+      const p = join(outputsDir, `preview_video_${timestamp}.png`)
       args.push('--preview', preview.trim())
-      args.push('--preview-path', resolve(previewImagePath))
-      if (previewInterval !== undefined && previewInterval > 1) {
-        args.push('--preview-interval', previewInterval.toString())
-      }
+      args.push('--preview-path', resolve(p))
+      if (previewInterval > 1) args.push('--preview-interval', previewInterval.toString())
     }
 
-    if (verbose === true) {
-      args.push('--verbose')
-    }
+    if (verbose) args.push('--verbose')
+    if (color) args.push('--color')
+    if (offloadToCpu) args.push('--offload-to-cpu')
+    if (diffusionFa) args.push('--diffusion-fa')
+    if (controlNetCpu) args.push('--control-net-cpu')
+    if (clipOnCpu) args.push('--clip-on-cpu')
+    if (vaeOnCpu) args.push('--vae-on-cpu')
+    if (diffusionConvDirect) args.push('--diffusion-conv-direct')
+    if (vaeConvDirect) args.push('--vae-conv-direct')
+    if (vaeTiling) args.push('--vae-tiling')
 
-    if (color === true) {
-      args.push('--color')
-    }
-
-    if (offloadToCpu === true) {
-      args.push('--offload-to-cpu')
-    }
-
-    if (diffusionFa === true) {
-      args.push('--diffusion-fa')
-    }
-
-    if (controlNetCpu === true) {
-      args.push('--control-net-cpu')
-    }
-
-    if (clipOnCpu === true) {
-      args.push('--clip-on-cpu')
-    }
-
-    if (vaeOnCpu === true) {
-      args.push('--vae-on-cpu')
-    }
-
-    if (diffusionConvDirect === true) {
-      args.push('--diffusion-conv-direct')
-    }
-
-    if (vaeConvDirect === true) {
-      args.push('--vae-conv-direct')
-    }
-
-    if (vaeTiling === true) {
-      args.push('--vae-tiling')
-    }
-
-    console.log(`[Generate Video] Starting video generation: ${sdExePath}`)
-    console.log(`[Generate Video] Command line arguments: ${args.join(' ')}`)
-    console.log(`[Generate Video] Frames: ${frames}, FPS: ${fps}`)
-
+    console.log(`[Generate Video] Starting video generation (${deviceType}): ${sdExePath}`)
     const startTime = Date.now()
-
     event.sender.send('generate-video:progress', { progress: '正在启动 SD.cpp 引擎...' })
 
     return new Promise((resolvePromise, reject) => {
-      // 使用 execa 库来执行命令，它自动处理参数转义，无需手动转义
-      // execa 会自动转义包含空格、引号等特殊字符的参数，更安全可靠
-      
-      // 使用 execa 执行命令，自动处理参数转义
-      const childProcess = execa(sdExePath, args, {
-        cwd: dirname(sdExePath),
-        // execa 会自动处理参数转义，无需手动转义
-        // 在 Windows 上，execa 会自动使用正确的转义规则
-      })
-
       let stdout = ''
       let stderr = ''
       let isResolved = false
-      
-      const resourceManager = new ResourceManager()
       const operationGuard = new AsyncOperationGuard()
-
-      let killTimeout: NodeJS.Timeout | null = null
-
-      currentGenerateProcess = childProcess
+      const resourceManager = new ResourceManager()
+      let childProcess: any = null
 
       const killProcess = () => {
-        if (childProcess && !childProcess.killed && childProcess.pid) {
-          if (killTimeout) {
-            clearTimeout(killTimeout)
-            killTimeout = null
-          }
-
-          const pid = childProcess.pid
-          console.log(`[Generate Video] Attempting to kill process tree (PID: ${pid})`)
-          
-          if (process.platform === 'win32') {
-            exec(`taskkill /F /T /PID ${pid}`, (error) => {
-              if (error) {
-                console.warn(`[Generate Video] Failed to kill process tree by PID: ${error.message}`)
-                const exeName = basename(sdExePath)
-                exec(`taskkill /F /T /IM ${exeName}`, (nameError) => {
-                  if (nameError) {
-                    console.warn(`[Generate Video] Failed to kill process by name: ${nameError.message}`)
-                  }
-                })
-              }
-            })
-          } else {
-            childProcess.kill('SIGTERM')
-            killTimeout = setTimeout(() => {
-              if (childProcess && !childProcess.killed && childProcess.pid) {
-                childProcess.kill('SIGKILL')
-              }
-              killTimeout = null
-            }, 3000)
-          }
+        if (isResolved) return
+        if (deviceType === 'webgpu') {
+          console.log(`[Generate Video] Killing WebGPU task by reloading worker window`)
+          workerWin?.webContents.reload()
+          isResolved = true
+          reject(new Error('生成已取消'))
+          return
+        }
+        if (childProcess && childProcess.pid) {
+          if (process.platform === 'win32') exec(`taskkill /F /T /PID ${childProcess.pid}`)
+          else childProcess.kill()
         }
       }
 
@@ -2075,10 +1611,6 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
 
       const cleanup = () => {
         operationGuard.invalidate()
-        if (killTimeout) {
-          clearTimeout(killTimeout)
-          killTimeout = null
-        }
         resourceManager.cleanupAll()
         if (currentGenerateProcess === childProcess) {
           currentGenerateProcess = null
@@ -2086,222 +1618,123 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
         }
       }
 
-      const cleanupExceptKillTimeout = () => {
-        operationGuard.invalidate()
-        resourceManager.cleanupAll()
-      }
-
-      const safeReject = (error: Error) => {
-        if (!isResolved) {
-          isResolved = true
-          killProcess()
-          cleanupExceptKillTimeout()
-          reject(error)
-        }
-      }
-
-      const safeResolve = (value: any) => {
-        if (!isResolved) {
-          isResolved = true
-          cleanup()
-          resolvePromise(value)
-        }
-      }
-
-      childProcess.stdout?.on('data', (data: Buffer) => {
-        const text = data.toString('utf8')
-        stdout += text
-        console.log(`[SD.cpp stdout RAW] length=${data.length}, text="${text.replace(/\r/g, '\\r').replace(/\n/g, '\\n')}"`)
-        
-        if (!operationGuard.check() || event.sender.isDestroyed()) {
-          return
-        }
-        
-        // 直接发送原始数据块，不做任何处理
-        event.sender.send('generate-video:cli-output', { type: 'stdout', text, raw: true })
-        
-        // 进度检测逻辑（基于原始数据块）
-        const progressMatch = text.match(/progress[:\s]+(\d+)%/i)
-        if (progressMatch) {
-          event.sender.send('generate-video:progress', { progress: `生成中... ${progressMatch[1]}%` })
-        } else if (text.includes('Generating') || text.includes('generating')) {
-          event.sender.send('generate-video:progress', { progress: '正在生成视频...' })
-        } else if (text.includes('Loading') || text.includes('loading')) {
-          event.sender.send('generate-video:progress', { progress: '正在加载模型...' })
-        }
-      })
-
-      childProcess.stderr?.on('data', (data: Buffer) => {
-        const text = data.toString('utf8')
-        stderr += text
-        console.error(`[SD.cpp stderr RAW] length=${data.length}, text="${text.replace(/\r/g, '\\r').replace(/\n/g, '\\n')}"`)
-        
-        if (!operationGuard.check() || event.sender.isDestroyed()) {
-          return
-        }
-        
-        // 直接发送原始数据块，不做任何处理
-        event.sender.send('generate-video:cli-output', { type: 'stderr', text, raw: true })
-      })
-
-      childProcess.on('error', (error: Error) => {
-        console.error('[Generate Video] Failed to start process:', error)
-        event.sender.send('generate-video:progress', { progress: `错误: ${error.message}` })
-        safeReject(new Error(`无法启动 SD.cpp 引擎: ${error.message}`))
-      })
-
-      childProcess.on('exit', async (code: number | null, signal: NodeJS.Signals | null) => {
-        cleanup()
-
-        if (isResolved) return
-
-        if (code === 0) {
-          // 生成成功
-          try {
-            const endTime = Date.now()
-            const duration = endTime - startTime
-
-            let groupName: string | undefined
-            let vaeModelPath: string | undefined
-            let llmModelPath: string | undefined
-
-            if (groupId) {
-              const groups = await loadModelGroups()
-              const group = groups.find(g => g.id === groupId)
-              if (group) {
-                groupName = group.name
-                vaeModelPath = group.vaeModel
-                llmModelPath = group.llmModel
-              }
-            }
-
-            // 检查视频文件是否存在
-            if (!existsSync(outputAviPath)) {
-              safeReject(new Error('生成完成但未找到输出视频文件'))
-              return
-            }
-
-            // 转换 AVI 到 MP4
-            try {
-              event.sender.send('generate-video:progress', { progress: '正在转换视频格式 (AVI -> MP4)...' })
-              const ffmpegPath = getFFmpegPath()
-              if (existsSync(ffmpegPath)) {
-                // 使用 ffmpeg 转换，libx264 编码，yuv420p 像素格式以确保浏览器兼容性
-                await execa(ffmpegPath, [
-                  '-i', outputAviPath,
-                  '-c:v', 'libx264',
-                  '-pix_fmt', 'yuv420p',
-                  '-y',
-                  outputMp4Path
-                ])
-                console.log(`[Generate Video] FFmpeg conversion completed: ${outputMp4Path}`)
-                
-                // 转换成功后删除原始 AVI 文件
-                await fs.unlink(outputAviPath).catch(err => console.warn(`[Generate Video] Failed to delete AVI: ${err.message}`))
-              } else {
-                console.warn(`[Generate Video] FFmpeg not found at ${ffmpegPath}, skipping conversion.`)
-                // 如果没有 ffmpeg，我们只能报错，因为用户明确要求转换
-                throw new Error(`未找到 FFmpeg 引擎: ${ffmpegPath}`)
-              }
-            } catch (convError) {
-              console.error('[Generate Video] FFmpeg conversion failed:', convError)
-              safeReject(new Error(`视频转换失败: ${convError instanceof Error ? convError.message : String(convError)}`))
-              return
-            }
-
-            // 自动删除可能存在的预览 AVI 文件
-            const previewAviPath = join(outputsDir, `preview_video_${timestamp}.avi`)
-            if (existsSync(previewAviPath)) {
-              await fs.unlink(previewAviPath).catch(() => {})
-            }
-
-            const durationSeconds = (duration / 1000).toFixed(2)
-            console.log(`[Generate Video] Video generation completed in ${durationSeconds}s (${duration}ms)`)
-
-            // 保存生成参数元数据
-            const metadata = {
-              prompt,
-              negativePrompt,
-              steps,
-              width,
-              height,
-              cfgScale,
-              deviceType,
-              groupId: groupId || null,
-              groupName: groupName || null,
-              modelPath: sdModelPath,
-              vaeModelPath: vaeModelPath || null,
-              llmModelPath: llmModelPath || null,
-              timestamp,
-              generatedAt: new Date().toISOString(),
-              samplingMethod: samplingMethod || null,
-              scheduler: scheduler || null,
-              seed: seed !== undefined ? seed : null,
-              batchCount,
-              threads: threads !== undefined ? threads : null,
-              preview: preview || null,
-              previewInterval: previewInterval || null,
-              verbose,
-              color,
-              offloadToCpu,
-              diffusionFa,
-              controlNetCpu,
-              clipOnCpu,
-              vaeOnCpu,
-              diffusionConvDirect,
-              vaeConvDirect,
-              vaeTiling,
-              frames,
-              fps,
-              commandLine: args.join(' '),
-              duration,
-              type: 'video' as const,
-              mediaType: 'video' as const,
-            }
-
-            await fs.writeFile(outputMetadataPath, JSON.stringify(metadata, null, 2), 'utf-8')
-
-            // 发送完成消息（使用 media:/// 协议 URL）
-            const videoFileUrl = `media:///${outputMp4Path.replace(/\\/g, '/')}`
-            event.sender.send('generate-video:progress', {
-              progress: `生成完成（耗时: ${durationSeconds}秒）`,
-              video: videoFileUrl,
-            })
-
-            safeResolve({
-              success: true,
-              video: videoFileUrl,
-              videoPath: outputMp4Path,
-              duration,
-            })
-          } catch (error) {
-            console.error('[Generate Video] Failed to process generated video:', error)
-            safeReject(new Error(`处理生成视频失败: ${error instanceof Error ? error.message : String(error)}`))
-          }
-        } else {
-          const endTime = Date.now()
-          const duration = endTime - startTime
-          const durationSeconds = (duration / 1000).toFixed(2)
-          
-          const wasCancelled = signal === 'SIGTERM' || signal === 'SIGKILL'
-          
-          if (wasCancelled) {
-            console.log(`[Generate Video] Video generation cancelled after ${durationSeconds}s (${duration}ms)`)
-            event.sender.send('generate-video:progress', { progress: `生成已取消（耗时: ${durationSeconds}秒）` })
-            safeReject(new Error('生成已取消'))
+      const handleVideoCompletion = async () => {
+        try {
+          if (!existsSync(outputAviPath)) throw new Error('未找到输出视频文件')
+          event.sender.send('generate-video:progress', { progress: '正在转换视频格式 (AVI -> MP4)...' })
+          const ffmpegPath = getFFmpegPath()
+          if (existsSync(ffmpegPath)) {
+            await execa(ffmpegPath, ['-i', outputAviPath, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-y', outputMp4Path])
+            await fs.unlink(outputAviPath).catch(() => {})
           } else {
-            const errorMsg = stderr || stdout || `进程退出，代码: ${code}, 信号: ${signal}`
-            console.log(`[Generate Video] Video generation failed after ${durationSeconds}s (${duration}ms)`)
-            event.sender.send('generate-video:progress', { progress: `生成失败: ${errorMsg}（耗时: ${durationSeconds}秒）` })
-            safeReject(new Error(`视频生成失败: ${errorMsg}`))
+            throw new Error(`未找到 FFmpeg 引擎: ${ffmpegPath}`)
+          }
+
+          const duration = Date.now() - startTime
+          const metadata = {
+            prompt, negativePrompt, steps, width, height, cfgScale, deviceType,
+            groupId, timestamp, generatedAt: new Date().toISOString(),
+            samplingMethod, scheduler, seed, batchCount, threads,
+            frames, fps, commandLine: args.join(' '), duration, type: 'video', mediaType: 'video'
+          }
+          await fs.writeFile(outputMetadataPath, JSON.stringify(metadata, null, 2), 'utf-8')
+          const videoUrl = `media:///${outputMp4Path.replace(/\\/g, '/')}`
+          event.sender.send('generate-video:progress', { progress: `生成完成`, video: videoUrl })
+          resolvePromise({ success: true, video: videoUrl, videoPath: outputMp4Path, duration })
+        } catch (e: any) {
+          reject(e)
+        }
+      }
+
+      if (deviceType === 'webgpu') {
+        console.log(`[Generate Video] Using worker window for WebGPU`)
+        if (!workerWin) createWorkerWindow()
+        const taskId = `vid_${Date.now()}`
+        
+        const onStdout = (_: any, text: string) => {
+          stdout += text
+          if (operationGuard.check() && !event.sender.isDestroyed()) {
+            event.sender.send('generate-video:cli-output', { type: 'stdout', text })
+            const m = text.match(/progress[:\s]+(\d+)%/i)
+            if (m) event.sender.send('generate-video:progress', { progress: `生成中... ${m[1]}%` })
           }
         }
-      })
+        const onStderr = (_: any, text: string) => {
+          stderr += text
+          if (operationGuard.check() && !event.sender.isDestroyed()) {
+            event.sender.send('generate-video:cli-output', { type: 'stderr', text })
+          }
+        }
+        const onExit = (_: any, code: number) => {
+          cleanup()
+          if (isResolved) return
+          isResolved = true
+          if (code === 0) handleVideoCompletion()
+          else reject(new Error(`SD.cpp 退出，错误代码: ${code}`))
+        }
+        const onError = (_: any, msg: string) => {
+          cleanup()
+          if (isResolved) return
+          isResolved = true
+          reject(new Error(msg))
+        }
+
+        ipcMain.on(`sdcpp:stdout:${taskId}`, onStdout)
+        ipcMain.on(`sdcpp:stderr:${taskId}`, onStderr)
+        ipcMain.on(`sdcpp:exit:${taskId}`, onExit)
+        ipcMain.on(`sdcpp:error:${taskId}`, onError)
+        
+        resourceManager.register(() => {
+          ipcMain.removeListener(`sdcpp:stdout:${taskId}`, onStdout)
+          ipcMain.removeListener(`sdcpp:stderr:${taskId}`, onStderr)
+          ipcMain.removeListener(`sdcpp:exit:${taskId}`, onExit)
+          ipcMain.removeListener(`sdcpp:error:${taskId}`, onError)
+        }, 'listener')
+
+        workerWin!.webContents.send('sdcpp:run', { exePath: sdExePath, args, id: taskId })
+        childProcess = { taskId }
+        currentGenerateProcess = childProcess
+      } else {
+        childProcess = execa(sdExePath, args, { cwd: dirname(sdExePath) })
+        currentGenerateProcess = childProcess
+
+        childProcess.stdout?.on('data', (data: Buffer) => {
+          const text = data.toString('utf8')
+          stdout += text
+          if (operationGuard.check() && !event.sender.isDestroyed()) {
+            event.sender.send('generate-video:cli-output', { type: 'stdout', text })
+            const m = text.match(/progress[:\s]+(\d+)%/i)
+            if (m) event.sender.send('generate-video:progress', { progress: `生成中... ${m[1]}%` })
+          }
+        })
+
+        childProcess.stderr?.on('data', (data: Buffer) => {
+          const text = data.toString('utf8')
+          stderr += text
+          if (operationGuard.check() && !event.sender.isDestroyed()) {
+            event.sender.send('generate-video:cli-output', { type: 'stderr', text })
+          }
+        })
+
+        childProcess.on('close', (code: number) => {
+          cleanup()
+          if (isResolved) return
+          isResolved = true
+          if (code === 0) handleVideoCompletion()
+          else reject(new Error(`SD.cpp 退出，错误代码: ${code}`))
+        })
+
+        childProcess.on('error', (err: Error) => {
+          cleanup()
+          if (isResolved) return
+          isResolved = true
+          reject(err)
+        })
+      }
     })
-  } catch (error) {
-    console.error('[Generate Video] Failed to generate video:', error)
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    throw new Error(`生成视频失败: ${errorMessage}`)
+  } catch (error: any) {
+    console.error('[Generate Video] Error:', error)
+    throw error
   }
 })
 
@@ -2689,6 +2122,7 @@ app.whenReady().then(async () => {
   // 初始化默认 outputs 文件夹
   await initDefaultOutputsFolder()
   createWindow()
+  createWorkerWindow()
 })
 
 
