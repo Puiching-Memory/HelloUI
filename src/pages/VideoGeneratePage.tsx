@@ -36,6 +36,7 @@ import {
 } from '@fluentui/react-icons';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
+import { useAppStore } from '../hooks/useAppStore';
 
 const useStyles = makeStyles({
   container: {
@@ -441,12 +442,9 @@ const stripAnsiCodes = (text: string): string => {
     .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
 };
 
-interface VideoGeneratePageProps {
-  onGeneratingStateChange?: (isGenerating: boolean) => void;
-}
-
-export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePageProps) => {
+export const VideoGeneratePage = () => {
   const styles = useStyles();
+  const { setIsGenerating } = useAppStore();
   const [generationMode, setGenerationMode] = useState<'text2video' | 'image2video'>('text2video');
   const [initImage, setInitImage] = useState<string | null>(null);
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
@@ -587,10 +585,8 @@ export const VideoGeneratePage = ({ onGeneratingStateChange }: VideoGeneratePage
 
   // 通知父组件生成状态变化
   useEffect(() => {
-    if (onGeneratingStateChange) {
-      onGeneratingStateChange(generating);
-    }
-  }, [generating, onGeneratingStateChange]);
+    setIsGenerating(generating);
+  }, [generating, setIsGenerating]);
 
   // 当选择的模型组变化时，更新默认参数
   useEffect(() => {

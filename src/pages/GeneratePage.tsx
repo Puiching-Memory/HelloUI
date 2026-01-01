@@ -32,6 +32,7 @@ import {
 import { PhotoView } from 'react-photo-view';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
+import { useAppStore } from '../hooks/useAppStore';
 
 const useStyles = makeStyles({
   container: {
@@ -329,12 +330,9 @@ const stripAnsiCodes = (text: string): string => {
     .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, ''); // 移除八进制格式的转义序列（使用十六进制替代）
 };
 
-interface GeneratePageProps {
-  onGeneratingStateChange?: (isGenerating: boolean) => void;
-}
-
-export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => {
+export const GeneratePage = () => {
   const styles = useStyles();
+  const { setIsGenerating } = useAppStore();
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [deviceType, setDeviceType] = useState<DeviceType>('cuda');
   const [prompt, setPrompt] = useState<string>('');
@@ -480,10 +478,8 @@ export const GeneratePage = ({ onGeneratingStateChange }: GeneratePageProps) => 
 
   // 通知父组件生成状态变化
   useEffect(() => {
-    if (onGeneratingStateChange) {
-      onGeneratingStateChange(generating);
-    }
-  }, [generating, onGeneratingStateChange]);
+    setIsGenerating(generating);
+  }, [generating, setIsGenerating]);
 
   // 当选择的模型组变化时，更新默认参数
   useEffect(() => {

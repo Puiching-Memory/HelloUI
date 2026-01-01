@@ -34,6 +34,7 @@ import {
 import { PhotoView } from 'react-photo-view';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
+import { useAppStore } from '../hooks/useAppStore';
 
 const useStyles = makeStyles({
   container: {
@@ -369,12 +370,9 @@ const cleanText = (text: string): string => {
   return text;
 };
 
-interface EditImagePageProps {
-  onGeneratingStateChange?: (isGenerating: boolean) => void;
-}
-
-export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) => {
+export const EditImagePage = () => {
   const styles = useStyles();
+  const { setIsGenerating } = useAppStore();
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [deviceType, setDeviceType] = useState<DeviceType>('cuda');
   const [prompt, setPrompt] = useState<string>('');
@@ -581,10 +579,8 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
 
   // 通知父组件生成状态变化
   useEffect(() => {
-    if (onGeneratingStateChange) {
-      onGeneratingStateChange(generating);
-    }
-  }, [generating, onGeneratingStateChange]);
+    setIsGenerating(generating);
+  }, [generating, setIsGenerating]);
 
   const loadModelGroups = async () => {
     try {
