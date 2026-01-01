@@ -352,7 +352,7 @@ interface ModelGroup {
   updatedAt: number;
 }
 
-type DeviceType = 'cpu' | 'vulkan' | 'cuda';
+type DeviceType = 'cpu' | 'vulkan' | 'cuda' | 'webgpu';
 
 // 默认负面提示词（精简版，保留最核心的负面提示词）
 const DEFAULT_NEGATIVE_PROMPT = '低质量, 最差质量, 模糊, 低分辨率, 手部错误, 脚部错误, 比例错误, 多余肢体, 缺失肢体, 水印';
@@ -782,6 +782,8 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
         return 'Vulkan';
       case 'cuda':
         return 'CUDA';
+      case 'webgpu':
+        return 'WebGPU';
       default:
         return device;
     }
@@ -1198,7 +1200,7 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
               </Text>
             </div>
             <div style={{ marginBottom: tokens.spacingVerticalM }}>
-              <Field label="推理引擎" hint="选择主要的推理引擎（CUDA/Vulkan/CPU）">
+              <Field label="推理引擎" hint="选择主要的推理引擎（CUDA/Vulkan/CPU/WebGPU）">
                 <Dropdown
                   value={getDeviceLabel(deviceType)}
                   selectedOptions={[deviceType]}
@@ -1211,6 +1213,7 @@ export const EditImagePage = ({ onGeneratingStateChange }: EditImagePageProps) =
                   <Option value="cpu">CPU</Option>
                   <Option value="vulkan">Vulkan</Option>
                   <Option value="cuda">CUDA</Option>
+                  <Option value="webgpu">WebGPU</Option>
                 </Dropdown>
               </Field>
             </div>

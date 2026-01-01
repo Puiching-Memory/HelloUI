@@ -76,7 +76,7 @@ interface EngineFile {
   deviceType: DeviceType;
 }
 
-type DeviceType = 'cpu' | 'vulkan' | 'cuda';
+type DeviceType = 'cpu' | 'vulkan' | 'cuda' | 'webgpu';
 
 export const SDCppPage = () => {
   const styles = useStyles();
@@ -86,6 +86,7 @@ export const SDCppPage = () => {
     cpu: null,
     vulkan: null,
     cuda: null,
+    webgpu: null,
   });
   const [loading, setLoading] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -132,7 +133,7 @@ export const SDCppPage = () => {
     setLoading(true);
     try {
       // 加载所有设备类型的文件和版本号
-      const deviceTypes: DeviceType[] = ['cpu', 'vulkan', 'cuda'];
+      const deviceTypes: DeviceType[] = ['cpu', 'vulkan', 'cuda', 'webgpu'];
       const allFilesPromises = deviceTypes.map(async (deviceType) => {
         try {
           const result = await window.ipcRenderer.invoke('sdcpp:list-files', engineFolder, deviceType);
@@ -154,6 +155,7 @@ export const SDCppPage = () => {
         cpu: null,
         vulkan: null,
         cuda: null,
+        webgpu: null,
       };
       
       // 收集版本号信息
@@ -196,6 +198,8 @@ export const SDCppPage = () => {
         return 'Vulkan';
       case 'cuda':
         return 'CUDA';
+      case 'webgpu':
+        return 'WebGPU';
       default:
         return device;
     }
@@ -290,6 +294,7 @@ export const SDCppPage = () => {
       {renderDeviceFileList('cpu')}
       {renderDeviceFileList('cuda')}
       {renderDeviceFileList('vulkan')}
+      {renderDeviceFileList('webgpu')}
     </div>
   );
 };
