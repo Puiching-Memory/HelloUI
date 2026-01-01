@@ -34,6 +34,7 @@ import {
 import { PhotoView } from 'react-photo-view';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
+import { useAppStore } from '../hooks/useAppStore';
 
 const useStyles = makeStyles({
   container: {
@@ -359,12 +360,9 @@ const stripAnsiCodes = (text: string): string => {
     .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
 };
 
-interface ImageUpscalePageProps {
-  onGeneratingStateChange?: (isGenerating: boolean) => void;
-}
-
-export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePageProps) => {
+export const ImageUpscalePage = () => {
   const styles = useStyles();
+  const { setIsGenerating } = useAppStore();
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [deviceType, setDeviceType] = useState<DeviceType>('cuda');
   const [prompt, setPrompt] = useState<string>('');
@@ -508,10 +506,8 @@ export const ImageUpscalePage = ({ onGeneratingStateChange }: ImageUpscalePagePr
 
   // 通知父组件生成状态变化
   useEffect(() => {
-    if (onGeneratingStateChange) {
-      onGeneratingStateChange(generating);
-    }
-  }, [generating, onGeneratingStateChange]);
+    setIsGenerating(generating);
+  }, [generating, setIsGenerating]);
 
   const loadModelGroups = async () => {
     try {

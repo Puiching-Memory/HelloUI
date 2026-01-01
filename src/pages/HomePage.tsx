@@ -21,7 +21,7 @@ import {
   PaintBrushRegular,
   FolderRegular,
 } from '@fluentui/react-icons';
-import type { PageType } from '../components/MainLayout';
+import { useNavigate } from 'react-router-dom';
 
 const useStyles = makeStyles({
   container: {
@@ -146,37 +146,34 @@ const useStyles = makeStyles({
   },
 });
 
-interface HomePageProps {
-  onNavigate?: (page: PageType) => void;
-}
-
-export const HomePage = ({ onNavigate }: HomePageProps) => {
+export const HomePage = () => {
   const styles = useStyles();
+  const navigate = useNavigate();
 
   const quickActions = [
     {
-      id: 'generate' as PageType,
+      id: 'generate',
       title: '图片生成',
       description: '使用 AI 技术从文本提示词生成高质量图片',
       icon: <ImageAddRegular fontSize={28} />,
       color: 'brand' as const,
     },
     {
-      id: 'edit-image' as PageType,
+      id: 'edit-image',
       title: '图片编辑',
       description: '使用 AI 技术编辑和修改现有图片',
       icon: <EditRegular fontSize={28} />,
       color: 'success' as const,
     },
     {
-      id: 'video-generate' as PageType,
+      id: 'video-generate',
       title: '视频生成',
       description: '从文本或图片生成动态视频内容',
       icon: <VideoClipRegular fontSize={28} />,
       color: 'danger' as const,
     },
     {
-      id: 'image-upscale' as PageType,
+      id: 'image-upscale',
       title: '图像超分辨率',
       description: '提升图片分辨率和质量',
       icon: <ZoomInRegular fontSize={28} />,
@@ -202,10 +199,8 @@ export const HomePage = ({ onNavigate }: HomePageProps) => {
     },
   ];
 
-  const handleActionClick = (pageId: PageType) => {
-    if (onNavigate) {
-      onNavigate(pageId);
-    }
+  const handleActionClick = (pageId: string) => {
+    navigate(pageId === 'home' ? '/' : '/' + pageId);
   };
 
   return (

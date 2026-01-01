@@ -1,4 +1,5 @@
-import { ReactNode } from 'react';
+import { ReactNode, ReactElement } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Button,
   makeStyles,
@@ -16,6 +17,7 @@ import {
   VideoClipRegular,
   ZoomInRegular,
 } from '@fluentui/react-icons';
+import { useAppStore } from '../hooks/useAppStore';
 
 const useStyles = makeStyles({
   container: {
@@ -84,76 +86,52 @@ const useStyles = makeStyles({
   },
 });
 
-export type PageType = 'home' | 'components' | 'settings' | 'weights' | 'sdcpp' | 'generate' | 'edit-image' | 'images' | 'video-generate' | 'image-upscale' | 'aliyun-video';
-
-interface MainLayoutProps {
-  currentPage: PageType;
-  onPageChange: (page: PageType) => void;
-  children: ReactNode;
-  navigationDisabled?: boolean;
-  navigationDisabledReason?: string;
+interface NavItem {
+  id: string;
+  path: string;
+  label: string;
+  icon: ReactElement;
 }
 
-export const MainLayout = ({ currentPage, onPageChange, children, navigationDisabled = false, navigationDisabledReason }: MainLayoutProps) => {
+export const MainLayout = ({ children }: { children: ReactNode }) => {
   const styles = useStyles();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { isUploading, isGenerating } = useAppStore();
 
-  const navItems = [
-    {
-      id: 'home' as PageType,
-      label: '主页',
-      icon: <HomeRegular />,
-    },
-    {
-      id: 'weights' as PageType,
-      label: '模型权重管理',
-      icon: <DatabaseRegular />,
-    },
-    {
-      id: 'sdcpp' as PageType,
-      label: 'SD.cpp 推理引擎',
-      icon: <CodeRegular />,
-    },
-    {
-      id: 'generate' as PageType,
-      label: '图片生成',
-      icon: <ImageAddRegular />,
-    },
-    {
-      id: 'edit-image' as PageType,
-      label: '图片编辑',
-      icon: <EditRegular />,
-    },
-    {
-      id: 'video-generate' as PageType,
-      label: '视频生成',
-      icon: <VideoClipRegular />,
-    },
-    {
-      id: 'image-upscale' as PageType,
-      label: '图像超分辨率',
-      icon: <ZoomInRegular />,
-    },
-    {
-      id: 'aliyun-video' as PageType,
-      label: '文生视频',
-      icon: <VideoClipRegular />,
-    },
-    {
-      id: 'images' as PageType,
-      label: '生成结果',
-      icon: <ImageRegular />,
-    },
-    {
-      id: 'components' as PageType,
-      label: '组件展示',
-      icon: <AppsRegular />,
-    },
-    {
-      id: 'settings' as PageType,
-      label: '设置',
-      icon: <SettingsRegular />,
-    },
+  const navigationDisabled = isUploading || isGenerating;
+  const navigationDisabledReason = isGenerating ? '正在生成图片，请稍候...' : isUploading ? '正在上传文件，请稍候...' : undefined;
+
+  const navItems: NavItem[] = [
+    { id: 'home', path: '/', label: '主页', icon: <HomeRegular /> },
+    { id: 'weights', path: '/weights', label: '模型权重管理', icon: <DatabaseRegular /> },
+    { id: 'sdcpp', path: '/sdcpp', label: 'SD.cpp 推理引擎', icon: <CodeRegular /> },
+    { id: 'generate', path: '/generate', label: '图片生成', icon: <ImageAddRegular /> },
+    { id: 'edit-image', path: '/edit-image', label: '图片编辑', icon: <EditRegular /> },
+    { id: 'video-generate', path: '/video-generate', label: '视频生成', icon: <VideoClipRegular /> },
+    { id: 'image-upscale', path: '/image-upscale', label: '图像超分辨率', icon: <ZoomInRegular /> },
+    { id: 'aliyun-video', path: '/aliyun-video', label: '文生视频', icon: <VideoClipRegular /> },
+    { id: 'images', path: '/images', label: '生成结果', icon: <ImageRegular /> },
+    { id: 'components', path: '/components', label: '组件展示', icon: <AppsRegular /> },
+    { id: 'settings', path: '/settings', label: '设置', icon: <SettingsRegular /> },
   ];
+
+  const renderNavButton = (item: NavItem) => {
+    const isActive = location.pathname === item.path;
+    return (
+      <Button
+        key={item.id}
+        appearance={isActive ? 'primary' : 'subtle'}
+        icon={item.icon}
+        className={styles.navButton}
+        onClick={() => navigate(item.path)}
+        disabled={navigationDisabled && !isActive}
+        title={navigationDisabled && !isActive ? (navigationDisabledReason || '操作进行中，请稍候...') : undefined}
+      >
+        {item.label}
+      </Button>
+    );
+  };
 
   return (
     <div className={styles.container}>
@@ -166,70 +144,22 @@ export const MainLayout = ({ currentPage, onPageChange, children, navigationDisa
         </div>
         
         {/* 主页按钮 */}
-        {navItems.filter(item => item.id === 'home').map((item) => (
-          <Button
-            key={item.id}
-            appearance={currentPage === item.id ? 'primary' : 'subtle'}
-            icon={item.icon}
-            className={styles.navButton}
-            onClick={() => onPageChange(item.id)}
-            disabled={navigationDisabled && currentPage !== item.id}
-            title={navigationDisabled && currentPage !== item.id ? (navigationDisabledReason || '操作进行中，请稍候...') : undefined}
-          >
-            {item.label}
-          </Button>
-        ))}
+        {navItems.filter(item => item.id === 'home').map(renderNavButton)}
 
         {/* SD.cpp引擎功能页面组 */}
         <div className={styles.navGroup}>
           <div className={styles.navGroupTitle}>SD.cpp引擎</div>
-          {navItems.filter(item => ['weights', 'sdcpp', 'generate', 'edit-image', 'video-generate', 'image-upscale', 'images'].includes(item.id)).map((item) => (
-            <Button
-              key={item.id}
-              appearance={currentPage === item.id ? 'primary' : 'subtle'}
-              icon={item.icon}
-              className={styles.navButton}
-              onClick={() => onPageChange(item.id)}
-              disabled={navigationDisabled && currentPage !== item.id}
-              title={navigationDisabled && currentPage !== item.id ? (navigationDisabledReason || '操作进行中，请稍候...') : undefined}
-            >
-              {item.label}
-            </Button>
-          ))}
+          {navItems.filter(item => ['weights', 'sdcpp', 'generate', 'edit-image', 'video-generate', 'image-upscale', 'images'].includes(item.id)).map(renderNavButton)}
         </div>
 
         {/* 阿里通义API页面组 */}
         <div className={styles.navGroup}>
           <div className={styles.navGroupTitle}>阿里通义API</div>
-          {navItems.filter(item => ['aliyun-video'].includes(item.id)).map((item) => (
-            <Button
-              key={item.id}
-              appearance={currentPage === item.id ? 'primary' : 'subtle'}
-              icon={item.icon}
-              className={styles.navButton}
-              onClick={() => onPageChange(item.id)}
-              disabled={navigationDisabled && currentPage !== item.id}
-              title={navigationDisabled && currentPage !== item.id ? (navigationDisabledReason || '操作进行中，请稍候...') : undefined}
-            >
-              {item.label}
-            </Button>
-          ))}
+          {navItems.filter(item => ['aliyun-video'].includes(item.id)).map(renderNavButton)}
         </div>
 
         {/* 其他页面按钮 */}
-        {navItems.filter(item => !['home', 'weights', 'sdcpp', 'generate', 'edit-image', 'images', 'video-generate', 'image-upscale', 'aliyun-video'].includes(item.id)).map((item) => (
-          <Button
-            key={item.id}
-            appearance={currentPage === item.id ? 'primary' : 'subtle'}
-            icon={item.icon}
-            className={styles.navButton}
-            onClick={() => onPageChange(item.id)}
-            disabled={navigationDisabled && currentPage !== item.id}
-            title={navigationDisabled && currentPage !== item.id ? (navigationDisabledReason || '操作进行中，请稍候...') : undefined}
-          >
-            {item.label}
-          </Button>
-        ))}
+        {navItems.filter(item => !['home', 'weights', 'sdcpp', 'generate', 'edit-image', 'images', 'video-generate', 'image-upscale', 'aliyun-video'].includes(item.id)).map(renderNavButton)}
       </div>
 
       {/* 主内容区 */}
@@ -241,4 +171,5 @@ export const MainLayout = ({ currentPage, onPageChange, children, navigationDisa
     </div>
   );
 };
+
 

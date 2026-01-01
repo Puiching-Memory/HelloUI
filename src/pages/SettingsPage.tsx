@@ -11,7 +11,7 @@ import {
 } from '@fluentui/react-components';
 import { CodeRegular, CheckmarkCircleFilled } from '@fluentui/react-icons';
 import { useState, useEffect } from 'react';
-import type { ThemeMode, ColorScheme } from '../App';
+import { useAppStore, type ThemeMode } from '../hooks/useAppStore';
 
 const useStyles = makeStyles({
   container: {
@@ -80,15 +80,9 @@ const useStyles = makeStyles({
   },
 });
 
-interface SettingsPageProps {
-  themeMode: ThemeMode;
-  onThemeChange: (mode: ThemeMode) => void;
-  colorScheme: ColorScheme;
-  onColorSchemeChange: (scheme: ColorScheme) => void;
-}
-
-export const SettingsPage = ({ themeMode, onThemeChange, colorScheme, onColorSchemeChange }: SettingsPageProps) => {
+export const SettingsPage = () => {
   const styles = useStyles();
+  const { themeMode, setThemeMode, colorScheme, setColorScheme } = useAppStore();
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [appVersion, setAppVersion] = useState<string>('');
 
@@ -124,7 +118,7 @@ export const SettingsPage = ({ themeMode, onThemeChange, colorScheme, onColorSch
               {/* 默认 Fluent UI 主题 */}
               <div
                 className={`${styles.themeCard} ${colorScheme === 'default' ? styles.themeCardSelected : ''}`}
-                onClick={() => onColorSchemeChange('default')}
+                onClick={() => setColorScheme('default')}
               >
                 {colorScheme === 'default' && (
                   <CheckmarkCircleFilled className={styles.checkmarkIcon} />
@@ -143,7 +137,7 @@ export const SettingsPage = ({ themeMode, onThemeChange, colorScheme, onColorSch
               {/* Catppuccin 主题 */}
               <div
                 className={`${styles.themeCard} ${colorScheme === 'catppuccin' ? styles.themeCardSelected : ''}`}
-                onClick={() => onColorSchemeChange('catppuccin')}
+                onClick={() => setColorScheme('catppuccin')}
               >
                 {colorScheme === 'catppuccin' && (
                   <CheckmarkCircleFilled className={styles.checkmarkIcon} />
@@ -162,7 +156,7 @@ export const SettingsPage = ({ themeMode, onThemeChange, colorScheme, onColorSch
               {/* Latte 主题 */}
               <div
                 className={`${styles.themeCard} ${colorScheme === 'latte' ? styles.themeCardSelected : ''}`}
-                onClick={() => onColorSchemeChange('latte')}
+                onClick={() => setColorScheme('latte')}
               >
                 {colorScheme === 'latte' && (
                   <CheckmarkCircleFilled className={styles.checkmarkIcon} />
@@ -187,7 +181,7 @@ export const SettingsPage = ({ themeMode, onThemeChange, colorScheme, onColorSch
             </Body1>
             <RadioGroup
               value={themeMode}
-              onChange={(_, data) => onThemeChange(data.value as ThemeMode)}
+              onChange={(_, data) => setThemeMode(data.value as ThemeMode)}
             >
               <Radio label="浅色" value="light" />
               <Radio label="深色" value="dark" />
@@ -239,4 +233,5 @@ export const SettingsPage = ({ themeMode, onThemeChange, colorScheme, onColorSch
     </div>
   );
 };
+
 

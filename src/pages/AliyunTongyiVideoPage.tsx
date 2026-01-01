@@ -31,6 +31,7 @@ import {
   DocumentArrowDownRegular,
 } from '@fluentui/react-icons';
 import { useState, useEffect, useRef } from 'react';
+import { useAppStore } from '../hooks/useAppStore';
 
 const useStyles = makeStyles({
   container: {
@@ -153,6 +154,7 @@ const REGIONS = [
 
 export const AliyunTongyiVideoPage = () => {
   const styles = useStyles();
+  const { setIsGenerating } = useAppStore();
   const [apiKey, setApiKey] = useState(localStorage.getItem('aliyun_api_key') || '');
   const [region, setRegion] = useState(localStorage.getItem('aliyun_region') || 'beijing');
   const [model, setModel] = useState('wan2.6-t2v');
@@ -173,6 +175,10 @@ export const AliyunTongyiVideoPage = () => {
   const [messageDialogContent, setMessageDialogContent] = useState<{ title: string; message: string } | null>(null);
   
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    setIsGenerating(generating);
+  }, [generating, setIsGenerating]);
 
   useEffect(() => {
     return () => {

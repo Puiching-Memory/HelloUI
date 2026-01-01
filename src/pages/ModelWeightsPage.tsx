@@ -42,6 +42,7 @@ import {
 } from '@fluentui/react-icons';
 import { useState, useEffect } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
+import { useAppStore } from '../hooks/useAppStore';
 import type { TaskType, ModelGroup, WeightFile } from '../../electron/types/index';
 
 const useStyles = makeStyles({
@@ -222,12 +223,9 @@ const useStyles = makeStyles({
   },
 });
 
-interface ModelWeightsPageProps {
-  onUploadStateChange?: (isUploading: boolean) => void;
-}
-
-export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps) => {
+export const ModelWeightsPage = () => {
   const styles = useStyles();
+  const { setIsUploading } = useAppStore();
   const [weightsFolder, setWeightsFolder] = useState<string>('');
   const [files, setFiles] = useState<WeightFile[]>([]);
   const [loading, setLoading] = useState(false);
@@ -361,7 +359,7 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
         setImportProgress({ progress: 0, fileName: folderName, copied: 0, total: 0 });
         
         // 通知父组件开始上传，禁用导航
-        onUploadStateChange?.(true);
+        setIsUploading(true);
         
         try {
           const result = await window.ipcRenderer.invoke('model-groups:import', { folderPath, targetFolder: weightsFolder });
@@ -377,14 +375,14 @@ export const ModelWeightsPage = ({ onUploadStateChange }: ModelWeightsPageProps)
           }
         } finally {
           setLoading(false);
-          onUploadStateChange?.(false);
+          setIsUploading(false);
           setTimeout(() => setImportProgress(null), 1000);
         }
       }
     } catch (error) {
       setImportProgress(null);
       setLoading(false);
-      onUploadStateChange?.(false);
+      setIsUploading(false);
       
       const errorMessage = error instanceof Error ? error.message : String(error);
       setMessageDialogContent({ title: '导入失败', message: `导入模型组失败: ${errorMessage}` });
