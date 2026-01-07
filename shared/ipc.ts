@@ -84,13 +84,13 @@ export interface IPCRequestMap {
   'model-groups:delete': { request: { id: string; deleteFiles?: boolean }; response: boolean }
   'model-groups:get': { request: string; response: ModelGroup | null }
   'model-groups:select-folder': { request: void; response: string | null }
-  'model-groups:import': { request: { folderPath: string; targetFolder: string }; response: { success: boolean; message?: string; group?: ModelGroup } }
-  'model-groups:build-and-export': { request: Omit<ModelGroup, 'id' | 'createdAt' | 'updatedAt'>; response: { success: boolean; message?: string; exportPath?: string } }
+  'model-groups:import': { request: { folderPath: string; targetFolder: string }; response: { success: boolean; message?: string; group?: ModelGroup; error?: string } }
+  'model-groups:build-and-export': { request: Omit<ModelGroup, 'id' | 'createdAt' | 'updatedAt'>; response: { success: boolean; message?: string; exportPath?: string; error?: string } }
 
-  'generate:start': { request: GenerateImageParams; response: { success: boolean; image?: string; imagePath?: string; duration?: number } }
-  'generate:cancel': { request: void; response: { success: boolean; message?: string } }
+  'generate:start': { request: GenerateImageParams; response: { success: boolean; image?: string; imagePath?: string; duration?: number; error?: string } }
+  'generate:cancel': { request: void; response: { success: boolean; message?: string; error?: string } }
 
-  'generate-video:start': { request: GenerateImageParams & { frames?: number; fps?: number; mode?: string }; response: { success: boolean; video?: string; videoPath?: string; duration?: number } }
+  'generate-video:start': { request: GenerateImageParams & { frames?: number; fps?: number; mode?: string }; response: { success: boolean; video?: string; videoPath?: string; duration?: number; frames?: string[]; error?: string } }
   'generate-video:cancel': { request: void; response: boolean }
 
   'generated-images:list': { request: void; response: GeneratedImageInfo[] }
@@ -98,7 +98,7 @@ export interface IPCRequestMap {
   'generated-images:delete': { request: string; response: boolean }
   'generated-images:get-preview': { request: string; response: string }
   'generated-images:get-video-data': { request: string; response: { data: number[]; mimeType: string } }
-  'generated-images:batch-download': { request: string[]; response: { success: boolean; zipPath?: string; size?: number; canceled?: boolean } }
+  'generated-images:batch-download': { request: [string[]]; response: { success: boolean; zipPath?: string; size?: number; canceled?: boolean } }
 
   'dialog:open-image': { request: void; response: string | null }
   'edit-image:select-file': { request: void; response: string | null }
@@ -116,7 +116,7 @@ export interface IPCEventMap {
   'generate:progress': { progress: string | number; image?: string }
   'generate:cli-output': { type: 'stdout' | 'stderr'; text: string }
   'generate:preview-update': { previewImage: string }
-  'generate-video:progress': { progress: string | number; video?: string }
+  'generate-video:progress': { progress: string | number; video?: string; frames?: string[] }
   'generate-video:cli-output': { type: 'stdout' | 'stderr'; text: string }
 }
 

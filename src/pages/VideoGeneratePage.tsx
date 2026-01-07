@@ -553,7 +553,7 @@ export const VideoGeneratePage = () => {
   }, []);
 
   // 监听 CLI 输出
-  useIpcListener<{ type: 'stdout' | 'stderr'; text: string }>(
+  useIpcListener(
     'generate-video:cli-output',
     handleCliOutput
   );
@@ -693,9 +693,9 @@ export const VideoGeneratePage = () => {
       setLastViewedOutputCount(0); // 重置已查看数量
 
       // 监听进度更新
-      const progressListener = (data: { progress?: string; video?: string; frames?: string[] }) => {
+      const progressListener = (_event: any, data: { progress: string | number; video?: string; frames?: string[] }) => {
         if (data.progress) {
-          setGenerationProgress(data.progress);
+          setGenerationProgress(String(data.progress));
         }
         if (data.video) {
           setGeneratedVideo(data.video);
@@ -720,7 +720,7 @@ export const VideoGeneratePage = () => {
           groupId: selectedGroupId,
           deviceType,
           mode: generationMode,
-          initImage: generationMode === 'image2video' ? initImage : undefined,
+          initImage: generationMode === 'image2video' ? (initImage || undefined) : undefined,
           prompt,
           negativePrompt: negativePrompt || undefined,
           steps,

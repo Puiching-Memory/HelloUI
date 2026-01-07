@@ -464,13 +464,13 @@ export const ImageUpscalePage = () => {
   }, []);
 
   // 监听 CLI 输出
-  useIpcListener<{ type: 'stdout' | 'stderr'; text: string }>(
+  useIpcListener(
     'generate:cli-output',
     handleCliOutput
   );
 
   // 监听预览图片更新
-  useIpcListener<{ previewImage?: string }>(
+  useIpcListener(
     'generate:preview-update',
     (data) => {
       if (data?.previewImage) {
@@ -587,9 +587,9 @@ export const ImageUpscalePage = () => {
       setHasUserCollapsed(false); // 重置用户收起状态，允许新的自动展开
       setLastViewedOutputCount(0); // 重置已查看数量
 
-      const progressListener = (_event: unknown, data: { progress?: string; image?: string }) => {
+      const progressListener = (_event: unknown, data: { progress: string | number; image?: string }) => {
         if (data.progress) {
-          setGenerationProgress(data.progress);
+          setGenerationProgress(String(data.progress));
         }
         if (data.image) {
           setGeneratedImage(data.image);

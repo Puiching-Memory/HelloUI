@@ -502,7 +502,7 @@ export const GeneratedImagesPage = () => {
       }
       
       if (result.success) {
-        const sizeInMB = (result.size / (1024 * 1024)).toFixed(2);
+        const sizeInMB = result.size ? (result.size / (1024 * 1024)).toFixed(2) : '0';
         setMessageDialogContent({ title: '成功', message: `成功打包 ${selectedPaths.length} 张图片为 ZIP 文件\n文件大小: ${sizeInMB} MB` });
         setMessageDialogOpen(true);
       } else {
