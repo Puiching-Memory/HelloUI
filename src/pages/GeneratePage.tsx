@@ -436,13 +436,13 @@ export const GeneratePage = () => {
   }, []);
 
   // 监听 CLI 输出
-  useIpcListener<{ type: 'stdout' | 'stderr'; text: string }>(
+  useIpcListener(
     'generate:cli-output',
     handleCliOutput
   );
 
   // 监听预览图片更新
-  useIpcListener<{ previewImage?: string }>(
+  useIpcListener(
     'generate:preview-update',
     (data) => {
       if (data?.previewImage) {
@@ -583,9 +583,9 @@ export const GeneratePage = () => {
       setLastViewedOutputCount(0); // 重置已查看数量
 
       // 监听生成进度
-      const progressListener = (_event: unknown, data: { progress?: string; image?: string }) => {
+      const progressListener = (_event: unknown, data: { progress: string | number; image?: string }) => {
         if (data.progress) {
-          setGenerationProgress(data.progress);
+          setGenerationProgress(String(data.progress));
         }
         if (data.image) {
           setGeneratedImage(data.image);

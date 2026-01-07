@@ -237,13 +237,14 @@ export const AliyunTongyiVideoPage = () => {
         },
       });
 
-      if (result.status === 200 && result.data.output?.task_id) {
-        const tid = result.data.output.task_id;
+      const data = result.data as any;
+      if (result.status === 200 && data?.output?.task_id) {
+        const tid = data.output.task_id;
         setTaskId(tid);
         setTaskStatus('任务已创建，正在排队...');
         startPolling(tid);
       } else {
-        throw new Error(result.data?.message || result.statusText || '创建任务失败');
+        throw new Error(data?.message || result.statusText || '创建任务失败');
       }
     } catch (err) {
       console.error('Failed to create task:', err);
@@ -267,15 +268,16 @@ export const AliyunTongyiVideoPage = () => {
         });
 
         if (result.status === 200) {
-          const status = result.data.output.task_status;
+          const data = result.data as any;
+          const status = data.output.task_status;
           setTaskStatus(status === 'PENDING' ? '排队中...' : status === 'RUNNING' ? '生成中...' : status);
           
           if (status === 'SUCCEEDED') {
-            setVideoUrl(result.data.output.video_url);
+            setVideoUrl(data.output.video_url);
             setGenerating(false);
             if (pollingRef.current) clearInterval(pollingRef.current);
           } else if (status === 'FAILED' || status === 'CANCELED' || status === 'UNKNOWN') {
-            setError(`任务状态: ${status}. ${result.data.output.message || ''}`);
+            setError(`任务状态: ${status}. ${data.output.message || ''}`);
             setGenerating(false);
             if (pollingRef.current) clearInterval(pollingRef.current);
           }
