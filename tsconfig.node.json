@@ -11,6 +11,6 @@
     "declarationMap": true,
     "outDir": "./dist-electron"
   },
-  "include": ["vite.config.ts", "electron"]
+  "include": ["vite.config.ts", "electron", "shared"]
 }
 

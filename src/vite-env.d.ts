@@ -1,5 +1,13 @@
 /// <reference types="vite/client" />
 
+import type {
+  IpcEventChannel,
+  IpcInvokeArgs,
+  IpcInvokeChannel,
+  IpcInvokeResponse,
+  IPCEventMap,
+} from '../shared/ipc'
+
 interface ImportMetaEnv {
   readonly VITE_DEV_SERVER_URL: string
 }
@@ -11,11 +19,11 @@ interface ImportMeta {
 declare global {
   interface Window {
     ipcRenderer: {
-      on(channel: string, listener: (event: any, ...args: any[]) => void): void
+      on<C extends IpcEventChannel>(channel: C, listener: (event: any, payload: IPCEventMap[C]) => void): void
       off(channel: string, ...args: any[]): void
       removeAllListeners(channel: string): void
-      send(channel: string, ...args: any[]): void
-      invoke(channel: string, ...args: any[]): Promise<any>
+      send<C extends IpcInvokeChannel>(channel: C, ...args: IpcInvokeArgs<C>): void
+      invoke<C extends IpcInvokeChannel>(channel: C, ...args: IpcInvokeArgs<C>): Promise<IpcInvokeResponse<C>>
     }
   }
 }

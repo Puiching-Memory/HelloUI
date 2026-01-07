@@ -12,14 +12,8 @@ const archiver = require('archiver')
 import { execa } from 'execa'
 import { AsyncOperationGuard } from './utils/AsyncOperationGuard.js'
 import { ResourceManager } from './utils/ResourceManager.js'
+import { registerSystemIpc } from './ipc/system.js'
 import type { DeviceType, ModelGroup, GenerateImageParams, GeneratedImageInfo } from './types/index.js'
-
-// 启用 WebGPU 相关命令行开关
-app.commandLine.appendSwitch('enable-webgpu')
-app.commandLine.appendSwitch('enable-unsafe-webgpu')
-app.commandLine.appendSwitch('enable-features', 'WebGPU')
-app.commandLine.appendSwitch('ignore-gpu-blocklist')
-app.commandLine.appendSwitch('enable-webgpu-developer-features')
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
@@ -38,7 +32,6 @@ process.env.VITE_PUBLIC = app.isPackaged
   : join(process.env.DIST, '../public')
 
 let win: BrowserWindow | null = null
-let workerWin: BrowserWindow | null = null
 
 // 使用绝对路径确保 preload 脚本正确加载
 const preload = resolve(__dirname, 'preload.js')
@@ -66,34 +59,6 @@ function createWindow() {
     const distPath = process.env.DIST || join(__dirname, '../dist')
     win.loadFile(join(distPath, 'index.html'))
   }
-}
-
-function createWorkerWindow() {
-  workerWin = new BrowserWindow({
-    show: false,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
-      webSecurity: false, // 允许加载本地文件
-      experimentalFeatures: true, // 启用实验性功能
-    },
-  })
-
-  // 将 worker 窗口的控制台输出转发到主进程控制台
-  workerWin.webContents.on('console-message', (event) => {
-    console.log(`[Worker Console] ${event.message}`)
-  })
-
-  const workerHtmlPath = join(__dirname, '../worker.html')
-  if (existsSync(workerHtmlPath)) {
-    console.log(`[Main] Loading worker from: ${workerHtmlPath}`)
-    workerWin.loadFile(workerHtmlPath)
-  } else {
-    console.error(`[Main] Worker HTML not found at: ${workerHtmlPath}`)
-  }
-  
-  // 如果需要调试，可以取消注释下面这行
-  // workerWin.webContents.openDevTools({ mode: 'detach' })
 }
 
 app.on('window-all-closed', () => {
@@ -234,7 +199,7 @@ async function initDefaultSDCppFolder(): Promise<string> {
     console.log(`[Main] Created default SD.cpp engine folder: ${defaultFolder}`)
   }
   // 创建设备子文件夹
-  const deviceFolders = ['cpu', 'vulkan', 'cuda', 'webgpu']
+  const deviceFolders = ['cpu', 'vulkan', 'cuda']
   for (const device of deviceFolders) {
     const deviceFolder = join(defaultFolder, device)
     if (!existsSync(deviceFolder)) {
@@ -583,88 +548,14 @@ ipcMain.handle('sdcpp:get-device', async () => {
 // IPC 处理程序：列出文件夹中的文件（根据设备类型）
 // 获取可执行文件的版本号
 async function getExecutableVersion(exePath: string): Promise<string | null> {
-  const isJs = exePath.endsWith('.js')
   const cwd = dirname(exePath)
-  
+
   try {
-    let output = ''
-    if (isJs) {
-      // 对于 WebGPU 版本，使用 worker 窗口获取版本号以获得真实的 WebGPU 环境
-      if (!workerWin) {
-        createWorkerWindow()
-      }
-      
-      output = await new Promise<string>((resolve) => {
-        const taskId = `ver_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
-        let version = ''
-        let isFinished = false
-        
-        const onStdout = (_: any, text: string) => {
-          console.log(`[Main] Received version stdout for ${taskId}: ${text}`)
-          version += text
-        }
-
-        const onStderr = (_: any, text: string) => {
-          console.log(`[Main] Received version stderr for ${taskId}: ${text}`)
-          // 有时版本信息会打印到 stderr
-          version += text
-        }
-        
-        const onExit = (_: any, code: number) => {
-          console.log(`[Main] Version process exited for ${taskId} with code ${code}`)
-          finish()
-        }
-
-        const onError = (_: any, msg: string) => {
-          console.error(`[Main] Version check error for ${taskId}: ${msg}`)
-          finish()
-        }
-        
-        const finish = () => {
-          if (isFinished) return
-          isFinished = true
-          cleanup()
-          // 延迟一小会儿再 reload，确保消息处理完
-          setTimeout(() => {
-            if (workerWin && !workerWin.isDestroyed()) {
-              console.log(`[Main] Reloading worker window after version check ${taskId}`)
-              workerWin.webContents.reload()
-            }
-          }, 100)
-          resolve(version.trim())
-        }
-        
-        const cleanup = () => {
-          ipcMain.removeListener(`sdcpp:stdout:${taskId}`, onStdout)
-          ipcMain.removeListener(`sdcpp:stderr:${taskId}`, onStderr)
-          ipcMain.removeListener(`sdcpp:exit:${taskId}`, onExit)
-          ipcMain.removeListener(`sdcpp:error:${taskId}`, onError)
-        }
-        
-        ipcMain.on(`sdcpp:stdout:${taskId}`, onStdout)
-        ipcMain.on(`sdcpp:stderr:${taskId}`, onStderr)
-        ipcMain.on(`sdcpp:exit:${taskId}`, onExit)
-        ipcMain.on(`sdcpp:error:${taskId}`, onError)
-        
-        console.log(`[Main] Requesting version from worker, taskId: ${taskId}`)
-        workerWin!.webContents.send('sdcpp:run', { exePath, args: ['--version'], id: taskId })
-        
-        // 设置超时
-        setTimeout(() => {
-          if (!isFinished) {
-            console.log(`[Main] Version detection timeout for ${taskId}, current output: ${version.substring(0, 50)}...`)
-            finish()
-          }
-        }, 8000)
-      })
-    } else {
-      // 对于原生可执行文件
-      const { stdout, stderr } = await execa(exePath, ['--version'], {
-        cwd,
-        timeout: 5000
-      })
-      output = (stdout || stderr || '').trim()
-    }
+    const { stdout, stderr } = await execa(exePath, ['--version'], {
+      cwd,
+      timeout: 5000
+    })
+    const output = (stdout || stderr || '').trim()
 
     if (output) {
       // 提取版本信息，例如：stable-diffusion.cpp version unknown, commit bda7fab
@@ -696,11 +587,11 @@ ipcMain.handle('sdcpp:list-files', async (_, folder: string, deviceType: DeviceT
   const files: Array<{ name: string; size: number; path: string; modified: number }> = []
   // 目前仅支持 Windows 平台
   // TODO: 未来如需支持其他平台，可在此处添加对应的文件扩展名（如 .so 用于 Linux，.dylib 用于 macOS）
-  const engineExtensions = ['.exe', '.dll', '.bin', '.txt', '.js', '.wasm']
+  const engineExtensions = ['.exe', '.dll', '.bin', '.txt']
   
-  // 查找 sd-cli.exe 或 sd-cli.js 以获取引擎版本号
+  // 查找 sd-cli.exe 以获取引擎版本号
   let engineVersion: string | null = null
-  const executableName = deviceType === 'webgpu' ? 'sd-cli.js' : 'sd-cli.exe'
+  const executableName = 'sd-cli.exe'
   const executablePath = join(deviceFolder, executableName)
   
   // 收集所有文件信息
@@ -1161,7 +1052,7 @@ function getSDCppExecutablePath(deviceType: DeviceType): string {
   const deviceFolder = join(engineFolder, deviceType)
   // 目前仅支持 Windows 平台
   // TODO: 未来如需支持其他平台，可在此处添加平台检测逻辑
-  const executableName = deviceType === 'webgpu' ? 'sd-cli.js' : 'sd-cli.exe'
+  const executableName = 'sd-cli.exe'
   return join(deviceFolder, executableName)
 }
 
@@ -1257,11 +1148,7 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
     if (seed !== undefined && seed >= 0) args.push('--seed', seed.toString())
     if (batchCount > 1) args.push('--batch-count', batchCount.toString())
     
-    if (deviceType === 'webgpu') {
-      // WebGPU 模式下限制线程数，减少 WASM 堆压力
-      const t = (threads !== undefined && threads > 0) ? Math.min(threads, 4) : 4
-      args.push('--threads', t.toString())
-    } else if (threads !== undefined && threads > 0) {
+    if (threads !== undefined && threads > 0) {
       args.push('--threads', threads.toString())
     }
 
@@ -1296,13 +1183,6 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
 
       const killProcess = () => {
         if (isResolved) return
-        if (deviceType === 'webgpu') {
-          console.log(`[Generate] Killing WebGPU task by reloading worker window`)
-          workerWin?.webContents.reload()
-          isResolved = true
-          reject(new Error('生成已取消'))
-          return
-        }
         if (childProcess && childProcess.pid) {
           if (process.platform === 'win32') exec(`taskkill /F /T /PID ${childProcess.pid}`)
           else childProcess.kill()
@@ -1348,98 +1228,50 @@ ipcMain.handle('generate:start', async (event, params: GenerateImageParams) => {
         }
       }
 
-      if (deviceType === 'webgpu') {
-        if (!workerWin) createWorkerWindow()
-        const taskId = `gen_${Date.now()}`
-        const onStdout = (_: any, text: string) => {
-          stdout += text
-          if (operationGuard.check() && !event.sender.isDestroyed()) {
-            event.sender.send('generate:cli-output', { type: 'stdout', text })
-            const m = text.match(/progress[:\s]+(\d+)%/i)
-            if (m) event.sender.send('generate:progress', { progress: `生成中... ${m[1]}%` })
-          }
+      childProcess = execa(sdExePath, args, { cwd: dirname(sdExePath) })
+      currentGenerateProcess = childProcess
+
+      childProcess.stdout?.on('data', (data: Buffer) => {
+        const text = data.toString('utf8')
+        stdout += text
+        if (operationGuard.check() && !event.sender.isDestroyed()) {
+          event.sender.send('generate:cli-output', { type: 'stdout', text })
+          const m = text.match(/progress[:\s]+(\d+)%/i)
+          if (m) event.sender.send('generate:progress', { progress: `生成中... ${m[1]}%` })
         }
-        const onStderr = (_: any, text: string) => {
-          stderr += text
-          if (operationGuard.check() && !event.sender.isDestroyed()) {
-            event.sender.send('generate:cli-output', { type: 'stderr', text })
-          }
+      })
+
+      childProcess.stderr?.on('data', (data: Buffer) => {
+        const text = data.toString('utf8')
+        stderr += text
+        if (operationGuard.check() && !event.sender.isDestroyed()) {
+          event.sender.send('generate:cli-output', { type: 'stderr', text })
         }
-        const onExit = (_: any, code: number) => {
-          cleanup()
-          if (isResolved) return
-          isResolved = true
-          if (code === 0) handleCompletion()
-          else reject(new Error(`SD.cpp 退出，错误代码: ${code}`))
-        }
-        const onError = (_: any, msg: string) => {
-          cleanup()
-          if (isResolved) return
-          isResolved = true
-          reject(new Error(msg))
-        }
+      })
 
-        ipcMain.on(`sdcpp:stdout:${taskId}`, onStdout)
-        ipcMain.on(`sdcpp:stderr:${taskId}`, onStderr)
-        ipcMain.on(`sdcpp:exit:${taskId}`, onExit)
-        ipcMain.on(`sdcpp:error:${taskId}`, onError)
-        
-        resourceManager.register(() => {
-          ipcMain.removeListener(`sdcpp:stdout:${taskId}`, onStdout)
-          ipcMain.removeListener(`sdcpp:stderr:${taskId}`, onStderr)
-          ipcMain.removeListener(`sdcpp:exit:${taskId}`, onExit)
-          ipcMain.removeListener(`sdcpp:error:${taskId}`, onError)
-        }, 'listener')
-
-        workerWin!.webContents.send('sdcpp:run', { exePath: sdExePath, args, id: taskId })
-        childProcess = { taskId }
-        currentGenerateProcess = childProcess
-      } else {
-        childProcess = execa(sdExePath, args, { cwd: dirname(sdExePath) })
-        currentGenerateProcess = childProcess
-
-        childProcess.stdout?.on('data', (data: Buffer) => {
-          const text = data.toString('utf8')
-          stdout += text
-          if (operationGuard.check() && !event.sender.isDestroyed()) {
-            event.sender.send('generate:cli-output', { type: 'stdout', text })
-            const m = text.match(/progress[:\s]+(\d+)%/i)
-            if (m) event.sender.send('generate:progress', { progress: `生成中... ${m[1]}%` })
-          }
-        })
-
-        childProcess.stderr?.on('data', (data: Buffer) => {
-          const text = data.toString('utf8')
-          stderr += text
-          if (operationGuard.check() && !event.sender.isDestroyed()) {
-            event.sender.send('generate:cli-output', { type: 'stderr', text })
-          }
-        })
-
-        childProcess.on('close', (code: number, signal: string) => {
-          cleanup()
-          if (isResolved) return
-          isResolved = true
-          if (code === 0) {
-            handleCompletion()
+      childProcess.on('close', (code: number, signal: string) => {
+        cleanup()
+        if (isResolved) return
+        isResolved = true
+        if (code === 0) {
+          handleCompletion()
+        } else {
+          const wasCancelled = signal === 'SIGTERM' || signal === 'SIGKILL'
+          if (wasCancelled) {
+            reject(new Error('生成已取消'))
           } else {
-            const wasCancelled = signal === 'SIGTERM' || signal === 'SIGKILL'
-            if (wasCancelled) {
-              reject(new Error('生成已取消'))
-            } else {
-              const errorMsg = stderr || stdout || `进程退出，代码: ${code}, 信号: ${signal}`
-              reject(new Error(`图片生成失败: ${errorMsg}`))
-            }
+            const errorMsg = stderr || stdout || `进程退出，代码: ${code}, 信号: ${signal}`
+            reject(new Error(`图片生成失败: ${errorMsg}`))
           }
-        })
+        }
+      })
 
-        childProcess.on('error', (err: Error) => {
-          cleanup()
-          if (isResolved) return
-          isResolved = true
-          reject(err)
-        })
-      }
+      childProcess.on('error', (err: Error) => {
+        cleanup()
+        if (isResolved) return
+        isResolved = true
+        reject(err)
+      })
 
       if (preview && preview !== 'none' && preview.trim() !== '') {
         const absPath = resolve(previewImagePath)
@@ -1594,13 +1426,6 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
 
       const killProcess = () => {
         if (isResolved) return
-        if (deviceType === 'webgpu') {
-          console.log(`[Generate Video] Killing WebGPU task by reloading worker window`)
-          workerWin?.webContents.reload()
-          isResolved = true
-          reject(new Error('生成已取消'))
-          return
-        }
         if (childProcess && childProcess.pid) {
           if (process.platform === 'win32') exec(`taskkill /F /T /PID ${childProcess.pid}`)
           else childProcess.kill()
@@ -1646,91 +1471,41 @@ ipcMain.handle('generate-video:start', async (event, params: GenerateImageParams
         }
       }
 
-      if (deviceType === 'webgpu') {
-        console.log(`[Generate Video] Using worker window for WebGPU`)
-        if (!workerWin) createWorkerWindow()
-        const taskId = `vid_${Date.now()}`
-        
-        const onStdout = (_: any, text: string) => {
-          stdout += text
-          if (operationGuard.check() && !event.sender.isDestroyed()) {
-            event.sender.send('generate-video:cli-output', { type: 'stdout', text })
-            const m = text.match(/progress[:\s]+(\d+)%/i)
-            if (m) event.sender.send('generate-video:progress', { progress: `生成中... ${m[1]}%` })
-          }
+      childProcess = execa(sdExePath, args, { cwd: dirname(sdExePath) })
+      currentGenerateProcess = childProcess
+
+      childProcess.stdout?.on('data', (data: Buffer) => {
+        const text = data.toString('utf8')
+        stdout += text
+        if (operationGuard.check() && !event.sender.isDestroyed()) {
+          event.sender.send('generate-video:cli-output', { type: 'stdout', text })
+          const m = text.match(/progress[:\s]+(\d+)%/i)
+          if (m) event.sender.send('generate-video:progress', { progress: `生成中... ${m[1]}%` })
         }
-        const onStderr = (_: any, text: string) => {
-          stderr += text
-          if (operationGuard.check() && !event.sender.isDestroyed()) {
-            event.sender.send('generate-video:cli-output', { type: 'stderr', text })
-          }
+      })
+
+      childProcess.stderr?.on('data', (data: Buffer) => {
+        const text = data.toString('utf8')
+        stderr += text
+        if (operationGuard.check() && !event.sender.isDestroyed()) {
+          event.sender.send('generate-video:cli-output', { type: 'stderr', text })
         }
-        const onExit = (_: any, code: number) => {
-          cleanup()
-          if (isResolved) return
-          isResolved = true
-          if (code === 0) handleVideoCompletion()
-          else reject(new Error(`SD.cpp 退出，错误代码: ${code}`))
-        }
-        const onError = (_: any, msg: string) => {
-          cleanup()
-          if (isResolved) return
-          isResolved = true
-          reject(new Error(msg))
-        }
+      })
 
-        ipcMain.on(`sdcpp:stdout:${taskId}`, onStdout)
-        ipcMain.on(`sdcpp:stderr:${taskId}`, onStderr)
-        ipcMain.on(`sdcpp:exit:${taskId}`, onExit)
-        ipcMain.on(`sdcpp:error:${taskId}`, onError)
-        
-        resourceManager.register(() => {
-          ipcMain.removeListener(`sdcpp:stdout:${taskId}`, onStdout)
-          ipcMain.removeListener(`sdcpp:stderr:${taskId}`, onStderr)
-          ipcMain.removeListener(`sdcpp:exit:${taskId}`, onExit)
-          ipcMain.removeListener(`sdcpp:error:${taskId}`, onError)
-        }, 'listener')
+      childProcess.on('close', (code: number) => {
+        cleanup()
+        if (isResolved) return
+        isResolved = true
+        if (code === 0) handleVideoCompletion()
+        else reject(new Error(`SD.cpp 退出，错误代码: ${code}`))
+      })
 
-        workerWin!.webContents.send('sdcpp:run', { exePath: sdExePath, args, id: taskId })
-        childProcess = { taskId }
-        currentGenerateProcess = childProcess
-      } else {
-        childProcess = execa(sdExePath, args, { cwd: dirname(sdExePath) })
-        currentGenerateProcess = childProcess
-
-        childProcess.stdout?.on('data', (data: Buffer) => {
-          const text = data.toString('utf8')
-          stdout += text
-          if (operationGuard.check() && !event.sender.isDestroyed()) {
-            event.sender.send('generate-video:cli-output', { type: 'stdout', text })
-            const m = text.match(/progress[:\s]+(\d+)%/i)
-            if (m) event.sender.send('generate-video:progress', { progress: `生成中... ${m[1]}%` })
-          }
-        })
-
-        childProcess.stderr?.on('data', (data: Buffer) => {
-          const text = data.toString('utf8')
-          stderr += text
-          if (operationGuard.check() && !event.sender.isDestroyed()) {
-            event.sender.send('generate-video:cli-output', { type: 'stderr', text })
-          }
-        })
-
-        childProcess.on('close', (code: number) => {
-          cleanup()
-          if (isResolved) return
-          isResolved = true
-          if (code === 0) handleVideoCompletion()
-          else reject(new Error(`SD.cpp 退出，错误代码: ${code}`))
-        })
-
-        childProcess.on('error', (err: Error) => {
-          cleanup()
-          if (isResolved) return
-          isResolved = true
-          reject(err)
-        })
-      }
+      childProcess.on('error', (err: Error) => {
+        cleanup()
+        if (isResolved) return
+        isResolved = true
+        reject(err)
+      })
     })
   } catch (error: any) {
     console.error('[Generate Video] Error:', error)
@@ -2050,52 +1825,8 @@ ipcMain.handle('generated-images:batch-download', async (_, filePaths: string[])
     })
 })
 
-// IPC 处理程序：切换开发者工具（打开/关闭）
-ipcMain.handle('devtools:toggle', async () => {
-  const window = win || BrowserWindow.getFocusedWindow()
-  if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) {
-    try {
-      window.webContents.toggleDevTools()
-      return { success: true, isOpen: window.webContents.isDevToolsOpened() }
-    } catch (error) {
-      console.error('Failed to toggle DevTools:', error)
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  }
-  return { success: false, error: 'No available window' }
-})
-
-// IPC 处理程序：获取应用版本号
-ipcMain.handle('app:get-version', async () => {
-  return app.getVersion()
-})
-
-// IPC 处理程序：阿里通义 API 调用
-ipcMain.handle('aliyun-api:call', async (_, { method, url, headers, body }) => {
-  try {
-    const response = await net.fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    })
-    
-    const data = await response.json()
-    return {
-      status: response.status,
-      statusText: response.statusText,
-      data,
-    }
-  } catch (error) {
-    console.error('Aliyun API call failed:', error)
-    return {
-      status: 500,
-      statusText: 'Internal Server Error',
-      error: error instanceof Error ? error.message : String(error),
-    }
-  }
-})
-
 app.whenReady().then(async () => {
+  registerSystemIpc({ getWindow: () => win || BrowserWindow.getFocusedWindow() })
   // 注册 media 协议以允许加载本地资源
   protocol.handle('media', (request) => {
     let filePath = decodeURIComponent(request.url.slice('media://'.length))
@@ -2122,7 +1853,6 @@ app.whenReady().then(async () => {
   // 初始化默认 outputs 文件夹
   await initDefaultOutputsFolder()
   createWindow()
-  createWorkerWindow()
 })
 
 

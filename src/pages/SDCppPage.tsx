@@ -4,16 +4,9 @@ import {
   Title1,
   Title2,
   Body1,
-  Table,
-  TableHeader,
-  TableHeaderCell,
-  TableBody,
-  TableRow,
-  TableCell,
   makeStyles,
   tokens,
   Spinner,
-  Tooltip,
 } from '@fluentui/react-components';
 import { useState, useEffect } from 'react';
 
@@ -26,45 +19,34 @@ const useStyles = makeStyles({
     maxWidth: '1400px',
     margin: '0 auto',
   },
-  section: {
+  summaryGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+    gap: tokens.spacingVerticalL,
+  },
+  engineCard: {
+    padding: tokens.spacingVerticalL,
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
+    gap: tokens.spacingVerticalS,
   },
-  tableContainer: {
-    overflowX: 'auto',
+  engineInfoRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  infoLabel: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase300,
+  },
+  infoValue: {
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase400,
   },
   emptyState: {
     textAlign: 'center',
     padding: tokens.spacingVerticalXXL,
     color: tokens.colorNeutralForeground3,
-  },
-  truncatedText: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    display: 'block',
-    width: '100%',
-  },
-  tableCellFileName: {
-    maxWidth: '400px',
-    minWidth: '200px',
-    overflow: 'hidden',
-  },
-  tableCellSize: {
-    maxWidth: '150px',
-    minWidth: '100px',
-    overflow: 'hidden',
-  },
-  tableCellDate: {
-    maxWidth: '200px',
-    minWidth: '150px',
-    overflow: 'hidden',
-  },
-  tableCellVersion: {
-    maxWidth: '200px',
-    minWidth: '150px',
-    overflow: 'hidden',
   },
 });
 
@@ -76,7 +58,7 @@ interface EngineFile {
   deviceType: DeviceType;
 }
 
-type DeviceType = 'cpu' | 'vulkan' | 'cuda' | 'webgpu';
+type DeviceType = 'cpu' | 'vulkan' | 'cuda';
 
 export const SDCppPage = () => {
   const styles = useStyles();
@@ -86,7 +68,6 @@ export const SDCppPage = () => {
     cpu: null,
     vulkan: null,
     cuda: null,
-    webgpu: null,
   });
   const [loading, setLoading] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -133,7 +114,7 @@ export const SDCppPage = () => {
     setLoading(true);
     try {
       // 加载所有设备类型的文件和版本号
-      const deviceTypes: DeviceType[] = ['cpu', 'vulkan', 'cuda', 'webgpu'];
+      const deviceTypes: DeviceType[] = ['cpu', 'vulkan', 'cuda'];
       const allFilesPromises = deviceTypes.map(async (deviceType) => {
         try {
           const result = await window.ipcRenderer.invoke('sdcpp:list-files', engineFolder, deviceType);
@@ -155,7 +136,6 @@ export const SDCppPage = () => {
         cpu: null,
         vulkan: null,
         cuda: null,
-        webgpu: null,
       };
       
       // 收集版本号信息
@@ -186,10 +166,6 @@ export const SDCppPage = () => {
     return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
   };
 
-  const formatDate = (timestamp: number): string => {
-    return new Date(timestamp).toLocaleString('zh-CN');
-  };
-
   const getDeviceLabel = (device: DeviceType): string => {
     switch (device) {
       case 'cpu':
@@ -198,103 +174,66 @@ export const SDCppPage = () => {
         return 'Vulkan';
       case 'cuda':
         return 'CUDA';
-      case 'webgpu':
-        return 'WebGPU';
       default:
         return device;
     }
   };
 
-  // 按设备类型分组文件
-  const filesByDevice = files.reduce((acc, file) => {
-    if (!acc[file.deviceType]) {
-      acc[file.deviceType] = [];
-    }
-    acc[file.deviceType].push(file);
-    return acc;
-  }, {} as Record<DeviceType, EngineFile[]>);
-
-  // 渲染单个设备类型的文件列表
-  const renderDeviceFileList = (deviceType: DeviceType) => {
-    const deviceFiles = filesByDevice[deviceType] || [];
-    const deviceLabel = getDeviceLabel(deviceType);
+  // 按设备类型计算引擎概览
+  const engineSummaries = (['cpu', 'vulkan', 'cuda'] as DeviceType[]).map((deviceType) => {
+    const deviceFiles = files.filter(f => f.deviceType === deviceType);
+    const totalSize = deviceFiles.reduce((sum, file) => sum + file.size, 0);
     const version = deviceVersions[deviceType];
+    const label = getDeviceLabel(deviceType);
+    const hasFiles = deviceFiles.length > 0;
 
-    return (
-      <Card className={styles.section} key={deviceType}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalM }}>
-          <Title2>{deviceLabel} 引擎文件</Title2>
-          {version && (
-            <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-              版本: {version}
-            </Body1>
-          )}
-        </div>
-        {loading && deviceFiles.length === 0 ? (
-          <div className={styles.emptyState}>
-            <Spinner size="large" />
-            <Body1 style={{ marginTop: tokens.spacingVerticalM }}>加载中...</Body1>
-          </div>
-        ) : deviceFiles.length === 0 ? (
-          <div className={styles.emptyState}>
-            <Body1>暂无引擎文件</Body1>
-            <Body1 style={{ fontSize: tokens.fontSizeBase200, marginTop: tokens.spacingVerticalS }}>
-              {deviceLabel} 设备类型下暂无引擎文件
-            </Body1>
-          </div>
-        ) : (
-          <div className={styles.tableContainer}>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHeaderCell>文件名</TableHeaderCell>
-                  <TableHeaderCell>大小</TableHeaderCell>
-                  <TableHeaderCell>修改时间</TableHeaderCell>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {deviceFiles.map((file) => (
-                  <TableRow key={file.path}>
-                    <TableCell className={styles.tableCellFileName}>
-                      <Tooltip content={file.name} relationship="label">
-                        <div className={styles.truncatedText} title={file.name}>
-                          <Body1>{file.name}</Body1>
-                        </div>
-                      </Tooltip>
-                    </TableCell>
-                    <TableCell className={styles.tableCellSize}>
-                      <Tooltip content={formatFileSize(file.size)} relationship="label">
-                        <div className={styles.truncatedText} title={formatFileSize(file.size)}>
-                          <Body1>{formatFileSize(file.size)}</Body1>
-                        </div>
-                      </Tooltip>
-                    </TableCell>
-                    <TableCell className={styles.tableCellDate}>
-                      <Tooltip content={formatDate(file.modified)} relationship="label">
-                        <div className={styles.truncatedText} title={formatDate(file.modified)}>
-                          <Body1>{formatDate(file.modified)}</Body1>
-                        </div>
-                      </Tooltip>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </Card>
-    );
-  };
+    return {
+      type: deviceType,
+      label,
+      totalSize,
+      version,
+      hasFiles
+    };
+  });
 
   return (
     <div className={styles.container}>
       <Title1>SD.cpp 推理引擎</Title1>
 
-      {/* 按设备类型分组的文件列表 */}
-      {renderDeviceFileList('cpu')}
-      {renderDeviceFileList('cuda')}
-      {renderDeviceFileList('vulkan')}
-      {renderDeviceFileList('webgpu')}
+      {loading && files.length === 0 ? (
+        <div className={styles.emptyState}>
+          <Spinner size="large" />
+          <Body1 style={{ marginTop: tokens.spacingVerticalM }}>加载中...</Body1>
+        </div>
+      ) : (
+        <div className={styles.summaryGrid}>
+          {engineSummaries.map((summary) => (
+            <Card className={styles.engineCard} key={summary.type}>
+              <div className={styles.engineInfoRow}>
+                <Title2>{summary.label} 引擎</Title2>
+              </div>
+              
+              {!summary.hasFiles ? (
+                <Body1 style={{ color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalS }}>
+                  暂无相关文件
+                </Body1>
+              ) : (
+                <>
+                  <div className={styles.engineInfoRow} style={{ marginTop: tokens.spacingVerticalM }}>
+                    <span className={styles.infoLabel}>当前版本</span>
+                    <span className={styles.infoValue}>{summary.version || '未知'}</span>
+                  </div>
+                  
+                  <div className={styles.engineInfoRow}>
+                    <span className={styles.infoLabel}>占用空间</span>
+                    <span className={styles.infoValue}>{formatFileSize(summary.totalSize)}</span>
+                  </div>
+                </>
+              )}
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

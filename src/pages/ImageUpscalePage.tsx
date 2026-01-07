@@ -348,7 +348,7 @@ interface ModelGroup {
   updatedAt: number;
 }
 
-type DeviceType = 'cpu' | 'vulkan' | 'cuda' | 'webgpu';
+type DeviceType = 'cpu' | 'vulkan' | 'cuda';
 
 // 清理 ANSI 转义序列
 const stripAnsiCodes = (text: string): string => {
@@ -696,8 +696,6 @@ export const ImageUpscalePage = () => {
         return 'Vulkan';
       case 'cuda':
         return 'CUDA';
-      case 'webgpu':
-        return 'WebGPU';
       default:
         return device;
     }
@@ -1121,7 +1119,7 @@ export const ImageUpscalePage = () => {
               </Text>
             </div>
             <div style={{ marginBottom: tokens.spacingVerticalM }}>
-              <Field label="推理引擎" hint="选择主要的推理引擎（CUDA/Vulkan/CPU/WebGPU）">
+              <Field label="推理引擎" hint="选择主要的推理引擎（CUDA/Vulkan/CPU）">
                 <Dropdown
                   value={getDeviceLabel(deviceType)}
                   selectedOptions={[deviceType]}
@@ -1134,7 +1132,6 @@ export const ImageUpscalePage = () => {
                   <Option value="cpu">CPU</Option>
                   <Option value="vulkan">Vulkan</Option>
                   <Option value="cuda">CUDA</Option>
-                  <Option value="webgpu">WebGPU</Option>
                 </Dropdown>
               </Field>
             </div>
