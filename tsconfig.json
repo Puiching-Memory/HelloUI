@@ -29,7 +29,7 @@
     /* Node types */
     "types": ["node"]
   },
-  "include": ["src", "src/vite-env.d.ts"],
+  "include": ["src", "src/vite-env.d.ts", "shared"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
 

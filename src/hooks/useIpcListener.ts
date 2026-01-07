@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import type { IpcEventChannel, IPCEventMap } from '../../shared/ipc';
 
 /**
  * 标准化的 IPC 监听器管理 Hook
@@ -20,13 +21,13 @@ import { useEffect, useRef } from 'react';
  * );
  * ```
  */
-export function useIpcListener<T = any>(
-  channel: string,
-  handler: (data: T) => void,
+export function useIpcListener<C extends IpcEventChannel>(
+  channel: C,
+  handler: (data: IPCEventMap[C]) => void,
   deps?: React.DependencyList
 ): void {
   const handlerRef = useRef(handler);
-  const listenerRef = useRef<((_event: unknown, data: T) => void) | null>(null);
+  const listenerRef = useRef<((_event: unknown, data: IPCEventMap[C]) => void) | null>(null);
 
   // 更新 handler 引用，确保使用最新的 handler
   useEffect(() => {
@@ -45,7 +46,7 @@ export function useIpcListener<T = any>(
     }
 
     // 创建新的监听器
-    const listener = (_event: unknown, data: T) => {
+    const listener = (_event: unknown, data: IPCEventMap[C]) => {
       handlerRef.current(data);
     };
     listenerRef.current = listener;
