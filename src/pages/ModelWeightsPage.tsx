@@ -43,7 +43,8 @@ import {
 import { useState, useEffect } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
 import { useAppStore } from '../hooks/useAppStore';
-import type { TaskType, ModelGroup, WeightFile } from '../../electron/types/index';
+import { formatFileSize } from '@/utils/format';
+import type { TaskType, ModelGroup, WeightFile } from '../../shared/types'
 
 const useStyles = makeStyles({
   container: {
@@ -417,13 +418,7 @@ export const ModelWeightsPage = () => {
     }
   };
 
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
-  };
+
 
   const formatDate = (timestamp: number): string => {
     return new Date(timestamp).toLocaleString('zh-CN');

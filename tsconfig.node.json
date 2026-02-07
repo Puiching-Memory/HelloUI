@@ -7,9 +7,7 @@
     "allowSyntheticDefaultImports": true,
     "strict": true,
     "types": ["node"],
-    "declaration": true,
-    "declarationMap": true,
-    "outDir": "./dist-electron"
+    "noEmit": true
   },
   "include": ["vite.config.ts", "electron", "shared"]
 }

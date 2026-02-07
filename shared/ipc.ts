@@ -1,4 +1,4 @@
-import type { DeviceType, ModelGroup, WeightFile, GenerateImageParams, GeneratedImageInfo } from '../electron/types/index.js'
+import type { DeviceType, ModelGroup, WeightFile, GenerateImageParams, GeneratedImageInfo } from './types.js'
 
 // IPC channel allowlists
 export const IPC_INVOKE_CHANNELS = [
