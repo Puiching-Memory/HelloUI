@@ -7,11 +7,15 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies
 node_modules
+
+# Build outputs
 dist
 dist-electron
 release
 *.local
+*.tsbuildinfo
 
 # Editor directories and files
 .vscode/*
@@ -24,10 +28,19 @@ release
 *.sln
 *.sw?
 
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Test coverage
+coverage
+
 # Electron
 out
 *.asar
 
+# Large binary assets (managed separately)
 engines/
 models/
 outputs/

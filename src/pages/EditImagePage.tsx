@@ -14,276 +14,27 @@ import {
   Input,
   Checkbox,
   Text,
-  Dialog,
-  DialogSurface,
-  DialogTitle,
-  DialogBody,
-  DialogActions,
-  DialogContent,
-  CounterBadge,
 } from '@fluentui/react-components';
 import {
   ImageAddRegular,
-  ChevronDownRegular,
-  ChevronUpRegular,
-  CopyRegular,
   DocumentArrowDownRegular,
   ArrowUploadRegular,
   DismissRegular,
 } from '@fluentui/react-icons';
 import { PhotoView } from 'react-photo-view';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
 import { useAppStore } from '../hooks/useAppStore';
+import { useCliOutput } from '../hooks/useCliOutput';
+import { useModelGroups, useDeviceType } from '../hooks/useModelGroups';
+import { useSharedStyles } from '../styles/sharedStyles';
+import { CliOutputPanel } from '../components/CliOutputPanel';
+import { MessageDialog, useMessageDialog } from '../components/MessageDialog';
+import { getDeviceLabel, getModelInfo, DEFAULT_NEGATIVE_PROMPT } from '../utils/modelUtils';
+import type { DeviceType } from '../../shared/types';
 
-const useStyles = makeStyles({
-  container: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalL,
-    padding: tokens.spacingVerticalL,
-    paddingBottom: '120px', // 为浮动控制面板留出空间
-    minHeight: '100%',
-    maxWidth: '1600px',
-    margin: '0 auto',
-  },
-  previewCard: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-    flex: '1 1 auto',
-    minHeight: 0,
-    overflow: 'hidden',
-  },
-  previewSection: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-    flex: '1 1 auto',
-    minHeight: 0,
-    overflow: 'auto',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  previewImage: {
-    width: 'auto',
-    height: 'auto',
-    objectFit: 'contain',
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderRadius: tokens.borderRadiusMedium,
-    cursor: 'pointer',
-    // 限制图片最大尺寸为屏幕的50%
-    maxWidth: '50vw',
-    maxHeight: '50vh',
-  },
-  emptyState: {
-    textAlign: 'center',
-    padding: tokens.spacingVerticalXXL,
-    color: tokens.colorNeutralForeground3,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: '100%',
-  },
-  configCard: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-    flex: '0 0 auto',
-    maxHeight: '50%',
-    overflow: 'auto',
-  },
-  formSection: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-    padding: tokens.spacingVerticalM,
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderRadius: tokens.borderRadiusMedium,
-  },
-  actions: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalM,
-    flexWrap: 'wrap',
-  },
-  floatingControlPanel: {
-    position: 'fixed',
-    bottom: tokens.spacingVerticalL,
-    // 与 container 对齐：container 在 mainContent 中（从 240px 开始）居中，maxWidth: 1600px
-    // 使用与 container 相同的布局逻辑
-    left: `calc(240px + ${tokens.spacingVerticalL})`,
-    right: tokens.spacingVerticalL,
-    maxWidth: '1600px',
-    width: 'auto',
-    margin: '0 auto',
-    zIndex: 1000,
-    boxShadow: tokens.shadow28,
-    borderRadius: tokens.borderRadiusLarge,
-    padding: tokens.spacingVerticalM,
-    // 云母 / 亚克力效果：使用伪元素实现半透明背景，保持内容不透明
-    backgroundColor: 'transparent',
-    backdropFilter: 'blur(20px) saturate(180%)',
-    WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    // 根据主题自动调整的高光描边
-    outline: `1px solid ${tokens.colorNeutralStroke1}`,
-    boxSizing: 'border-box',
-    // 使用伪元素创建半透明背景层
-    '::before': {
-      content: '""',
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: tokens.colorNeutralBackground1,
-      opacity: 0.7,
-      zIndex: -1,
-      borderRadius: tokens.borderRadiusLarge,
-    },
-  },
-  cliOutputCard: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-    flex: '0 0 auto',
-    maxHeight: '300px',
-  },
-  cliOutputCardWithNewMessage: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-    flex: '0 0 auto',
-    maxHeight: '300px',
-    border: `2px solid ${tokens.colorBrandStroke1}`,
-    boxShadow: `0 0 8px ${tokens.colorBrandStroke1}40`,
-    transition: 'all 0.3s ease-in-out',
-  },
-  cliOutputHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: tokens.spacingHorizontalM,
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    minHeight: '44px',
-  },
-  cliOutputHeaderLeft: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    cursor: 'pointer',
-    flex: 1,
-    minWidth: 0,
-    padding: tokens.spacingVerticalXS,
-    margin: `-${tokens.spacingVerticalXS}`,
-    borderRadius: tokens.borderRadiusSmall,
-    position: 'relative',
-    ':hover': {
-      backgroundColor: tokens.colorNeutralBackground2,
-    },
-  },
-  cliOutputTitleContainer: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
-    position: 'relative',
-  },
-  cliOutputTitle: {
-    position: 'relative',
-  },
-  cliOutputHeaderActions: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalXS,
-    alignItems: 'center',
-    flexShrink: 0,
-  },
-  cliOutputContent: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
-    padding: tokens.spacingVerticalM,
-    backgroundColor: tokens.colorNeutralBackground3,
-    borderRadius: tokens.borderRadiusMedium,
-    fontFamily: 'Consolas, "Courier New", monospace',
-    fontSize: tokens.fontSizeBase200,
-    maxHeight: '250px',
-    overflowY: 'auto',
-    overflowX: 'auto',
-  },
-  modelDeviceCard: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-    padding: tokens.spacingVerticalM,
-    backgroundColor: tokens.colorNeutralBackground1,
-    borderRadius: tokens.borderRadiusMedium,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-  },
-  modelDeviceHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: tokens.spacingVerticalXS,
-  },
-  modelDeviceList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-  },
-  modelDeviceItem: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderRadius: tokens.borderRadiusSmall,
-  },
-  modelDeviceItemLeft: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXXS,
-    flex: 1,
-  },
-  modelDeviceItemRight: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    flexShrink: 0,
-  },
-  modelDeviceSelector: {
-    minWidth: '120px',
-  },
-  modelDeviceInfo: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXXS,
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    marginTop: tokens.spacingVerticalXXS,
-  },
-  offloadToCpuSection: {
-    marginTop: tokens.spacingVerticalM,
-    paddingTop: tokens.spacingVerticalM,
-    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-  },
-  cliOutputLine: {
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
-    lineHeight: '1.5',
-  },
-  cliOutputLineStdout: {
-    color: tokens.colorNeutralForeground1,
-  },
-  cliOutputLineStderr: {
-    color: tokens.colorPaletteRedForeground1,
-  },
-  cliOutputEmpty: {
-    color: tokens.colorNeutralForeground3,
-    fontStyle: 'italic',
-    textAlign: 'center',
-    padding: tokens.spacingVerticalM,
-  },
+// 页面特有的样式（上传区域）
+const useLocalStyles = makeStyles({
   uploadSection: {
     display: 'flex',
     flexDirection: 'column',
@@ -331,50 +82,14 @@ const useStyles = makeStyles({
   },
 });
 
-interface ModelGroup {
-  id: string;
-  name: string;
-  taskType?: 'generate' | 'edit' | 'video' | 'upscale';
-  sdModel?: string;
-  vaeModel?: string;
-  llmModel?: string;
-  clipVisionModel?: string;
-  defaultSteps?: number;
-  defaultCfgScale?: number;
-  defaultWidth?: number;
-  defaultHeight?: number;
-  defaultSamplingMethod?: string;
-  defaultScheduler?: string;
-  defaultSeed?: number;
-  defaultHighNoiseSteps?: number;
-  defaultHighNoiseCfgScale?: number;
-  defaultHighNoiseSamplingMethod?: string;
-  createdAt: number;
-  updatedAt: number;
-}
-
-type DeviceType = 'cpu' | 'vulkan' | 'cuda';
-
-// 默认负面提示词（精简版，保留最核心的负面提示词）
-const DEFAULT_NEGATIVE_PROMPT = '低质量, 最差质量, 模糊, 低分辨率, 手部错误, 脚部错误, 比例错误, 多余肢体, 缺失肢体, 水印';
-
-// 清理文本：移除多余的空格和重复的标签
-const cleanText = (text: string): string => {
-  // 移除重复的 [INFO ] 标签（可能是数据流分割导致的）
-  // 匹配模式：一个或多个 [INFO ] 标签，可能中间有空格
-  text = text.replace(/(\[INFO \]\s*)+/g, '[INFO ] ');
-  
-  // 移除行首和行尾的空白字符
-  text = text.trim();
-  
-  return text;
-};
-
 export const EditImagePage = () => {
-  const styles = useStyles();
+  const styles = useSharedStyles();
+  const localStyles = useLocalStyles();
   const { setIsGenerating } = useAppStore();
-  const [selectedGroupId, setSelectedGroupId] = useState<string>('');
-  const [deviceType, setDeviceType] = useState<DeviceType>('cuda');
+  const { modelGroups, loading, selectedGroupId, setSelectedGroupId, selectedGroup, reloadModelGroups } = useModelGroups('edit');
+  const { deviceType, handleDeviceTypeChange } = useDeviceType();
+  const cli = useCliOutput('generate:cli-output');
+  const msgDialog = useMessageDialog();
   const [prompt, setPrompt] = useState<string>('');
   const [negativePrompt, setNegativePrompt] = useState<string>(DEFAULT_NEGATIVE_PROMPT);
   const [steps, setSteps] = useState<number>(20);
@@ -383,19 +98,11 @@ export const EditImagePage = () => {
   const [widthInput, setWidthInput] = useState<string>('512');
   const [heightInput, setHeightInput] = useState<string>('512');
   const [cfgScale, setCfgScale] = useState<number>(7.0);
-  const [modelGroups, setModelGroups] = useState<ModelGroup[]>([]);
-  const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [generatedImagePath, setGeneratedImagePath] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [generationProgress, setGenerationProgress] = useState<string>('');
-  const [cliOutput, setCliOutput] = useState<Array<{ type: 'stdout' | 'stderr'; text: string; timestamp: number }>>([]);
-  const [cliOutputExpanded, setCliOutputExpanded] = useState(false);
-  const [hasUserCollapsed, setHasUserCollapsed] = useState(false); // 跟踪用户是否手动收起过
-  const [lastViewedOutputCount, setLastViewedOutputCount] = useState(0); // 跟踪最后查看的输出行数
-  const [copySuccess, setCopySuccess] = useState(false);
-  const cliOutputRef = useRef<HTMLDivElement>(null);
   
   // 新增参数状态
   const [samplingMethod, setSamplingMethod] = useState<string>('euler_a');
@@ -407,8 +114,6 @@ export const EditImagePage = () => {
   const [threadsInput, setThreadsInput] = useState<string>('');
   const [preview, setPreview] = useState<string>('proj');
   const [previewInterval, setPreviewInterval] = useState<number>(1);
-  const [messageDialogOpen, setMessageDialogOpen] = useState(false);
-  const [messageDialogContent, setMessageDialogContent] = useState<{ title: string; message: string } | null>(null);
   const [verbose, setVerbose] = useState<boolean>(false);
   const [color, setColor] = useState<boolean>(false);
   const [offloadToCpu, setOffloadToCpu] = useState<boolean>(false);
@@ -424,124 +129,6 @@ export const EditImagePage = () => {
   const [inputImagePath, setInputImagePath] = useState<string | null>(null);
   const [inputImagePreview, setInputImagePreview] = useState<string | null>(null);
 
-  // 加载模型组列表
-  useEffect(() => {
-    // 等待 ipcRenderer 可用（最多重试 50 次，即 5 秒）
-    let retryCount = 0;
-    const maxRetries = 50;
-    const checkAndLoad = () => {
-      if (window.ipcRenderer) {
-        loadModelGroups().catch(console.error);
-      } else if (retryCount < maxRetries) {
-        retryCount++;
-        setTimeout(checkAndLoad, 100);
-      } else {
-        console.error('window.ipcRenderer is not available after maximum retries');
-      }
-    };
-    checkAndLoad();
-  }, []);
-
-  // 加载设备类型
-  useEffect(() => {
-    // 等待 ipcRenderer 可用（最多重试 50 次，即 5 秒）
-    let retryCount = 0;
-    const maxRetries = 50;
-    const checkAndLoad = () => {
-      if (window.ipcRenderer) {
-        loadDeviceType().catch(console.error);
-      } else if (retryCount < maxRetries) {
-        retryCount++;
-        setTimeout(checkAndLoad, 100);
-      } else {
-        console.error('window.ipcRenderer is not available after maximum retries');
-      }
-    };
-    checkAndLoad();
-  }, []);
-
-  // 用于累积不完整的行数据（渲染进程端缓冲）
-  const cliBufferRef = useRef<{ stdout: string; stderr: string }>({ stdout: '', stderr: '' });
-
-  // 处理 CLI 输出的回调函数
-  // 主进程现在发送原始数据块，需要在渲染进程端进行缓冲和行分割
-  const handleCliOutput = useCallback((data: { type: 'stdout' | 'stderr'; text: string; raw?: boolean }) => {
-    // 累积到缓冲区
-    const bufferKey = data.type;
-    cliBufferRef.current[bufferKey] += data.text;
-    
-    // 处理完整行（以 \n 结尾）
-    const buffer = cliBufferRef.current[bufferKey];
-    const lines = buffer.split('\n');
-    
-    // 保留最后一个不完整的行在缓冲区中
-    cliBufferRef.current[bufferKey] = lines.pop() || '';
-    
-    // 处理完整的行
-    if (lines.length > 0) {
-      setCliOutput(prev => {
-        let newOutput = [...prev];
-        
-        for (const line of lines) {
-          // 处理回车符：如果行包含 \r，表示要覆盖上一行
-          const hasCarriageReturn = line.includes('\r');
-          // 移除所有回车符
-          let processedLine = line.replace(/\r/g, '');
-          
-          // 清理文本（合并重复的 [INFO ] 标签等）
-          processedLine = cleanText(processedLine);
-          
-          // 跳过空行
-          if (!processedLine) {
-            continue;
-          }
-          
-          // 检查是否是进度条行（包含 |=> 或 |==> 等模式）
-          const isProgressLine = /^\s*\|[=>\s-]+\|/.test(processedLine);
-          
-          if (hasCarriageReturn || isProgressLine) {
-            // 如果是进度条或包含回车符，更新最后一行而不是添加新行
-            const lastIndex = newOutput.length - 1;
-            if (lastIndex >= 0 && newOutput[lastIndex].type === data.type) {
-              // 检查最后一行是否也是进度条
-              const lastIsProgress = /^\s*\|[=>\s-]+\|/.test(newOutput[lastIndex].text);
-              if (lastIsProgress || isProgressLine) {
-                // 更新最后一行
-                newOutput[lastIndex] = {
-                  ...newOutput[lastIndex],
-                  text: processedLine,
-                  timestamp: Date.now(),
-                };
-                continue;
-              }
-            }
-          }
-          
-          // 检查是否与最后一行重复（避免重复添加相同的行）
-          const lastLine = newOutput[newOutput.length - 1];
-          if (lastLine && lastLine.text === processedLine && lastLine.type === data.type) {
-            continue;
-          }
-          
-          // 添加新行
-          newOutput.push({
-            type: data.type,
-            text: processedLine,
-            timestamp: Date.now(),
-          });
-        }
-        
-        return newOutput;
-      });
-    }
-  }, []);
-
-  // 监听 CLI 输出
-  useIpcListener(
-    'generate:cli-output',
-    handleCliOutput
-  );
-
   // 监听预览图片更新
   useIpcListener(
     'generate:preview-update',
@@ -552,110 +139,28 @@ export const EditImagePage = () => {
     }
   );
 
-  // 当 CLI 输出从无内容变为有内容时，自动展开（仅在初始状态下，即用户未手动收起过）
-  useEffect(() => {
-    if (cliOutput.length > 0 && !cliOutputExpanded && !hasUserCollapsed) {
-      setCliOutputExpanded(true);
-      setLastViewedOutputCount(cliOutput.length); // 自动展开时更新已查看数量
-    }
-  }, [cliOutput.length, cliOutputExpanded, hasUserCollapsed]);
-
-  // 当展开时，更新最后查看的输出数量
-  useEffect(() => {
-    if (cliOutputExpanded) {
-      setLastViewedOutputCount(cliOutput.length);
-    }
-  }, [cliOutputExpanded, cliOutput.length]);
-
-  // 计算未读消息数
-  const unreadCount = cliOutput.length - lastViewedOutputCount;
-
-  // 自动滚动到底部
-  useEffect(() => {
-    if (cliOutputRef.current && cliOutputExpanded) {
-      cliOutputRef.current.scrollTop = cliOutputRef.current.scrollHeight;
-    }
-  }, [cliOutput, cliOutputExpanded]);
-
   // 通知父组件生成状态变化
   useEffect(() => {
     setIsGenerating(generating);
   }, [generating, setIsGenerating]);
 
-  const loadModelGroups = async () => {
-    try {
-      // 检查 ipcRenderer 是否可用
-      if (!window.ipcRenderer) {
-        console.error('window.ipcRenderer is not available');
-        setModelGroups([]);
-        return;
-      }
-      setLoading(true);
-      const groups = await window.ipcRenderer.invoke('model-groups:list');
-      // 过滤模型组：只显示 taskType 为 'edit' 的模型组
-      const filteredGroups = (groups || []).filter((group: any) => {
-        const taskType = group.taskType;
-        return taskType === 'edit';
-      });
-      setModelGroups(filteredGroups);
-    } catch (error) {
-      console.error('Failed to load model groups:', error);
-      setModelGroups([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadDeviceType = async () => {
-    try {
-      // 检查 ipcRenderer 是否可用
-      if (!window.ipcRenderer) {
-        console.error('window.ipcRenderer is not available');
-        return;
-      }
-      const device = await window.ipcRenderer.invoke('sdcpp:get-device');
-      if (device) {
-        setDeviceType(device as DeviceType);
-      }
-    } catch (error) {
-      console.error('Failed to load device type:', error);
-    }
-  };
-
-  const handleDeviceTypeChange = async (value: DeviceType) => {
-    setDeviceType(value);
-    try {
-      if (!window.ipcRenderer) {
-        console.error('window.ipcRenderer is not available');
-        return;
-      }
-      await window.ipcRenderer.invoke('sdcpp:set-device', value);
-    } catch (error) {
-      console.error('Failed to set device type:', error);
-    }
-  };
-
   const handleGenerate = async () => {
     if (!selectedGroupId) {
-      setMessageDialogContent({ title: '提示', message: '请选择模型组' });
-      setMessageDialogOpen(true);
+      msgDialog.showMessage('提示', '请选择模型组');
       return;
     }
     if (!inputImagePath) {
-      setMessageDialogContent({ title: '提示', message: '请先上传待编辑的图片' });
-      setMessageDialogOpen(true);
+      msgDialog.showMessage('提示', '请先上传待编辑的图片');
       return;
     }
     if (!prompt.trim()) {
-      setMessageDialogContent({ title: '提示', message: '请输入提示词' });
-      setMessageDialogOpen(true);
+      msgDialog.showMessage('提示', '请输入提示词');
       return;
     }
 
     // 检查 ipcRenderer 是否可用
     if (!window.ipcRenderer) {
-      setMessageDialogContent({ title: '错误', message: 'IPC 通信不可用，请确保应用正常运行' });
-      setMessageDialogOpen(true);
+      msgDialog.showMessage('错误', 'IPC 通信不可用，请确保应用正常运行');
       return;
     }
 
@@ -664,11 +169,7 @@ export const EditImagePage = () => {
       setGeneratedImage(null);
       setPreviewImage(null); // 清空预览图片
       setGenerationProgress('正在初始化...');
-      setCliOutput([]); // 清空之前的输出
-      setHasUserCollapsed(false); // 重置用户收起状态，允许新的自动展开
-      setLastViewedOutputCount(0); // 重置已查看数量
-      // 清空缓冲区
-      cliBufferRef.current = { stdout: '', stderr: '' };
+      cli.clearOutput(); // 清空之前的输出
 
       // 监听生成进度
       const progressListener = (_event: unknown, data: { progress: string | number; image?: string }) => {
@@ -742,8 +243,7 @@ export const EditImagePage = () => {
       const errorMessage = error instanceof Error ? error.message : String(error);
       // 检查是否是取消操作
       if (!errorMessage.includes('生成已取消') && !errorMessage.includes('cancelled')) {
-        setMessageDialogContent({ title: '生成失败', message: `生成图片失败: ${errorMessage}` });
-        setMessageDialogOpen(true);
+        msgDialog.showMessage('生成失败', `生成图片失败: ${errorMessage}`);
       }
       setGenerationProgress('');
       setGenerating(false);
@@ -770,42 +270,9 @@ export const EditImagePage = () => {
     }
   };
 
-  const getDeviceLabel = (device: DeviceType): string => {
-    switch (device) {
-      case 'cpu':
-        return 'CPU';
-      case 'vulkan':
-        return 'Vulkan';
-      case 'cuda':
-        return 'CUDA';
-      default:
-        return device;
-    }
-  };
-
-  const selectedGroup = modelGroups.find(g => g.id === selectedGroupId);
-  const getModelInfo = (group: ModelGroup | undefined): string => {
-    if (!group) return '';
-    const parts: string[] = [];
-    if (group.sdModel) {
-      const sdName = group.sdModel.split(/[/\\]/).pop() || 'SD模型';
-      parts.push(`SD: ${sdName}`);
-    }
-    if (group.vaeModel) {
-      const vaeName = group.vaeModel.split(/[/\\]/).pop() || 'VAE模型';
-      parts.push(`VAE: ${vaeName}`);
-    }
-    if (group.llmModel) {
-      const llmName = group.llmModel.split(/[/\\]/).pop() || 'LLM模型';
-      parts.push(`LLM: ${llmName}`);
-    }
-    return parts.join(' | ');
-  };
-
   const handleSelectImage = async () => {
     if (!window.ipcRenderer) {
-      setMessageDialogContent({ title: '错误', message: 'IPC 通信不可用，请确保应用正常运行' });
-      setMessageDialogOpen(true);
+      msgDialog.showMessage('错误', 'IPC 通信不可用，请确保应用正常运行');
       return;
     }
 
@@ -819,8 +286,7 @@ export const EditImagePage = () => {
       }
     } catch (error) {
       console.error('Failed to select image:', error);
-      setMessageDialogContent({ title: '错误', message: '选择图片失败，请重试' });
-      setMessageDialogOpen(true);
+      msgDialog.showMessage('错误', '选择图片失败，请重试');
     }
   };
 
@@ -863,7 +329,7 @@ export const EditImagePage = () => {
             保存最新图片
           </Button>
           <Button
-            onClick={loadModelGroups}
+            onClick={reloadModelGroups}
             disabled={loading || generating}
           >
             刷新模型组列表
@@ -926,107 +392,16 @@ export const EditImagePage = () => {
       </Card>
 
       {/* CLI 输出窗口 - 在第二个位置 */}
-      <Card className={!cliOutputExpanded && unreadCount > 0 ? styles.cliOutputCardWithNewMessage : styles.cliOutputCard}>
-        <div className={styles.cliOutputHeader}>
-          <div 
-            className={styles.cliOutputHeaderLeft}
-            onClick={() => {
-              const newExpanded = !cliOutputExpanded;
-              setCliOutputExpanded(newExpanded);
-              // 如果用户手动收起，记录这个状态
-              if (!newExpanded) {
-                setHasUserCollapsed(true);
-              } else {
-                // 展开时更新已查看数量
-                setLastViewedOutputCount(cliOutput.length);
-              }
-            }}
-          >
-            <div className={styles.cliOutputTitleContainer}>
-              <Title2 style={{ fontSize: tokens.fontSizeBase400, margin: 0, whiteSpace: 'nowrap' }} className={styles.cliOutputTitle}>
-                CLI 输出
-              </Title2>
-              {!cliOutputExpanded && unreadCount > 0 && (
-                <CounterBadge 
-                  count={unreadCount} 
-                  color="brand" 
-                  size="small"
-                  style={{ position: 'absolute', top: '-4px', right: '-8px' }}
-                />
-              )}
-            </div>
-            {cliOutputExpanded ? <ChevronUpRegular /> : <ChevronDownRegular />}
-          </div>
-          <div className={styles.cliOutputHeaderActions}>
-            <Button
-              size="small"
-              icon={<CopyRegular />}
-              onClick={(e) => {
-                e.stopPropagation();
-                const text = cliOutput.map(line => line.text).join('');
-                navigator.clipboard.writeText(text).then(() => {
-                  setCopySuccess(true);
-                  setTimeout(() => setCopySuccess(false), 2000);
-                }).catch((error) => {
-                  console.error('复制失败:', error);
-                });
-              }}
-              disabled={cliOutput.length === 0}
-              appearance="subtle"
-              style={copySuccess ? { color: tokens.colorPaletteGreenForeground1 } : undefined}
-            >
-              {copySuccess ? '已复制' : '复制'}
-            </Button>
-            <Button
-              size="small"
-              icon={<DocumentArrowDownRegular />}
-              onClick={(e) => {
-                e.stopPropagation();
-                const text = cliOutput.map(line => line.text).join('');
-                const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-                const url = URL.createObjectURL(blob);
-                const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `cli-output-${timestamp}.txt`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-              }}
-              disabled={cliOutput.length === 0}
-              appearance="subtle"
-            >
-              导出
-            </Button>
-          </div>
-        </div>
-        {cliOutputExpanded && (
-          <div 
-            ref={cliOutputRef}
-            className={styles.cliOutputContent}
-          >
-            {cliOutput.length === 0 ? (
-              <div className={styles.cliOutputEmpty}>
-                暂无输出，开始生成后将显示 SD.cpp 的 CLI 输出
-              </div>
-            ) : (
-              cliOutput.map((line, index) => (
-                <div
-                  key={index}
-                  className={`${styles.cliOutputLine} ${
-                    line.type === 'stderr' 
-                      ? styles.cliOutputLineStderr 
-                      : styles.cliOutputLineStdout
-                  }`}
-                >
-                  {line.text}
-                </div>
-              ))
-            )}
-          </div>
-        )}
-      </Card>
+      <CliOutputPanel
+        cliOutput={cli.cliOutput}
+        cliOutputExpanded={cli.cliOutputExpanded}
+        unreadCount={cli.unreadCount}
+        copySuccess={cli.copySuccess}
+        cliOutputRef={cli.cliOutputRef}
+        onToggleExpanded={cli.toggleExpanded}
+        onCopy={cli.handleCopyOutput}
+        onExport={cli.handleExportOutput}
+      />
 
       {/* 配置区域 - 在下方 */}
       <Card className={styles.configCard}>
@@ -1034,27 +409,27 @@ export const EditImagePage = () => {
         <div className={styles.formSection}>
           {/* 图片上传区域 */}
           <Field label="待编辑图片" required>
-            <div className={styles.uploadSection}>
+            <div className={localStyles.uploadSection}>
               {inputImagePreview ? (
-                <div className={styles.uploadedImageContainer}>
+                <div className={localStyles.uploadedImageContainer}>
                   <PhotoView src={inputImagePreview}>
                     <img 
                       src={inputImagePreview} 
                       alt="待编辑图片" 
-                      className={styles.uploadedImage}
+                      className={localStyles.uploadedImage}
                       title="点击放大查看"
                     />
                   </PhotoView>
                   <Button
                     icon={<DismissRegular />}
                     appearance="subtle"
-                    className={styles.removeImageButton}
+                    className={localStyles.removeImageButton}
                     onClick={handleRemoveImage}
                     title="移除图片"
                   />
                 </div>
               ) : (
-                <div className={styles.uploadArea} onClick={handleSelectImage}>
+                <div className={localStyles.uploadArea} onClick={handleSelectImage}>
                   <ArrowUploadRegular style={{ fontSize: '48px', color: tokens.colorNeutralForeground3 }} />
                   <Body1 style={{ color: tokens.colorNeutralForeground3 }}>
                     点击选择要编辑的图片
@@ -1652,24 +1027,7 @@ export const EditImagePage = () => {
       </Card>
 
       {/* 消息对话框 */}
-      <Dialog open={messageDialogOpen} onOpenChange={(_, data) => setMessageDialogOpen(data.open)}>
-        <DialogSurface>
-          <DialogTitle>{messageDialogContent?.title || '提示'}</DialogTitle>
-          <DialogBody>
-            <DialogContent>
-              <Body1 style={{ whiteSpace: 'pre-line' }}>{messageDialogContent?.message || ''}</Body1>
-            </DialogContent>
-          </DialogBody>
-          <DialogActions>
-            <Button
-              appearance="primary"
-              onClick={() => setMessageDialogOpen(false)}
-            >
-              确定
-            </Button>
-          </DialogActions>
-        </DialogSurface>
-      </Dialog>
+      <MessageDialog open={msgDialog.open} title={msgDialog.title} message={msgDialog.message} onClose={msgDialog.close} />
     </div>
   );
 };

@@ -14,60 +14,27 @@ import {
   Input,
   Checkbox,
   Text,
-  Dialog,
-  DialogSurface,
-  DialogTitle,
-  DialogBody,
-  DialogActions,
-  DialogContent,
-  CounterBadge,
   TabList,
   Tab,
 } from '@fluentui/react-components';
 import {
   VideoClipRegular,
-  ChevronDownRegular,
-  ChevronUpRegular,
-  CopyRegular,
   DocumentArrowDownRegular,
   ImageAddRegular,
   ArrowUploadRegular,
   DismissRegular,
 } from '@fluentui/react-icons';
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { useIpcListener } from '../hooks/useIpcListener';
+import { useState, useEffect } from 'react';
 import { useAppStore } from '../hooks/useAppStore';
+import { useSharedStyles } from '@/styles/sharedStyles';
+import { useCliOutput } from '@/hooks/useCliOutput';
+import { useModelGroups, useDeviceType } from '@/hooks/useModelGroups';
+import { CliOutputPanel } from '@/components/CliOutputPanel';
+import { MessageDialog, useMessageDialog } from '@/components/MessageDialog';
+import { getDeviceLabel, getModelInfo } from '@/utils/modelUtils';
+import type { DeviceType } from '../../shared/types';
 
-const useStyles = makeStyles({
-  container: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalL,
-    padding: tokens.spacingVerticalL,
-    paddingBottom: '120px', // 为浮动控制面板留出空间
-    minHeight: '100%',
-    maxWidth: '1600px',
-    margin: '0 auto',
-  },
-  previewCard: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-    flex: '1 1 auto',
-    minHeight: 0,
-    overflow: 'hidden',
-  },
-  previewSection: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-    flex: '1 1 auto',
-    minHeight: 0,
-    overflow: 'auto',
-    alignItems: 'stretch',
-    justifyContent: 'flex-start',
-    padding: tokens.spacingVerticalM,
-  },
+const useLocalStyles = makeStyles({
   previewVideo: {
     width: 'auto',
     height: 'auto',
@@ -75,214 +42,6 @@ const useStyles = makeStyles({
     maxHeight: '50vh',
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     borderRadius: tokens.borderRadiusMedium,
-  },
-  emptyState: {
-    textAlign: 'center',
-    padding: tokens.spacingVerticalXXL,
-    color: tokens.colorNeutralForeground3,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: '100%',
-  },
-  configCard: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-    flex: '0 0 auto',
-    maxHeight: '50%',
-    overflow: 'auto',
-  },
-  formSection: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-    padding: tokens.spacingVerticalM,
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderRadius: tokens.borderRadiusMedium,
-  },
-  actions: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalM,
-    flexWrap: 'wrap',
-  },
-  floatingControlPanel: {
-    position: 'fixed',
-    bottom: tokens.spacingVerticalL,
-    // 与 container 对齐：container 在 mainContent 中（从 240px 开始）居中，maxWidth: 1600px
-    // 使用与 container 相同的布局逻辑
-    left: `calc(240px + ${tokens.spacingVerticalL})`,
-    right: tokens.spacingVerticalL,
-    maxWidth: '1600px',
-    width: 'auto',
-    margin: '0 auto',
-    zIndex: 1000,
-    boxShadow: tokens.shadow28,
-    borderRadius: tokens.borderRadiusLarge,
-    padding: tokens.spacingVerticalM,
-    // 云母 / 亚克力效果：使用伪元素实现半透明背景，保持内容不透明
-    backgroundColor: 'transparent',
-    backdropFilter: 'blur(20px) saturate(180%)',
-    WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    // 根据主题自动调整的高光描边
-    outline: `1px solid ${tokens.colorNeutralStroke1}`,
-    boxSizing: 'border-box',
-    // 使用伪元素创建半透明背景层
-    '::before': {
-      content: '""',
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: tokens.colorNeutralBackground1,
-      opacity: 0.7,
-      zIndex: -1,
-      borderRadius: tokens.borderRadiusLarge,
-    },
-  },
-  cliOutputCard: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-    flex: '0 0 auto',
-    maxHeight: '300px',
-  },
-  cliOutputCardWithNewMessage: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-    flex: '0 0 auto',
-    maxHeight: '300px',
-    border: `2px solid ${tokens.colorBrandStroke1}`,
-    boxShadow: `0 0 8px ${tokens.colorBrandStroke1}40`,
-    transition: 'all 0.3s ease-in-out',
-  },
-  cliOutputHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: tokens.spacingHorizontalM,
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    minHeight: '44px',
-  },
-  cliOutputHeaderLeft: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    cursor: 'pointer',
-    flex: 1,
-    minWidth: 0,
-    padding: tokens.spacingVerticalXS,
-    margin: `-${tokens.spacingVerticalXS}`,
-    borderRadius: tokens.borderRadiusSmall,
-    position: 'relative',
-    ':hover': {
-      backgroundColor: tokens.colorNeutralBackground2,
-    },
-  },
-  cliOutputTitleContainer: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
-    position: 'relative',
-  },
-  cliOutputTitle: {
-    position: 'relative',
-  },
-  cliOutputHeaderActions: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalXS,
-    alignItems: 'center',
-    flexShrink: 0,
-  },
-  cliOutputContent: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
-    padding: tokens.spacingVerticalM,
-    backgroundColor: tokens.colorNeutralBackground3,
-    borderRadius: tokens.borderRadiusMedium,
-    fontFamily: 'Consolas, "Courier New", monospace',
-    fontSize: tokens.fontSizeBase200,
-    maxHeight: '250px',
-    overflowY: 'auto',
-    overflowX: 'auto',
-  },
-  modelDeviceCard: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-    padding: tokens.spacingVerticalM,
-    backgroundColor: tokens.colorNeutralBackground1,
-    borderRadius: tokens.borderRadiusMedium,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-  },
-  modelDeviceHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: tokens.spacingVerticalXS,
-  },
-  modelDeviceList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-  },
-  modelDeviceItem: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderRadius: tokens.borderRadiusSmall,
-  },
-  modelDeviceItemLeft: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXXS,
-    flex: 1,
-  },
-  modelDeviceItemRight: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
-    flexShrink: 0,
-  },
-  modelDeviceSelector: {
-    minWidth: '120px',
-  },
-  modelDeviceInfo: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXXS,
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    marginTop: tokens.spacingVerticalXXS,
-  },
-  offloadToCpuSection: {
-    marginTop: tokens.spacingVerticalM,
-    paddingTop: tokens.spacingVerticalM,
-    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-  },
-  cliOutputLine: {
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
-    lineHeight: '1.5',
-  },
-  cliOutputLineStdout: {
-    color: tokens.colorNeutralForeground1,
-  },
-  cliOutputLineStderr: {
-    color: tokens.colorPaletteRedForeground1,
-  },
-  cliOutputEmpty: {
-    color: tokens.colorNeutralForeground3,
-    fontStyle: 'italic',
-    textAlign: 'center',
-    padding: tokens.spacingVerticalM,
   },
   framePreviewLayout: {
     display: 'flex',
@@ -404,51 +163,19 @@ const useStyles = makeStyles({
   },
 });
 
-interface ModelGroup {
-  id: string;
-  name: string;
-  taskType?: 'generate' | 'edit' | 'video' | 'all';
-  sdModel?: string;
-  vaeModel?: string;
-  llmModel?: string;
-  clipVisionModel?: string;
-  defaultSteps?: number;
-  defaultCfgScale?: number;
-  defaultWidth?: number;
-  defaultHeight?: number;
-  defaultSamplingMethod?: string;
-  defaultScheduler?: string;
-  defaultSeed?: number;
-  defaultFlowShift?: number;
-  defaultHighNoiseSteps?: number;
-  defaultHighNoiseCfgScale?: number;
-  defaultHighNoiseSamplingMethod?: string;
-  createdAt: number;
-  updatedAt: number;
-}
-
-type DeviceType = 'cpu' | 'vulkan' | 'cuda';
-
 // 默认负面提示词（针对视频生成优化）
 const DEFAULT_NEGATIVE_PROMPT = '色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走';
 
-// 清理 ANSI 转义序列
-const stripAnsiCodes = (text: string): string => {
-  return text
-    .replace(/\u001b\[[0-9;]*[a-zA-Z]/g, '')
-    .replace(/\u001b[\(\)][0-9;]*[a-zA-Z]/g, '')
-    .replace(/\u001b./g, '')
-    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
-    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-};
-
 export const VideoGeneratePage = () => {
-  const styles = useStyles();
+  const styles = useSharedStyles();
+  const localStyles = useLocalStyles();
   const { setIsGenerating } = useAppStore();
+  const models = useModelGroups('video');
+  const device = useDeviceType();
+  const cli = useCliOutput('generate-video:cli-output');
+  const msgDialog = useMessageDialog();
   const [generationMode, setGenerationMode] = useState<'text2video' | 'image2video'>('text2video');
   const [initImage, setInitImage] = useState<string | null>(null);
-  const [selectedGroupId, setSelectedGroupId] = useState<string>('');
-  const [deviceType, setDeviceType] = useState<DeviceType>('cuda');
   const [prompt, setPrompt] = useState<string>('');
   const [negativePrompt, setNegativePrompt] = useState<string>(DEFAULT_NEGATIVE_PROMPT);
   const [steps, setSteps] = useState<number>(20);
@@ -457,27 +184,17 @@ export const VideoGeneratePage = () => {
   const [widthInput, setWidthInput] = useState<string>('512');
   const [heightInput, setHeightInput] = useState<string>('512');
   const [cfgScale, setCfgScale] = useState<number>(7.0);
-  const [modelGroups, setModelGroups] = useState<ModelGroup[]>([]);
-  const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generatedVideo, setGeneratedVideo] = useState<string | null>(null);
   const [generatedVideoPath, setGeneratedVideoPath] = useState<string | null>(null);
   const [videoFrames, setVideoFrames] = useState<string[]>([]);
   const [selectedFrameIndex, setSelectedFrameIndex] = useState<number>(0);
   const [generationProgress, setGenerationProgress] = useState<string>('');
-  const [cliOutput, setCliOutput] = useState<Array<{ type: 'stdout' | 'stderr'; text: string; timestamp: number }>>([]);
-  const [cliOutputExpanded, setCliOutputExpanded] = useState(false);
-  const [hasUserCollapsed, setHasUserCollapsed] = useState(false); // 跟踪用户是否手动收起过
-  const [lastViewedOutputCount, setLastViewedOutputCount] = useState(0); // 跟踪最后查看的输出行数
-  const [copySuccess, setCopySuccess] = useState(false);
-  const cliOutputRef = useRef<HTMLDivElement>(null);
   
   // 视频生成特有参数
   const [frames, setFrames] = useState<number>(33); // 视频帧数 (Wan2.2 默认 33)
   const [fps, setFps] = useState<number>(8); // 帧率
   const [flowShift, setFlowShift] = useState<number>(3.0); // Flow Shift (Wan2.2 默认 3.0)
-  const [messageDialogOpen, setMessageDialogOpen] = useState(false);
-  const [messageDialogContent, setMessageDialogContent] = useState<{ title: string; message: string } | null>(null);
   
   // 其他参数
   const [samplingMethod, setSamplingMethod] = useState<string>('euler_a');
@@ -504,85 +221,6 @@ export const VideoGeneratePage = () => {
   const [vaeTiling, setVaeTiling] = useState<boolean>(true);
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
 
-  // 加载模型组列表
-  useEffect(() => {
-    let retryCount = 0;
-    const maxRetries = 50;
-    const checkAndLoad = () => {
-      if (window.ipcRenderer) {
-        loadModelGroups().catch(console.error);
-      } else if (retryCount < maxRetries) {
-        retryCount++;
-        setTimeout(checkAndLoad, 100);
-      } else {
-        console.error('window.ipcRenderer is not available after maximum retries');
-      }
-    };
-    checkAndLoad();
-  }, []);
-
-  // 加载设备类型
-  useEffect(() => {
-    let retryCount = 0;
-    const maxRetries = 50;
-    const checkAndLoad = () => {
-      if (window.ipcRenderer) {
-        loadDeviceType().catch(console.error);
-      } else if (retryCount < maxRetries) {
-        retryCount++;
-        setTimeout(checkAndLoad, 100);
-      } else {
-        console.error('window.ipcRenderer is not available after maximum retries');
-      }
-    };
-    checkAndLoad();
-  }, []);
-
-  // 处理 CLI 输出
-  const handleCliOutput = useCallback((data: { type: 'stdout' | 'stderr'; text: string }) => {
-    const cleanedText = stripAnsiCodes(data.text);
-    if (cleanedText.trim()) {
-      setCliOutput(prev => {
-        const lastLine = prev[prev.length - 1];
-        if (lastLine && lastLine.text === cleanedText && lastLine.type === data.type) {
-          return prev;
-        }
-        return [...prev, { ...data, text: cleanedText, timestamp: Date.now() }];
-      });
-    }
-  }, []);
-
-  // 监听 CLI 输出
-  useIpcListener(
-    'generate-video:cli-output',
-    handleCliOutput
-  );
-
-  // 当 CLI 输出从无内容变为有内容时，自动展开（仅在初始状态下，即用户未手动收起过）
-  useEffect(() => {
-    if (cliOutput.length > 0 && !cliOutputExpanded && !hasUserCollapsed) {
-      setCliOutputExpanded(true);
-      setLastViewedOutputCount(cliOutput.length); // 自动展开时更新已查看数量
-    }
-  }, [cliOutput.length, cliOutputExpanded, hasUserCollapsed]);
-
-  // 当展开时，更新最后查看的输出数量
-  useEffect(() => {
-    if (cliOutputExpanded) {
-      setLastViewedOutputCount(cliOutput.length);
-    }
-  }, [cliOutputExpanded, cliOutput.length]);
-
-  // 计算未读消息数
-  const unreadCount = cliOutput.length - lastViewedOutputCount;
-
-  // 自动滚动到底部
-  useEffect(() => {
-    if (cliOutputRef.current && cliOutputExpanded) {
-      cliOutputRef.current.scrollTop = cliOutputRef.current.scrollHeight;
-    }
-  }, [cliOutput, cliOutputExpanded]);
-
   // 通知父组件生成状态变化
   useEffect(() => {
     setIsGenerating(generating);
@@ -590,8 +228,8 @@ export const VideoGeneratePage = () => {
 
   // 当选择的模型组变化时，更新默认参数
   useEffect(() => {
-    if (selectedGroupId) {
-      const group = modelGroups.find(g => g.id === selectedGroupId);
+    if (models.selectedGroupId) {
+      const group = models.modelGroups.find(g => g.id === models.selectedGroupId);
       if (group) {
         if (group.defaultSteps) setSteps(group.defaultSteps);
         if (group.defaultCfgScale) setCfgScale(group.defaultCfgScale);
@@ -606,51 +244,7 @@ export const VideoGeneratePage = () => {
         if (group.defaultFlowShift) setFlowShift(group.defaultFlowShift);
       }
     }
-  }, [selectedGroupId, modelGroups]);
-
-  const loadModelGroups = async () => {
-    try {
-      if (!window.ipcRenderer) {
-        console.error('window.ipcRenderer is not available');
-        return;
-      }
-      setLoading(true);
-      const groups = await window.ipcRenderer.invoke('model-groups:list') as ModelGroup[];
-      // 只显示支持视频生成的模型组（taskType 为 'video'）
-      const videoGroups = groups.filter((g: ModelGroup) => g.taskType === 'video');
-      setModelGroups(videoGroups);
-    } catch (error) {
-      console.error('Failed to load model groups:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadDeviceType = async () => {
-    try {
-      if (!window.ipcRenderer) {
-        console.error('window.ipcRenderer is not available');
-        return;
-      }
-      const device = await window.ipcRenderer.invoke('sdcpp:get-device') as DeviceType;
-      setDeviceType(device);
-    } catch (error) {
-      console.error('Failed to load device type:', error);
-    }
-  };
-
-  const handleDeviceTypeChange = async (newDevice: DeviceType) => {
-    try {
-      if (!window.ipcRenderer) {
-        console.error('window.ipcRenderer is not available');
-        return;
-      }
-      await window.ipcRenderer.invoke('sdcpp:set-device', newDevice);
-      setDeviceType(newDevice);
-    } catch (error) {
-      console.error('Failed to set device type:', error);
-    }
-  };
+  }, [models.selectedGroupId, models.modelGroups]);
 
   const handleImageUpload = async () => {
     try {
@@ -671,14 +265,12 @@ export const VideoGeneratePage = () => {
 
   const handleGenerate = async () => {
     if (!window.ipcRenderer) {
-      setMessageDialogContent({ title: '错误', message: 'IPC 渲染器不可用' });
-      setMessageDialogOpen(true);
+      msgDialog.showMessage('错误', 'IPC 渲染器不可用');
       return;
     }
 
-    if (!selectedGroupId || !prompt.trim()) {
-      setMessageDialogContent({ title: '提示', message: '请选择模型组并输入提示词' });
-      setMessageDialogOpen(true);
+    if (!models.selectedGroupId || !prompt.trim()) {
+      msgDialog.showMessage('提示', '请选择模型组并输入提示词');
       return;
     }
 
@@ -688,9 +280,7 @@ export const VideoGeneratePage = () => {
       setVideoFrames([]);
       setSelectedFrameIndex(0);
       setGenerationProgress('');
-      setCliOutput([]); // 清空之前的输出
-      setHasUserCollapsed(false); // 重置用户收起状态，允许新的自动展开
-      setLastViewedOutputCount(0); // 重置已查看数量
+      cli.clearOutput();
 
       // 监听进度更新
       const progressListener = (_event: any, data: { progress: string | number; video?: string; frames?: string[] }) => {
@@ -717,8 +307,8 @@ export const VideoGeneratePage = () => {
 
       try {
         const result = await window.ipcRenderer.invoke('generate-video:start', {
-          groupId: selectedGroupId,
-          deviceType,
+          groupId: models.selectedGroupId,
+          deviceType: device.deviceType,
           mode: generationMode,
           initImage: generationMode === 'image2video' ? (initImage || undefined) : undefined,
           prompt,
@@ -777,8 +367,7 @@ export const VideoGeneratePage = () => {
       console.error('Failed to generate video:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       if (!errorMessage.includes('生成已取消') && !errorMessage.includes('cancelled')) {
-        setMessageDialogContent({ title: '生成失败', message: `生成视频失败: ${errorMessage}` });
-        setMessageDialogOpen(true);
+        msgDialog.showMessage('生成失败', `生成视频失败: ${errorMessage}`);
       }
       setGenerationProgress('');
       setGenerating(false);
@@ -805,42 +394,6 @@ export const VideoGeneratePage = () => {
     }
   };
 
-  const getDeviceLabel = (device: DeviceType): string => {
-    switch (device) {
-      case 'cpu':
-        return 'CPU';
-      case 'vulkan':
-        return 'Vulkan';
-      case 'cuda':
-        return 'CUDA';
-      default:
-        return device;
-    }
-  };
-
-  const selectedGroup = modelGroups.find(g => g.id === selectedGroupId);
-  const getModelInfo = (group: ModelGroup | undefined): string => {
-    if (!group) return '';
-    const parts: string[] = [];
-    if (group.sdModel) {
-      const sdName = group.sdModel.split(/[/\\]/).pop() || 'SD模型';
-      parts.push(`SD: ${sdName}`);
-    }
-    if (group.vaeModel) {
-      const vaeName = group.vaeModel.split(/[/\\]/).pop() || 'VAE模型';
-      parts.push(`VAE: ${vaeName}`);
-    }
-    if (group.llmModel) {
-      const llmName = group.llmModel.split(/[/\\]/).pop() || 'LLM模型';
-      parts.push(`LLM: ${llmName}`);
-    }
-    if (group.clipVisionModel) {
-      const clipVisionName = group.clipVisionModel.split(/[/\\]/).pop() || 'CLIP Vision';
-      parts.push(`CLIP Vision: ${clipVisionName}`);
-    }
-    return parts.join(' | ');
-  };
-
   return (
     <div className={styles.container}>
       <Title1>视频生成</Title1>
@@ -860,7 +413,7 @@ export const VideoGeneratePage = () => {
             <Button
               icon={<VideoClipRegular />}
               onClick={handleGenerate}
-              disabled={!selectedGroupId || !prompt.trim() || loading}
+              disabled={!models.selectedGroupId || !prompt.trim() || models.loading}
               appearance="primary"
               size="large"
             >
@@ -870,13 +423,13 @@ export const VideoGeneratePage = () => {
           <Button
             icon={<DocumentArrowDownRegular />}
             onClick={handleSaveGeneratedVideo}
-            disabled={loading || generating || !generatedVideoPath}
+            disabled={models.loading || generating || !generatedVideoPath}
           >
             保存最新视频
           </Button>
           <Button
-            onClick={loadModelGroups}
-            disabled={loading || generating}
+            onClick={models.reloadModelGroups}
+            disabled={models.loading || generating}
           >
             刷新模型组列表
           </Button>
@@ -895,22 +448,22 @@ export const VideoGeneratePage = () => {
               </Body1>
             </div>
           ) : videoFrames.length > 0 ? (
-            <div className={styles.framePreviewLayout}>
-              <div className={styles.framePreviewMain}>
+            <div className={localStyles.framePreviewLayout}>
+              <div className={localStyles.framePreviewMain}>
                 <img
                   src={videoFrames[Math.min(selectedFrameIndex, videoFrames.length - 1)]}
                   alt={`第 ${selectedFrameIndex + 1} 帧预览`}
-                  className={styles.framePreviewImage}
+                  className={localStyles.framePreviewImage}
                 />
               </div>
-              <div className={styles.frameTimeline}>
-                <div className={styles.frameTimelineHeader}>
+              <div className={localStyles.frameTimeline}>
+                <div className={localStyles.frameTimelineHeader}>
                   <Body1>帧预览时间线</Body1>
                   <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
                     第 {selectedFrameIndex + 1}/{videoFrames.length} 帧 · {fps} FPS
                   </Body1>
                 </div>
-                <div className={styles.frameTimelineTrack}>
+                <div className={localStyles.frameTimelineTrack}>
                   {videoFrames.map((frame, index) => {
                     const isSelected = index === selectedFrameIndex;
                     const timeInSeconds = (index / Math.max(fps, 1)).toFixed(2);
@@ -918,15 +471,15 @@ export const VideoGeneratePage = () => {
                       <button
                         key={index}
                         type="button"
-                        className={styles.frameThumbnailButton}
+                        className={localStyles.frameThumbnailButton}
                         onClick={() => setSelectedFrameIndex(index)}
                       >
                         <img
                           src={frame}
                           alt={`第 ${index + 1} 帧`}
-                          className={`${styles.frameThumbnail} ${isSelected ? styles.frameThumbnailSelected : ''}`}
+                          className={`${localStyles.frameThumbnail} ${isSelected ? localStyles.frameThumbnailSelected : ''}`}
                         />
-                        <span className={styles.frameTimecode}>{timeInSeconds}s</span>
+                        <span className={localStyles.frameTimecode}>{timeInSeconds}s</span>
                       </button>
                     );
                   })}
@@ -941,7 +494,7 @@ export const VideoGeneratePage = () => {
               <video
                 src={generatedVideo}
                 controls
-                className={styles.previewVideo}
+                className={localStyles.previewVideo}
                 style={{ maxWidth: '50vw', maxHeight: '50vh' }}
               />
               <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalS }}>
@@ -960,107 +513,17 @@ export const VideoGeneratePage = () => {
       </Card>
 
       {/* CLI 输出窗口 */}
-      <Card className={!cliOutputExpanded && unreadCount > 0 ? styles.cliOutputCardWithNewMessage : styles.cliOutputCard}>
-        <div className={styles.cliOutputHeader}>
-          <div 
-            className={styles.cliOutputHeaderLeft}
-            onClick={() => {
-              const newExpanded = !cliOutputExpanded;
-              setCliOutputExpanded(newExpanded);
-              // 如果用户手动收起，记录这个状态
-              if (!newExpanded) {
-                setHasUserCollapsed(true);
-              } else {
-                // 展开时更新已查看数量
-                setLastViewedOutputCount(cliOutput.length);
-              }
-            }}
-          >
-            <div className={styles.cliOutputTitleContainer}>
-              <Title2 style={{ fontSize: tokens.fontSizeBase400, margin: 0, whiteSpace: 'nowrap' }} className={styles.cliOutputTitle}>
-                CLI 输出
-              </Title2>
-              {!cliOutputExpanded && unreadCount > 0 && (
-                <CounterBadge 
-                  count={unreadCount} 
-                  color="brand" 
-                  size="small"
-                  style={{ position: 'absolute', top: '-4px', right: '-8px' }}
-                />
-              )}
-            </div>
-            {cliOutputExpanded ? <ChevronUpRegular /> : <ChevronDownRegular />}
-          </div>
-          <div className={styles.cliOutputHeaderActions}>
-            <Button
-              size="small"
-              icon={<CopyRegular />}
-              onClick={(e) => {
-                e.stopPropagation();
-                const text = cliOutput.map(line => line.text).join('');
-                navigator.clipboard.writeText(text).then(() => {
-                  setCopySuccess(true);
-                  setTimeout(() => setCopySuccess(false), 2000);
-                }).catch((error) => {
-                  console.error('复制失败:', error);
-                });
-              }}
-              disabled={cliOutput.length === 0}
-              appearance="subtle"
-              style={copySuccess ? { color: tokens.colorPaletteGreenForeground1 } : undefined}
-            >
-              {copySuccess ? '已复制' : '复制'}
-            </Button>
-            <Button
-              size="small"
-              icon={<DocumentArrowDownRegular />}
-              onClick={(e) => {
-                e.stopPropagation();
-                const text = cliOutput.map(line => line.text).join('');
-                const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-                const url = URL.createObjectURL(blob);
-                const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `cli-output-${timestamp}.txt`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-              }}
-              disabled={cliOutput.length === 0}
-              appearance="subtle"
-            >
-              导出
-            </Button>
-          </div>
-        </div>
-        {cliOutputExpanded && (
-          <div 
-            ref={cliOutputRef}
-            className={styles.cliOutputContent}
-          >
-            {cliOutput.length === 0 ? (
-              <div className={styles.cliOutputEmpty}>
-                暂无输出，开始生成后将显示 SD.cpp 的 CLI 输出
-              </div>
-            ) : (
-              cliOutput.map((line, index) => (
-                <div
-                  key={index}
-                  className={`${styles.cliOutputLine} ${
-                    line.type === 'stderr' 
-                      ? styles.cliOutputLineStderr 
-                      : styles.cliOutputLineStdout
-                  }`}
-                >
-                  {line.text}
-                </div>
-              ))
-            )}
-          </div>
-        )}
-      </Card>
+      <CliOutputPanel
+        cliOutput={cli.cliOutput}
+        cliOutputExpanded={cli.cliOutputExpanded}
+        unreadCount={cli.unreadCount}
+        copySuccess={cli.copySuccess}
+        cliOutputRef={cli.cliOutputRef}
+        onToggleExpanded={cli.toggleExpanded}
+        onCopy={cli.handleCopyOutput}
+        onExport={cli.handleExportOutput}
+        emptyMessage="暂无输出，开始生成后将显示 SD.cpp 的 CLI 输出"
+      />
 
       {/* 配置区域 */}
       <Card className={styles.configCard}>
@@ -1069,54 +532,54 @@ export const VideoGeneratePage = () => {
           {/* 模型组选择 */}
           <Field label="选择模型组" required>
             <Dropdown
-              placeholder={loading ? '加载中...' : '请选择模型组'}
-              disabled={loading || modelGroups.length === 0}
-              value={selectedGroup?.name || ''}
-              selectedOptions={[selectedGroupId]}
+              placeholder={models.loading ? '加载中...' : '请选择模型组'}
+              disabled={models.loading || models.modelGroups.length === 0}
+              value={models.selectedGroup?.name || ''}
+              selectedOptions={[models.selectedGroupId]}
               onOptionSelect={(_, data) => {
                 if (data.optionValue) {
-                  setSelectedGroupId(data.optionValue);
-                  const selectedGroup = modelGroups.find(g => g.id === data.optionValue);
-                  if (selectedGroup) {
-                    if (selectedGroup.defaultSteps !== undefined) {
-                      setSteps(selectedGroup.defaultSteps);
+                  models.setSelectedGroupId(data.optionValue);
+                  const group = models.modelGroups.find(g => g.id === data.optionValue);
+                  if (group) {
+                    if (group.defaultSteps !== undefined) {
+                      setSteps(group.defaultSteps);
                     }
-                    if (selectedGroup.defaultCfgScale !== undefined) {
-                      setCfgScale(selectedGroup.defaultCfgScale);
+                    if (group.defaultCfgScale !== undefined) {
+                      setCfgScale(group.defaultCfgScale);
                     }
-                    if (selectedGroup.defaultWidth !== undefined) {
-                      setWidth(selectedGroup.defaultWidth);
-                      setWidthInput(selectedGroup.defaultWidth.toString());
+                    if (group.defaultWidth !== undefined) {
+                      setWidth(group.defaultWidth);
+                      setWidthInput(group.defaultWidth.toString());
                     }
-                    if (selectedGroup.defaultHeight !== undefined) {
-                      setHeight(selectedGroup.defaultHeight);
-                      setHeightInput(selectedGroup.defaultHeight.toString());
+                    if (group.defaultHeight !== undefined) {
+                      setHeight(group.defaultHeight);
+                      setHeightInput(group.defaultHeight.toString());
                     }
-                    if (selectedGroup.defaultSamplingMethod !== undefined) {
-                      setSamplingMethod(selectedGroup.defaultSamplingMethod);
+                    if (group.defaultSamplingMethod !== undefined) {
+                      setSamplingMethod(group.defaultSamplingMethod);
                     }
-                    if (selectedGroup.defaultHighNoiseSteps !== undefined) {
-                      setHighNoiseSteps(selectedGroup.defaultHighNoiseSteps);
+                    if (group.defaultHighNoiseSteps !== undefined) {
+                      setHighNoiseSteps(group.defaultHighNoiseSteps);
                     } else {
                       setHighNoiseSteps(undefined);
                     }
-                    if (selectedGroup.defaultHighNoiseCfgScale !== undefined) {
-                      setHighNoiseCfgScale(selectedGroup.defaultHighNoiseCfgScale);
+                    if (group.defaultHighNoiseCfgScale !== undefined) {
+                      setHighNoiseCfgScale(group.defaultHighNoiseCfgScale);
                     } else {
                       setHighNoiseCfgScale(undefined);
                     }
-                    if (selectedGroup.defaultHighNoiseSamplingMethod !== undefined) {
-                      setHighNoiseSamplingMethod(selectedGroup.defaultHighNoiseSamplingMethod);
+                    if (group.defaultHighNoiseSamplingMethod !== undefined) {
+                      setHighNoiseSamplingMethod(group.defaultHighNoiseSamplingMethod);
                     } else {
                       setHighNoiseSamplingMethod(undefined);
                     }
-                    if (selectedGroup.defaultScheduler !== undefined) {
-                      setScheduler(selectedGroup.defaultScheduler);
+                    if (group.defaultScheduler !== undefined) {
+                      setScheduler(group.defaultScheduler);
                     }
-                    if (selectedGroup.defaultSeed !== undefined) {
-                      if (selectedGroup.defaultSeed >= 0) {
-                        setSeed(selectedGroup.defaultSeed);
-                        setSeedInput(selectedGroup.defaultSeed.toString());
+                    if (group.defaultSeed !== undefined) {
+                      if (group.defaultSeed >= 0) {
+                        setSeed(group.defaultSeed);
+                        setSeedInput(group.defaultSeed.toString());
                       } else {
                         setSeed(-1);
                         setSeedInput('');
@@ -1126,7 +589,7 @@ export const VideoGeneratePage = () => {
                 }
               }}
             >
-              {modelGroups.map((group) => (
+              {models.modelGroups.map((group) => (
                 <Option key={group.id} value={group.id} text={group.name}>
                   {group.name}
                 </Option>
@@ -1134,15 +597,15 @@ export const VideoGeneratePage = () => {
             </Dropdown>
           </Field>
           <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-            {modelGroups.length === 0
+            {models.modelGroups.length === 0
               ? '暂无可用模型组，请先在"模型权重管理"页面创建支持视频生成的模型组'
-              : selectedGroup
-              ? `已选择: ${selectedGroup.name}${getModelInfo(selectedGroup) ? ` (${getModelInfo(selectedGroup)})` : ''}`
+              : models.selectedGroup
+              ? `已选择: ${models.selectedGroup.name}${getModelInfo(models.selectedGroup) ? ` (${getModelInfo(models.selectedGroup)})` : ''}`
               : '未选择'}
           </Body1>
 
           {/* 生成模式选择 */}
-          <div className={styles.modeSelector}>
+          <div className={localStyles.modeSelector}>
             <TabList
               selectedValue={generationMode}
               onTabSelect={(_, data) => setGenerationMode(data.value as 'text2video' | 'image2video')}
@@ -1154,9 +617,9 @@ export const VideoGeneratePage = () => {
 
           {/* 图片上传区域 (仅在 image2video 模式下显示) */}
           {generationMode === 'image2video' && (
-            <div className={styles.uploadSection}>
+            <div className={localStyles.uploadSection}>
               {!initImage ? (
-                <div className={styles.uploadArea} onClick={handleImageUpload}>
+                <div className={localStyles.uploadArea} onClick={handleImageUpload}>
                   <ImageAddRegular style={{ fontSize: '48px', color: tokens.colorNeutralForeground3 }} />
                   <div style={{ textAlign: 'center' }}>
                     <Text block weight="semibold">点击上传参考图片</Text>
@@ -1164,10 +627,10 @@ export const VideoGeneratePage = () => {
                   </div>
                 </div>
               ) : (
-                <div className={styles.uploadedImageContainer}>
-                  <img src={initImage} alt="参考图片" className={styles.uploadedImage} />
+                <div className={localStyles.uploadedImageContainer}>
+                  <img src={initImage} alt="参考图片" className={localStyles.uploadedImage} />
                   <Button
-                    className={styles.removeImageButton}
+                    className={localStyles.removeImageButton}
                     icon={<DismissRegular />}
                     appearance="subtle"
                     onClick={handleRemoveImage}
@@ -1262,11 +725,11 @@ export const VideoGeneratePage = () => {
             <div style={{ marginBottom: tokens.spacingVerticalM }}>
               <Field label="推理引擎" hint="选择主要的推理引擎（CUDA/Vulkan/CPU）">
                 <Dropdown
-                  value={getDeviceLabel(deviceType)}
-                  selectedOptions={[deviceType]}
+                  value={getDeviceLabel(device.deviceType)}
+                  selectedOptions={[device.deviceType]}
                   onOptionSelect={(_, data) => {
                     if (data.optionValue) {
-                      handleDeviceTypeChange(data.optionValue as DeviceType);
+                      device.handleDeviceTypeChange(data.optionValue as DeviceType);
                     }
                   }}
                 >
@@ -1292,7 +755,7 @@ export const VideoGeneratePage = () => {
                 <div className={styles.modelDeviceItemRight}>
                   <Dropdown
                     className={styles.modelDeviceSelector}
-                    value={controlNetCpu ? 'CPU' : getDeviceLabel(deviceType)}
+                    value={controlNetCpu ? 'CPU' : getDeviceLabel(device.deviceType)}
                     selectedOptions={[controlNetCpu ? 'force-cpu' : 'main-device']}
                     onOptionSelect={(_, data) => {
                       if (data.optionValue) {
@@ -1301,7 +764,7 @@ export const VideoGeneratePage = () => {
                     }}
                   >
                     <Option value="force-cpu">CPU</Option>
-                    <Option value="main-device">{getDeviceLabel(deviceType)}</Option>
+                    <Option value="main-device">{getDeviceLabel(device.deviceType)}</Option>
                   </Dropdown>
                 </div>
               </div>
@@ -1317,7 +780,7 @@ export const VideoGeneratePage = () => {
                 <div className={styles.modelDeviceItemRight}>
                   <Dropdown
                     className={styles.modelDeviceSelector}
-                    value={clipOnCpu ? 'CPU' : getDeviceLabel(deviceType)}
+                    value={clipOnCpu ? 'CPU' : getDeviceLabel(device.deviceType)}
                     selectedOptions={[clipOnCpu ? 'force-cpu' : 'main-device']}
                     onOptionSelect={(_, data) => {
                       if (data.optionValue) {
@@ -1326,7 +789,7 @@ export const VideoGeneratePage = () => {
                     }}
                   >
                     <Option value="force-cpu">CPU</Option>
-                    <Option value="main-device">{getDeviceLabel(deviceType)}</Option>
+                    <Option value="main-device">{getDeviceLabel(device.deviceType)}</Option>
                   </Dropdown>
                 </div>
               </div>
@@ -1342,7 +805,7 @@ export const VideoGeneratePage = () => {
                 <div className={styles.modelDeviceItemRight}>
                   <Dropdown
                     className={styles.modelDeviceSelector}
-                    value={vaeOnCpu ? 'CPU' : getDeviceLabel(deviceType)}
+                    value={vaeOnCpu ? 'CPU' : getDeviceLabel(device.deviceType)}
                     selectedOptions={[vaeOnCpu ? 'force-cpu' : 'main-device']}
                     onOptionSelect={(_, data) => {
                       if (data.optionValue) {
@@ -1351,7 +814,7 @@ export const VideoGeneratePage = () => {
                     }}
                   >
                     <Option value="force-cpu">CPU</Option>
-                    <Option value="main-device">{getDeviceLabel(deviceType)}</Option>
+                    <Option value="main-device">{getDeviceLabel(device.deviceType)}</Option>
                   </Dropdown>
                 </div>
               </div>
@@ -1662,24 +1125,12 @@ export const VideoGeneratePage = () => {
       </Card>
 
       {/* 消息对话框 */}
-      <Dialog open={messageDialogOpen} onOpenChange={(_, data) => setMessageDialogOpen(data.open)}>
-        <DialogSurface>
-          <DialogTitle>{messageDialogContent?.title || '提示'}</DialogTitle>
-          <DialogBody>
-            <DialogContent>
-              <Body1 style={{ whiteSpace: 'pre-line' }}>{messageDialogContent?.message || ''}</Body1>
-            </DialogContent>
-          </DialogBody>
-          <DialogActions>
-            <Button
-              appearance="primary"
-              onClick={() => setMessageDialogOpen(false)}
-            >
-              确定
-            </Button>
-          </DialogActions>
-        </DialogSurface>
-      </Dialog>
+      <MessageDialog
+        open={msgDialog.open}
+        title={msgDialog.title}
+        message={msgDialog.message}
+        onClose={msgDialog.close}
+      />
     </div>
   );
 };

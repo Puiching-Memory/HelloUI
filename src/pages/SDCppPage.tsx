@@ -9,6 +9,9 @@ import {
   Spinner,
 } from '@fluentui/react-components';
 import { useState, useEffect } from 'react';
+import type { DeviceType } from '../../shared/types';
+import { formatFileSize } from '@/utils/format';
+import { getDeviceLabel } from '@/utils/modelUtils';
 
 const useStyles = makeStyles({
   container: {
@@ -57,8 +60,6 @@ interface EngineFile {
   modified: number;
   deviceType: DeviceType;
 }
-
-type DeviceType = 'cpu' | 'vulkan' | 'cuda';
 
 export const SDCppPage = () => {
   const styles = useStyles();
@@ -158,26 +159,7 @@ export const SDCppPage = () => {
     }
   };
 
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
-  };
 
-  const getDeviceLabel = (device: DeviceType): string => {
-    switch (device) {
-      case 'cpu':
-        return 'CPU';
-      case 'vulkan':
-        return 'Vulkan';
-      case 'cuda':
-        return 'CUDA';
-      default:
-        return device;
-    }
-  };
 
   // 按设备类型计算引擎概览
   const engineSummaries = (['cpu', 'vulkan', 'cuda'] as DeviceType[]).map((deviceType) => {

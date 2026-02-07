@@ -35,7 +35,8 @@ import {
 } from '@fluentui/react-icons';
 import { PhotoView } from 'react-photo-view';
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { GeneratedImage } from '../types/generatedImage';
+import type { GeneratedImage } from '../../shared/types';
+import { formatFileSize } from '@/utils/format';
 import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
 
 const useStyles = makeStyles({
@@ -589,13 +590,7 @@ export const GeneratedImagesPage = () => {
 
 
   // 使用 useCallback 缓存格式化函数
-  const formatFileSize = useCallback((bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
-  }, []);
+
 
   const formatDate = useCallback((timestamp: number): string => {
     const date = new Date(timestamp);
