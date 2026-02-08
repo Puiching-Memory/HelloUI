@@ -26,6 +26,9 @@ export const IPC_INVOKE_CHANNELS = [
   'model-groups:list',
   'model-groups:select-folder',
   'model-groups:update',
+  'perfect-pixel:read-image',
+  'perfect-pixel:save',
+  'perfect-pixel:select-image',
   'sdcpp:delete-file',
   'sdcpp:download-file',
   'sdcpp:get-device',
@@ -108,6 +111,10 @@ export interface IPCRequestMap {
   'app:get-version': { request: void; response: string }
 
   'aliyun-api:call': { request: { method: string; url: string; headers?: Record<string, string>; body?: unknown }; response: { status: number; statusText: string; data?: unknown; error?: string } }
+
+  'perfect-pixel:select-image': { request: void; response: string | null }
+  'perfect-pixel:read-image': { request: string; response: string }
+  'perfect-pixel:save': { request: string; response: { success: boolean; filePath?: string } }
 }
 
 export interface IPCEventMap {

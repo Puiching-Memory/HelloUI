@@ -11,6 +11,7 @@ import { registerModelGroupsHandlers } from './ipc/modelGroups.js'
 import { registerGenerateHandlers } from './ipc/generate.js'
 import { registerVideoGenerateHandlers } from './ipc/videoGenerate.js'
 import { registerGeneratedImagesHandlers } from './ipc/generatedImages.js'
+import { registerPerfectPixelHandlers } from './ipc/perfectPixel.js'
 import { createAppState } from './ipc/state.js'
 
 // Utilities
@@ -77,6 +78,7 @@ registerModelGroupsHandlers({ getWindow, state: appState })
 registerGenerateHandlers({ state: appState })
 registerVideoGenerateHandlers({ state: appState })
 registerGeneratedImagesHandlers({ getWindow })
+registerPerfectPixelHandlers({ getWindow })
 
 // ========== App ready ==========
 app.whenReady().then(async () => {

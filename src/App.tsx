@@ -15,6 +15,7 @@ import { GeneratedImagesPage } from './pages/GeneratedImagesPage';
 import { VideoGeneratePage } from './pages/VideoGeneratePage';
 import { ImageUpscalePage } from './pages/ImageUpscalePage';
 import { AliyunTongyiVideoPage } from './pages/AliyunTongyiVideoPage';
+import { PerfectPixelPage } from './pages/PerfectPixelPage';
 import type { Theme } from '@fluentui/react-components';
 import { useAppStore } from './hooks/useAppStore';
 
@@ -65,6 +66,7 @@ function App() {
               <Route path="/video-generate" element={<VideoGeneratePage />} />
               <Route path="/image-upscale" element={<ImageUpscalePage />} />
               <Route path="/aliyun-video" element={<AliyunTongyiVideoPage />} />
+              <Route path="/perfect-pixel" element={<PerfectPixelPage />} />
               <Route path="/images" element={<GeneratedImagesPage />} />
               <Route path="/components" element={<ComponentsPage />} />
               <Route path="/settings" element={<SettingsPage />} />

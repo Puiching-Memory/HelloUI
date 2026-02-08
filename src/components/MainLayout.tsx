@@ -16,6 +16,7 @@ import {
   EditRegular,
   VideoClipRegular,
   ZoomInRegular,
+  GridRegular,
 } from '@fluentui/react-icons';
 import { useAppStore } from '../hooks/useAppStore';
 
@@ -110,6 +111,7 @@ export const MainLayout = ({ children }: { children: ReactNode }) => {
     { id: 'edit-image', path: '/edit-image', label: '图片编辑', icon: <EditRegular /> },
     { id: 'video-generate', path: '/video-generate', label: '视频生成', icon: <VideoClipRegular /> },
     { id: 'image-upscale', path: '/image-upscale', label: '图像超分辨率', icon: <ZoomInRegular /> },
+    { id: 'perfect-pixel', path: '/perfect-pixel', label: '像素画精修', icon: <GridRegular /> },
     { id: 'aliyun-video', path: '/aliyun-video', label: '文生视频', icon: <VideoClipRegular /> },
     { id: 'images', path: '/images', label: '生成结果', icon: <ImageRegular /> },
     { id: 'components', path: '/components', label: '组件展示', icon: <AppsRegular /> },
@@ -149,7 +151,7 @@ export const MainLayout = ({ children }: { children: ReactNode }) => {
         {/* SD.cpp引擎功能页面组 */}
         <div className={styles.navGroup}>
           <div className={styles.navGroupTitle}>SD.cpp引擎</div>
-          {navItems.filter(item => ['weights', 'sdcpp', 'generate', 'edit-image', 'video-generate', 'image-upscale', 'images'].includes(item.id)).map(renderNavButton)}
+          {navItems.filter(item => ['weights', 'sdcpp', 'generate', 'edit-image', 'video-generate', 'image-upscale', 'perfect-pixel', 'images'].includes(item.id)).map(renderNavButton)}
         </div>
 
         {/* 阿里通义API页面组 */}
@@ -159,7 +161,7 @@ export const MainLayout = ({ children }: { children: ReactNode }) => {
         </div>
 
         {/* 其他页面按钮 */}
-        {navItems.filter(item => !['home', 'weights', 'sdcpp', 'generate', 'edit-image', 'images', 'video-generate', 'image-upscale', 'aliyun-video'].includes(item.id)).map(renderNavButton)}
+        {navItems.filter(item => !['home', 'weights', 'sdcpp', 'generate', 'edit-image', 'images', 'video-generate', 'image-upscale', 'perfect-pixel', 'aliyun-video'].includes(item.id)).map(renderNavButton)}
       </div>
 
       {/* 主内容区 */}
