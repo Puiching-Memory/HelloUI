@@ -25,7 +25,6 @@ import {
   Tooltip,
   Dropdown,
   Option,
-  Text,
 } from '@fluentui/react-components';
 import {
   ArrowUploadRegular,
@@ -39,12 +38,16 @@ import {
   EditRegular as EditIcon,
   VideoClipRegular,
   ZoomInRegular,
+  GlobeRegular,
+  CheckmarkCircleFilled,
+  DismissCircleRegular,
+  DismissRegular,
 } from '@fluentui/react-icons';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
 import { useAppStore } from '../hooks/useAppStore';
 import { formatFileSize } from '@/utils/format';
-import type { TaskType, ModelGroup, WeightFile } from '../../shared/types'
+import type { TaskType, ModelGroup, WeightFile, HfMirrorId, ModelDownloadProgress } from '../../shared/types'
 
 const useStyles = makeStyles({
   container: {
@@ -222,6 +225,51 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
     fontWeight: tokens.fontWeightSemibold,
   },
+  hfMirrorToggle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
+    padding: tokens.spacingVerticalS,
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: tokens.borderRadiusMedium,
+  },
+  hfMirrorBtn: {
+    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalM}`,
+    borderRadius: tokens.borderRadiusSmall,
+    cursor: 'pointer',
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    transition: 'all 0.15s ease',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+  },
+  hfMirrorBtnSelected: {
+    border: `2px solid ${tokens.colorBrandStroke1}`,
+    backgroundColor: tokens.colorBrandBackground2,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  downloadProgressCard: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: tokens.spacingVerticalXS,
+    padding: tokens.spacingVerticalM,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  fileStatusList: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: tokens.spacingVerticalXXS,
+  },
+  fileStatusItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    fontSize: tokens.fontSizeBase200,
+    padding: `${tokens.spacingVerticalXXS} 0`,
+  },
 });
 
 export const ModelWeightsPage = () => {
@@ -238,27 +286,47 @@ export const ModelWeightsPage = () => {
     copied: number;
     total: number;
   } | null>(null);
-  const [exportProgress, setExportProgress] = useState<{
-    progress: number;
-    fileName: string;
-    copied: number;
-    total: number;
-  } | null>(null);
+
 
   // 监听导入进度
   useIpcListener('model-groups:import-progress', (data) => {
     setImportProgress(data);
   });
 
-  // 监听导出进度
-  useIpcListener('model-groups:export-progress', (data) => {
-    setExportProgress(data);
+
+
+  // HF 下载相关状态
+  const [hfMirrorId, setHfMirrorId] = useState<HfMirrorId>('hf-mirror');
+  const [modelDownloadProgress, setModelDownloadProgress] = useState<ModelDownloadProgress | null>(null);
+  const [downloadingGroupId, setDownloadingGroupId] = useState<string | null>(null);
+  const [fileStatusMap, setFileStatusMap] = useState<Record<string, Array<{ file: string; exists: boolean; size?: number }>>>({});
+
+  // 监听模型下载进度
+  const loadFilesRef = useRef<() => Promise<void>>();
+  const loadModelGroupsRef = useRef<() => Promise<void>>();
+
+  useIpcListener('models:download-progress', (data) => {
+    setModelDownloadProgress(data);
+    if (data.stage === 'done') {
+      setTimeout(() => {
+        setModelDownloadProgress(null);
+        setDownloadingGroupId(null);
+        // 刷新文件列表和文件状态
+        loadFilesRef.current?.();
+        loadModelGroupsRef.current?.();
+      }, 1500);
+    }
+    if (data.stage === 'error') {
+      setModelDownloadProgress(null);
+      setDownloadingGroupId(null);
+    }
   });
 
   const [modelGroups, setModelGroups] = useState<ModelGroup[]>([]);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<ModelGroup | null>(null);
   const [groupName, setGroupName] = useState('');
+  const [groupHfRepo, setGroupHfRepo] = useState<string>('');
   const [groupSdModel, setGroupSdModel] = useState<string>('');
   const [groupHighNoiseSdModel, setGroupHighNoiseSdModel] = useState<string>('');
   const [groupVaeModel, setGroupVaeModel] = useState<string>('');
@@ -430,9 +498,100 @@ export const ModelWeightsPage = () => {
     setModelGroups(groups || []);
   };
 
+  // 保持 ref 始终最新
+  useEffect(() => {
+    loadFilesRef.current = loadFiles;
+    loadModelGroupsRef.current = loadModelGroups;
+  });
+
+  // 初始化 HF 镜像
+  useEffect(() => {
+    if (!window.ipcRenderer) return;
+    window.ipcRenderer.invoke('models:get-hf-mirror').then((id: HfMirrorId) => {
+      setHfMirrorId(id);
+    }).catch(console.error);
+  }, []);
+
+  // 加载模型组时检查文件状态
+  useEffect(() => {
+    if (modelGroups.length > 0) {
+      checkAllGroupFiles();
+    }
+  }, [modelGroups]);
+
+  const checkAllGroupFiles = async () => {
+    if (!window.ipcRenderer) return;
+    const statusMap: Record<string, Array<{ file: string; exists: boolean; size?: number }>> = {};
+    for (const group of modelGroups) {
+      if (group.hfFiles && group.hfFiles.length > 0) {
+        try {
+          const result = await window.ipcRenderer.invoke('models:check-files', { groupId: group.id });
+          statusMap[group.id] = result;
+        } catch (error) {
+          console.error(`Failed to check files for ${group.id}:`, error);
+        }
+      }
+    }
+    setFileStatusMap(statusMap);
+  };
+
+  const handleHfMirrorChange = useCallback(async (mirrorId: HfMirrorId) => {
+    if (!window.ipcRenderer) return;
+    try {
+      await window.ipcRenderer.invoke('models:set-hf-mirror', mirrorId);
+      setHfMirrorId(mirrorId);
+    } catch (error) {
+      console.error('Failed to set HF mirror:', error);
+    }
+  }, []);
+
+  const handleDownloadGroupFiles = useCallback(async (groupId: string) => {
+    if (!window.ipcRenderer) return;
+    setDownloadingGroupId(groupId);
+    setModelDownloadProgress({
+      stage: 'downloading',
+      downloadedBytes: 0,
+      totalBytes: -1,
+      speed: 0,
+      fileName: '准备中...',
+      totalFiles: 0,
+      currentFileIndex: 0,
+    });
+
+    try {
+      const result = await window.ipcRenderer.invoke('models:download-group-files', {
+        groupId,
+        mirrorId: hfMirrorId,
+      });
+      if (!result.success) {
+        setMessageDialogContent({ title: '下载失败', message: result.error || '下载失败' });
+        setMessageDialogOpen(true);
+        setModelDownloadProgress(null);
+        setDownloadingGroupId(null);
+      }
+    } catch (error: any) {
+      setMessageDialogContent({ title: '下载失败', message: error?.message || '下载失败' });
+      setMessageDialogOpen(true);
+      setModelDownloadProgress(null);
+      setDownloadingGroupId(null);
+    }
+  }, [hfMirrorId]);
+
+  const handleCancelModelDownload = useCallback(async () => {
+    if (!window.ipcRenderer) return;
+    try {
+      await window.ipcRenderer.invoke('models:cancel-download');
+      setModelDownloadProgress(null);
+      setDownloadingGroupId(null);
+    } catch (error) {
+      console.error('Failed to cancel download:', error);
+    }
+  }, []);
+
   const handleCreateGroup = () => {
     setEditingGroup(null);
     setGroupName('');
+    setGroupHfRepo('');
     setGroupSdModel('');
     setGroupHighNoiseSdModel('');
     setGroupVaeModel('');
@@ -455,13 +614,23 @@ export const ModelWeightsPage = () => {
   const handleEditGroup = (group: ModelGroup) => {
     setEditingGroup(group);
     setGroupName(group.name);
-    setGroupSdModel(group.sdModel || '');
-    setGroupHighNoiseSdModel(group.highNoiseSdModel || '');
-    setGroupVaeModel(group.vaeModel || '');
-    setGroupLlmModel(group.llmModel || '');
-    setGroupClipLModel(group.clipLModel || '');
-    setGroupT5xxlModel(group.t5xxlModel || '');
-    setGroupClipVisionModel(group.clipVisionModel || '');
+    // 从 hfFiles 中提取 repo（取第一个 entry 的 repo 作为默认）
+    const defaultRepo = group.hfFiles?.[0]?.repo || '';
+    setGroupHfRepo(defaultRepo);
+    // 从 hfFiles 中查找对应模型的文件名，若无则从 model path 中提取文件名
+    const findHfFile = (modelPath?: string) => {
+      if (!modelPath) return '';
+      const fileName = modelPath.split(/[/\\]/).pop() || modelPath;
+      const hfEntry = group.hfFiles?.find(f => f.file === fileName || f.savePath === fileName);
+      return hfEntry?.file || fileName;
+    };
+    setGroupSdModel(findHfFile(group.sdModel));
+    setGroupHighNoiseSdModel(findHfFile(group.highNoiseSdModel));
+    setGroupVaeModel(findHfFile(group.vaeModel));
+    setGroupLlmModel(findHfFile(group.llmModel));
+    setGroupClipLModel(findHfFile(group.clipLModel));
+    setGroupT5xxlModel(findHfFile(group.t5xxlModel));
+    setGroupClipVisionModel(findHfFile(group.clipVisionModel));
     setGroupDefaultSteps(group.defaultSteps?.toString() || '20');
     setGroupDefaultCfgScale(group.defaultCfgScale?.toString() || '7.0');
     setGroupDefaultWidth(group.defaultWidth?.toString() || '512');
@@ -481,15 +650,20 @@ export const ModelWeightsPage = () => {
       return;
     }
 
-    // 创建新模型组时，必须所有必需的模型都选择了有效模型
+    // 创建新模型组时，必须填写 HF 仓库和必需的模型文件名
     if (!editingGroup) {
+      if (!groupHfRepo || !groupHfRepo.trim()) {
+        setMessageDialogContent({ title: '提示', message: '请填写 HuggingFace 仓库 ID（如 leejet/Z-Image-GGUF）' });
+        setMessageDialogOpen(true);
+        return;
+      }
       if (!groupSdModel || !groupSdModel.trim()) {
-        setMessageDialogContent({ title: '提示', message: '创建新模型组时，必须选择SD模型' });
+        setMessageDialogContent({ title: '提示', message: '请填写 SD 模型文件名' });
         setMessageDialogOpen(true);
         return;
       }
       if (!groupVaeModel || !groupVaeModel.trim()) {
-        setMessageDialogContent({ title: '提示', message: '创建新模型组时，必须选择VAE模型' });
+        setMessageDialogContent({ title: '提示', message: '请填写 VAE 模型文件名' });
         setMessageDialogOpen(true);
         return;
       }
@@ -497,77 +671,84 @@ export const ModelWeightsPage = () => {
         setMessageDialogContent({ 
           title: '提示', 
           message: groupTaskType === 'edit' 
-            ? '创建图片编辑模型组时，必须选择 LLM 模型 (Qwen 2511)' 
-            : '创建新模型组时，必须选择LLM/CLIP模型' 
+            ? '请填写 LLM 模型文件名 (Qwen 2511)' 
+            : '请填写 LLM/CLIP 模型文件名' 
         });
         setMessageDialogOpen(true);
         return;
       }
     }
 
+    // 构建 hfFiles 数组和模型相对路径
+    const repo = groupHfRepo.trim();
+    const folderName = groupName.trim();
+    const buildModelPath = (fileName: string) => fileName ? `${folderName}/${fileName}` : undefined;
+    const hfFiles: { repo: string; file: string }[] = [];
+    const addHfFile = (fileName: string) => {
+      if (fileName && repo) {
+        if (!hfFiles.some(f => f.repo === repo && f.file === fileName)) {
+          hfFiles.push({ repo, file: fileName });
+        }
+      }
+    };
+
+    const sdFile = groupSdModel.trim();
+    const highNoiseSdFile = groupHighNoiseSdModel.trim();
+    const vaeFile = groupVaeModel.trim();
+    const llmFile = groupLlmModel.trim();
+    const clipLFile = groupClipLModel.trim();
+    const t5xxlFile = groupT5xxlModel.trim();
+    const clipVisionFile = groupClipVisionModel.trim();
+
+    addHfFile(sdFile);
+    addHfFile(highNoiseSdFile);
+    addHfFile(vaeFile);
+    addHfFile(llmFile);
+    addHfFile(clipLFile);
+    addHfFile(t5xxlFile);
+    addHfFile(clipVisionFile);
+
     setLoading(true);
     try {
+      const groupData = {
+        name: folderName,
+        taskType: groupTaskType,
+        sdModel: buildModelPath(sdFile),
+        highNoiseSdModel: buildModelPath(highNoiseSdFile),
+        vaeModel: buildModelPath(vaeFile),
+        llmModel: buildModelPath(llmFile),
+        clipLModel: buildModelPath(clipLFile),
+        t5xxlModel: buildModelPath(t5xxlFile),
+        clipVisionModel: buildModelPath(clipVisionFile),
+        hfFiles: hfFiles.length > 0 ? hfFiles : undefined,
+        defaultSteps: groupDefaultSteps ? parseFloat(groupDefaultSteps) : undefined,
+        defaultCfgScale: groupDefaultCfgScale ? parseFloat(groupDefaultCfgScale) : undefined,
+        defaultWidth: groupDefaultWidth ? parseInt(groupDefaultWidth) : undefined,
+        defaultHeight: groupDefaultHeight ? parseInt(groupDefaultHeight) : undefined,
+        defaultSamplingMethod: groupDefaultSamplingMethod || undefined,
+        defaultScheduler: groupDefaultScheduler || undefined,
+        defaultSeed: groupDefaultSeed ? parseInt(groupDefaultSeed) : undefined,
+        defaultFlowShift: groupDefaultFlowShift ? parseFloat(groupDefaultFlowShift) : undefined,
+      };
+
       if (editingGroup) {
         await window.ipcRenderer.invoke('model-groups:update', {
           id: editingGroup.id,
-          updates: {
-            name: groupName.trim(),
-            taskType: groupTaskType,
-            sdModel: groupSdModel || undefined,
-            highNoiseSdModel: groupHighNoiseSdModel || undefined,
-            vaeModel: groupVaeModel || undefined,
-            llmModel: groupLlmModel || undefined,
-            clipLModel: groupClipLModel || undefined,
-            t5xxlModel: groupT5xxlModel || undefined,
-            clipVisionModel: groupClipVisionModel || undefined,
-            defaultSteps: groupDefaultSteps ? parseFloat(groupDefaultSteps) : undefined,
-            defaultCfgScale: groupDefaultCfgScale ? parseFloat(groupDefaultCfgScale) : undefined,
-            defaultWidth: groupDefaultWidth ? parseInt(groupDefaultWidth) : undefined,
-            defaultHeight: groupDefaultHeight ? parseInt(groupDefaultHeight) : undefined,
-            defaultSamplingMethod: groupDefaultSamplingMethod || undefined,
-            defaultScheduler: groupDefaultScheduler || undefined,
-            defaultSeed: groupDefaultSeed ? parseInt(groupDefaultSeed) : undefined,
-            defaultFlowShift: groupDefaultFlowShift ? parseFloat(groupDefaultFlowShift) : undefined,
-          }
+          updates: groupData,
         });
-        await loadModelGroups();
-        setGroupDialogOpen(false);
-        setEditingGroup(null);
       } else {
-        // 建立并导出模型组
-        setExportProgress({ progress: 0, fileName: '准备中...', copied: 0, total: 0 });
-        const result = await window.ipcRenderer.invoke('model-groups:build-and-export', {
-          name: groupName.trim(),
-          taskType: groupTaskType,
-          sdModel: groupSdModel || undefined,
-          highNoiseSdModel: groupHighNoiseSdModel || undefined,
-          vaeModel: groupVaeModel || undefined,
-          llmModel: groupLlmModel || undefined,
-          clipLModel: groupClipLModel || undefined,
-          t5xxlModel: groupT5xxlModel || undefined,
-          clipVisionModel: groupClipVisionModel || undefined,
-          defaultSteps: groupDefaultSteps ? parseFloat(groupDefaultSteps) : undefined,
-          defaultCfgScale: groupDefaultCfgScale ? parseFloat(groupDefaultCfgScale) : undefined,
-          defaultWidth: groupDefaultWidth ? parseInt(groupDefaultWidth) : undefined,
-          defaultHeight: groupDefaultHeight ? parseInt(groupDefaultHeight) : undefined,
-          defaultSamplingMethod: groupDefaultSamplingMethod || undefined,
-          defaultScheduler: groupDefaultScheduler || undefined,
-          defaultSeed: groupDefaultSeed ? parseInt(groupDefaultSeed) : undefined,
-          defaultFlowShift: groupDefaultFlowShift ? parseFloat(groupDefaultFlowShift) : undefined,
-        });
-
-        if (result.success) {
-          setExportProgress((prev) => prev ? { ...prev, progress: 100 } : null);
-          setGroupDialogOpen(false);
-          setMessageDialogContent({ 
-            title: '导出成功', 
-            message: `模型组已成功导出至: ${result.exportPath}\n\n您可以点击“导入模型组文件夹”将其安装到应用中。` 
-          });
-          setMessageDialogOpen(true);
-        } else if (result.message !== '导出已取消') {
-          throw new Error(result.message);
-        }
+        await window.ipcRenderer.invoke('model-groups:create', groupData);
       }
+      await loadModelGroups();
+      setGroupDialogOpen(false);
+      if (!editingGroup) {
+        setMessageDialogContent({ 
+          title: '创建成功', 
+          message: `模型组 "${folderName}" 已创建。\n\n请在模型组卡片上点击"下载"按钮来获取模型文件。` 
+        });
+        setMessageDialogOpen(true);
+      }
+      setEditingGroup(null);
     } catch (error) {
       console.error('Failed to save group:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -575,7 +756,6 @@ export const ModelWeightsPage = () => {
       setMessageDialogOpen(true);
     } finally {
       setLoading(false);
-      setTimeout(() => setExportProgress(null), 1000);
     }
   };
 
@@ -688,6 +868,70 @@ export const ModelWeightsPage = () => {
         )}
       </Card>
 
+      {/* HF 下载源切换 */}
+      <Card className={styles.section}>
+        <Title2>模型下载源</Title2>
+        <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+          模型权重托管在 HuggingFace 上，中国大陆用户推荐使用 HF-Mirror 镜像加速下载。
+        </Body1>
+        <div className={styles.hfMirrorToggle}>
+          <GlobeRegular />
+          <div
+            className={`${styles.hfMirrorBtn} ${hfMirrorId === 'huggingface' ? styles.hfMirrorBtnSelected : ''}`}
+            onClick={() => handleHfMirrorChange('huggingface')}
+          >
+            HuggingFace (官方)
+          </div>
+          <div
+            className={`${styles.hfMirrorBtn} ${hfMirrorId === 'hf-mirror' ? styles.hfMirrorBtnSelected : ''}`}
+            onClick={() => handleHfMirrorChange('hf-mirror')}
+          >
+            HF-Mirror (中国镜像)
+          </div>
+        </div>
+
+        {/* 下载进度 */}
+        {modelDownloadProgress && modelDownloadProgress.stage === 'downloading' && (
+          <div className={styles.downloadProgressCard}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>
+                正在下载 ({modelDownloadProgress.currentFileIndex}/{modelDownloadProgress.totalFiles}): {modelDownloadProgress.fileName}
+              </Body1>
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<DismissRegular />}
+                onClick={handleCancelModelDownload}
+              >
+                取消
+              </Button>
+            </div>
+            <ProgressBar
+              value={modelDownloadProgress.totalBytes > 0 ? modelDownloadProgress.downloadedBytes / modelDownloadProgress.totalBytes : undefined}
+              max={1}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                {modelDownloadProgress.totalBytes > 0
+                  ? `${formatFileSize(modelDownloadProgress.downloadedBytes)} / ${formatFileSize(modelDownloadProgress.totalBytes)}`
+                  : formatFileSize(modelDownloadProgress.downloadedBytes)}
+              </Body1>
+              <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+                {modelDownloadProgress.speed > 0 ? `${formatFileSize(modelDownloadProgress.speed)}/s` : ''}
+              </Body1>
+            </div>
+          </div>
+        )}
+
+        {modelDownloadProgress && modelDownloadProgress.stage === 'done' && (
+          <div className={styles.downloadProgressCard}>
+            <Body1 style={{ fontWeight: tokens.fontWeightSemibold, color: tokens.colorPaletteGreenForeground1 }}>
+              下载完成！
+            </Body1>
+          </div>
+        )}
+      </Card>
+
       {/* 模型组管理 */}
       <Card className={styles.section}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalM }}>
@@ -695,10 +939,10 @@ export const ModelWeightsPage = () => {
           <Button
             icon={<AddRegular />}
             onClick={handleCreateGroup}
-            disabled={loading || !weightsFolder || files.length === 0}
+            disabled={loading || !weightsFolder}
             appearance="primary"
           >
-            建立并导出模型组
+            创建模型组
           </Button>
         </div>
         <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginBottom: tokens.spacingVerticalM }}>
@@ -955,6 +1199,74 @@ export const ModelWeightsPage = () => {
                       )}
                     </div>
                   )}
+
+                  {/* HF 文件下载区域 */}
+                  {group.hfFiles && group.hfFiles.length > 0 && (
+                    <div style={{ 
+                      marginTop: tokens.spacingVerticalS,
+                      paddingTop: tokens.spacingVerticalS,
+                      borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: tokens.spacingVerticalXS,
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Body1 style={{ fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase200 }}>
+                          模型文件 ({group.hfFiles.length} 个)
+                        </Body1>
+                        {downloadingGroupId === group.id ? (
+                          <Button
+                            icon={<DismissRegular />}
+                            size="small"
+                            appearance="secondary"
+                            onClick={handleCancelModelDownload}
+                          >
+                            取消下载
+                          </Button>
+                        ) : (
+                          <Button
+                            icon={<ArrowDownloadRegular />}
+                            size="small"
+                            appearance="primary"
+                            onClick={() => handleDownloadGroupFiles(group.id)}
+                            disabled={!!downloadingGroupId || loading}
+                          >
+                            {fileStatusMap[group.id]?.every(f => f.exists) ? '全部已下载' : '下载缺失文件'}
+                          </Button>
+                        )}
+                      </div>
+                      <div className={styles.fileStatusList}>
+                        {group.hfFiles.map((hfFile) => {
+                          const status = fileStatusMap[group.id]?.find(
+                            s => s.file === (hfFile.savePath || hfFile.file)
+                          );
+                          return (
+                            <div key={hfFile.file} className={styles.fileStatusItem}>
+                              {status?.exists ? (
+                                <CheckmarkCircleFilled style={{ color: tokens.colorPaletteGreenForeground1, fontSize: '14px' }} />
+                              ) : (
+                                <DismissCircleRegular style={{ color: tokens.colorNeutralForeground3, fontSize: '14px' }} />
+                              )}
+                              <span style={{ 
+                                color: status?.exists ? tokens.colorNeutralForeground1 : tokens.colorNeutralForeground3,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                flex: 1,
+                              }}>
+                                {hfFile.savePath || hfFile.file}
+                              </span>
+                              {status?.exists && status.size !== undefined && (
+                                <span style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }}>
+                                  {formatFileSize(status.size)}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </Card>
               );
             })}
@@ -1047,6 +1359,7 @@ export const ModelWeightsPage = () => {
         if (!data.open) {
           setEditingGroup(null);
           setGroupName('');
+          setGroupHfRepo('');
           setGroupSdModel('');
           setGroupVaeModel('');
           setGroupLlmModel('');
@@ -1063,7 +1376,7 @@ export const ModelWeightsPage = () => {
         }
       }}>
         <DialogSurface style={{ minWidth: '600px' }}>
-          <DialogTitle>{editingGroup ? '编辑模型组' : '建立并导出模型组'}</DialogTitle>
+          <DialogTitle>{editingGroup ? '编辑模型组' : '创建模型组'}</DialogTitle>
           <DialogBody>
             <DialogContent>
               <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM }}>
@@ -1077,7 +1390,7 @@ export const ModelWeightsPage = () => {
                 <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
                   {editingGroup 
                     ? '修改模型组的配置信息。' 
-                    : '选择模型文件并配置参数，系统将为您生成模型组文件夹并导出。'}
+                    : '填写 HuggingFace 仓库信息和模型文件名，创建后可通过下载按钮获取模型文件。'}
                 </Body1>
                 <Field label="任务类型" hint="选择此模型组可用于哪些任务" required>
                   <Dropdown
@@ -1100,169 +1413,68 @@ export const ModelWeightsPage = () => {
                     <Option value="upscale">图像超分辨率</Option>
                   </Dropdown>
                 </Field>
+                <Field label="HuggingFace 仓库 ID" required hint="例如 leejet/Z-Image-GGUF">
+                  <Input
+                    value={groupHfRepo}
+                    onChange={(_, data) => setGroupHfRepo(data.value)}
+                    placeholder="owner/repo"
+                  />
+                </Field>
                 <Field
-                  label={groupTaskType === 'video' ? '基础视频模型（必选，LowNoise）' : 'SD模型（必选）'}
-                  hint={groupTaskType === 'video' ? '例如 Wan2.2-T2V/I2V-LowNoise-*.gguf' : undefined}
+                  label={groupTaskType === 'video' ? '基础视频模型文件名（必填，LowNoise）' : 'SD模型文件名（必填）'}
+                  hint={groupTaskType === 'video' ? '例如 Wan2.2-TI2V-5B-Q4_K_M.gguf' : '例如 z_image_turbo-Q4_K.gguf'}
                 >
-                  <Dropdown
-                    placeholder={groupTaskType === 'video' ? '请选择基础视频模型（LowNoise）' : '请选择SD模型'}
-                    value={getModelFileName(groupSdModel)}
-                    selectedOptions={[groupSdModel]}
-                    onOptionSelect={(_, data) => {
-                      if (data.optionValue) {
-                        setGroupSdModel(data.optionValue);
-                      }
-                    }}
-                  >
-                    {files.map((file) => (
-                      <Option key={file.path} value={file.path} text={file.name}>
-                        {file.name}
-                      </Option>
-                    ))}
-                  </Dropdown>
+                  <Input
+                    value={groupSdModel}
+                    onChange={(_, data) => setGroupSdModel(data.value)}
+                    placeholder={groupTaskType === 'video' ? '基础视频模型文件名' : 'SD模型文件名'}
+                  />
                 </Field>
                 {groupTaskType === 'video' && (
                   <Field
-                    label="高噪声视频模型（可选，HighNoise）"
-                    hint="例如 Wan2.2-T2V/I2V-HighNoise-*.gguf。若未选择，将只使用基础模型。"
+                    label="高噪声视频模型文件名（可选，HighNoise）"
+                    hint="例如 Wan2.2-T2V-HighNoise-*.gguf"
                   >
-                    <Dropdown
-                      placeholder="请选择高噪声视频模型（HighNoise，可选）"
-                      value={getModelFileName(groupHighNoiseSdModel)}
-                      selectedOptions={[groupHighNoiseSdModel]}
-                      onOptionSelect={(_, data) => {
-                        if (data.optionValue) {
-                          setGroupHighNoiseSdModel(data.optionValue);
-                        } else {
-                          setGroupHighNoiseSdModel('');
-                        }
-                      }}
-                    >
-                      {editingGroup && <Option value="" text="无">无</Option>}
-                      {files.map((file) => (
-                        <Option key={file.path} value={file.path} text={file.name}>
-                          {file.name}
-                        </Option>
-                      ))}
-                    </Dropdown>
+                    <Input
+                      value={groupHighNoiseSdModel}
+                      onChange={(_, data) => setGroupHighNoiseSdModel(data.value)}
+                      placeholder="高噪声视频模型文件名（可选）"
+                    />
                   </Field>
                 )}
-                <Field label={editingGroup ? "VAE模型（可选）" : "VAE模型（必选）"}>
-                  <Dropdown
-                    placeholder={editingGroup ? "请选择VAE模型（可选）" : "请选择VAE模型（必选）"}
-                    value={getModelFileName(groupVaeModel)}
-                    selectedOptions={[groupVaeModel]}
-                    onOptionSelect={(_, data) => {
-                      if (data.optionValue) {
-                        setGroupVaeModel(data.optionValue);
-                      } else {
-                        setGroupVaeModel('');
-                      }
-                    }}
-                  >
-                    {editingGroup && <Option value="" text="无">无</Option>}
-                    {files.filter(file => {
-                      // 当前已选择的VAE模型可以显示（如果正在编辑）
-                      if (file.path === groupVaeModel) return true;
-                      // 过滤掉已被其他模型选择的文件
-                      return file.path !== groupSdModel && file.path !== groupLlmModel && 
-                             file.path !== groupClipLModel && file.path !== groupT5xxlModel;
-                    }).map((file) => (
-                      <Option key={file.path} value={file.path} text={file.name}>
-                        {file.name}
-                      </Option>
-                    ))}
-                  </Dropdown>
+                <Field label={editingGroup ? "VAE模型文件名（可选）" : "VAE模型文件名（必填）"}>
+                  <Input
+                    value={groupVaeModel}
+                    onChange={(_, data) => setGroupVaeModel(data.value)}
+                    placeholder="例如 wan2.2_vae.safetensors"
+                  />
                 </Field>
-                {groupTaskType === 'edit' ? (
-                  <Field label={editingGroup ? "LLM模型（可选）" : "LLM模型（必选）"}>
-                    <Dropdown
-                      placeholder={editingGroup ? "请选择LLM模型（可选）" : "请选择LLM模型（必选）"}
-                      value={getModelFileName(groupLlmModel)}
-                      selectedOptions={[groupLlmModel]}
-                      onOptionSelect={(_, data) => {
-                        if (data.optionValue) {
-                          setGroupLlmModel(data.optionValue);
-                        } else {
-                          setGroupLlmModel('');
-                        }
-                      }}
-                    >
-                      {editingGroup && <Option value="" text="无">无</Option>}
-                      {files.filter(file => {
-                        if (file.path === groupLlmModel) return true;
-                        return file.path !== groupSdModel && file.path !== groupVaeModel && 
-                               file.path !== groupClipLModel && file.path !== groupT5xxlModel;
-                      }).map((file) => (
-                        <Option key={file.path} value={file.path} text={file.name}>
-                          {file.name}
-                        </Option>
-                      ))}
-                    </Dropdown>
-                  </Field>
-                ) : (
-                  <Field
-                    label={
+                <Field
+                  label={
+                    groupTaskType === 'edit'
+                      ? (editingGroup ? 'LLM模型文件名（可选）' : 'LLM模型文件名（必填）')
+                      : groupTaskType === 'video'
+                        ? (editingGroup ? '文本编码器 / T5 模型文件名（可选）' : '文本编码器 / T5 模型文件名（必填）')
+                        : (editingGroup ? 'LLM/CLIP模型文件名（可选）' : 'LLM/CLIP模型文件名（必填）')
+                  }
+                >
+                  <Input
+                    value={groupLlmModel}
+                    onChange={(_, data) => setGroupLlmModel(data.value)}
+                    placeholder={
                       groupTaskType === 'video'
-                        ? (editingGroup ? '文本编码器 / T5 模型（可选）' : '文本编码器 / T5 模型（必选）')
-                        : (editingGroup ? 'LLM/CLIP模型（可选）' : 'LLM/CLIP模型（必选）')
+                        ? '例如 umt5-xxl-encoder-q4_k_m.gguf'
+                        : '例如 Qwen3-4B-Instruct-2507-Q4_K_M.gguf'
                     }
-                  >
-                    <Dropdown
-                      placeholder={
-                        groupTaskType === 'video'
-                          ? (editingGroup ? '请选择文本编码器 / T5 模型（可选）' : '请选择文本编码器 / T5 模型（必选）')
-                          : (editingGroup ? '请选择LLM/CLIP模型（可选）' : '请选择LLM/CLIP模型（必选）')
-                      }
-                      value={getModelFileName(groupLlmModel)}
-                      selectedOptions={[groupLlmModel]}
-                      onOptionSelect={(_, data) => {
-                        if (data.optionValue) {
-                          setGroupLlmModel(data.optionValue);
-                        } else {
-                          setGroupLlmModel('');
-                        }
-                      }}
-                    >
-                      {editingGroup && <Option value="" text="无">无</Option>}
-                      {files.filter(file => {
-                        // 当前已选择的LLM模型可以显示（如果正在编辑）
-                        if (file.path === groupLlmModel) return true;
-                        // 过滤掉已被SD或VAE选择的模型
-                        return file.path !== groupSdModel && file.path !== groupVaeModel;
-                      }).map((file) => (
-                        <Option key={file.path} value={file.path} text={file.name}>
-                          {file.name}
-                        </Option>
-                      ))}
-                    </Dropdown>
-                  </Field>
-                )}
+                  />
+                </Field>
                 {groupTaskType === 'video' && (
-                  <Field label="CLIP Vision 模型（可选，I2V/FLF2V用）">
-                    <Dropdown
-                      placeholder="请选择 CLIP Vision 模型（可选）"
-                      value={getModelFileName(groupClipVisionModel)}
-                      selectedOptions={[groupClipVisionModel]}
-                      onOptionSelect={(_, data) => {
-                        if (data.optionValue) {
-                          setGroupClipVisionModel(data.optionValue);
-                        } else {
-                          setGroupClipVisionModel('');
-                        }
-                      }}
-                    >
-                      <Option value="" text="无">无</Option>
-                      {files.filter(file => {
-                        if (file.path === groupClipVisionModel) return true;
-                        return file.path !== groupSdModel && file.path !== groupVaeModel && 
-                               file.path !== groupLlmModel && file.path !== groupHighNoiseSdModel;
-                      }).map((file) => (
-                        <Option key={file.path} value={file.path} text={file.name}>
-                          {file.name}
-                        </Option>
-                      ))}
-                    </Dropdown>
+                  <Field label="CLIP Vision 模型文件名（可选，I2V/FLF2V用）">
+                    <Input
+                      value={groupClipVisionModel}
+                      onChange={(_, data) => setGroupClipVisionModel(data.value)}
+                      placeholder="CLIP Vision 模型文件名（可选）"
+                    />
                   </Field>
                 )}
                 <Title2 style={{ fontSize: tokens.fontSizeBase400, marginTop: tokens.spacingVerticalM }}>
@@ -1439,21 +1651,7 @@ export const ModelWeightsPage = () => {
                 取消
               </Button>
 
-              {exportProgress ? (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, padding: `0 ${tokens.spacingHorizontalS}` }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text size={100} truncate style={{ color: tokens.colorNeutralForeground3 }}>
-                      正在导出: {exportProgress.fileName}
-                    </Text>
-                    <Text size={100} style={{ color: tokens.colorNeutralForeground3, whiteSpace: 'nowrap' }}>
-                      {exportProgress.progress}%
-                    </Text>
-                  </div>
-                  <ProgressBar value={exportProgress.progress} max={100} />
-                </div>
-              ) : (
-                <div style={{ flex: 1 }} /> // 占位符，确保“保存”按钮始终在右侧
-              )}
+              <div style={{ flex: 1 }} />
 
               <Button
                 appearance="primary"
@@ -1462,13 +1660,14 @@ export const ModelWeightsPage = () => {
                   loading || 
                   !groupName.trim() || 
                   (!editingGroup && (
+                    !groupHfRepo || !groupHfRepo.trim() ||
                     !groupSdModel || !groupSdModel.trim() || 
                     !groupVaeModel || !groupVaeModel.trim() || 
                     (!groupLlmModel || !groupLlmModel.trim())
                   ))
                 }
               >
-                {editingGroup ? '保存' : '建立并导出'}
+                {editingGroup ? '保存' : '创建'}
               </Button>
             </DialogActions>
           </DialogBody>

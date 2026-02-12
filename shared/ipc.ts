@@ -1,4 +1,4 @@
-import type { DeviceType, ModelGroup, WeightFile, GenerateImageParams, GeneratedImageInfo } from './types.js'
+import type { DeviceType, ModelGroup, WeightFile, GenerateImageParams, GeneratedImageInfo, MirrorSource, SDCppRelease, SDCppDownloadProgress, MirrorTestResult, SDCppReleaseAsset, HfMirror, HfMirrorId, HfFileRef, ModelDownloadProgress } from './types.js'
 
 // IPC channel allowlists
 export const IPC_INVOKE_CHANNELS = [
@@ -26,16 +26,29 @@ export const IPC_INVOKE_CHANNELS = [
   'model-groups:list',
   'model-groups:select-folder',
   'model-groups:update',
+  'models:cancel-download',
+  'models:check-files',
+  'models:download-group-files',
+  'models:get-hf-mirror',
+  'models:set-hf-mirror',
   'perfect-pixel:read-image',
   'perfect-pixel:save',
   'perfect-pixel:select-image',
+  'sdcpp:add-mirror',
+  'sdcpp:auto-select-mirror',
+  'sdcpp:cancel-download',
   'sdcpp:delete-file',
+  'sdcpp:download-engine',
   'sdcpp:download-file',
+  'sdcpp:fetch-releases',
   'sdcpp:get-device',
   'sdcpp:get-folder',
+  'sdcpp:get-mirrors',
   'sdcpp:init-default-folder',
   'sdcpp:list-files',
+  'sdcpp:remove-mirror',
   'sdcpp:set-device',
+  'sdcpp:test-mirrors',
   'weights:check-folder',
   'weights:delete-file',
   'weights:download-file',
@@ -54,6 +67,8 @@ export const IPC_EVENT_CHANNELS = [
   'generate-video:progress',
   'model-groups:export-progress',
   'model-groups:import-progress',
+  'sdcpp:download-progress',
+  'models:download-progress',
 ] as const
 
 export const IPC_EVENT_PATTERNS = [
@@ -80,6 +95,20 @@ export interface IPCRequestMap {
   'sdcpp:list-files': { request: [string, DeviceType]; response: { files: WeightFile[]; version: string | null } }
   'sdcpp:download-file': { request: string; response: boolean }
   'sdcpp:delete-file': { request: string; response: boolean }
+  'sdcpp:fetch-releases': { request: { mirrorId?: string; count?: number }; response: SDCppRelease[] }
+  'sdcpp:download-engine': { request: { asset: SDCppReleaseAsset; release: SDCppRelease; mirrorId?: string }; response: { success: boolean; error?: string } }
+  'sdcpp:cancel-download': { request: void; response: boolean }
+  'sdcpp:get-mirrors': { request: void; response: MirrorSource[] }
+  'sdcpp:add-mirror': { request: Omit<MirrorSource, 'id' | 'builtin'>; response: MirrorSource }
+  'sdcpp:remove-mirror': { request: string; response: boolean }
+  'sdcpp:test-mirrors': { request: void; response: MirrorTestResult[] }
+  'sdcpp:auto-select-mirror': { request: void; response: MirrorSource }
+
+  'models:get-hf-mirror': { request: void; response: HfMirrorId }
+  'models:set-hf-mirror': { request: HfMirrorId; response: boolean }
+  'models:download-group-files': { request: { groupId: string; mirrorId?: HfMirrorId }; response: { success: boolean; error?: string } }
+  'models:cancel-download': { request: void; response: boolean }
+  'models:check-files': { request: { groupId: string }; response: Array<{ file: string; exists: boolean; size?: number }> }
 
   'model-groups:list': { request: void; response: ModelGroup[] }
   'model-groups:create': { request: Omit<ModelGroup, 'id' | 'createdAt' | 'updatedAt'>; response: ModelGroup }
@@ -125,6 +154,8 @@ export interface IPCEventMap {
   'generate:preview-update': { previewImage: string }
   'generate-video:progress': { progress: string | number; video?: string; frames?: string[] }
   'generate-video:cli-output': { type: 'stdout' | 'stderr'; text: string }
+  'sdcpp:download-progress': SDCppDownloadProgress
+  'models:download-progress': ModelDownloadProgress
 }
 
 export type IpcInvokeArgs<C extends IpcInvokeChannel> = IPCRequestMap[C]['request'] extends void

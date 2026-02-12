@@ -8,6 +8,7 @@ import { registerDialogHandlers } from './ipc/dialog.js'
 import { registerWeightsHandlers } from './ipc/weights.js'
 import { registerSDCppHandlers } from './ipc/sdcpp.js'
 import { registerModelGroupsHandlers } from './ipc/modelGroups.js'
+import { registerModelDownloadHandlers } from './ipc/modelDownload.js'
 import { registerGenerateHandlers } from './ipc/generate.js'
 import { registerVideoGenerateHandlers } from './ipc/videoGenerate.js'
 import { registerGeneratedImagesHandlers } from './ipc/generatedImages.js'
@@ -75,6 +76,7 @@ registerDialogHandlers({ getWindow, state: appState })
 registerWeightsHandlers({ getWindow, state: appState })
 registerSDCppHandlers({ getWindow, state: appState })
 registerModelGroupsHandlers({ getWindow, state: appState })
+registerModelDownloadHandlers({ getWindow, state: appState })
 registerGenerateHandlers({ state: appState })
 registerVideoGenerateHandlers({ state: appState })
 registerGeneratedImagesHandlers({ getWindow })

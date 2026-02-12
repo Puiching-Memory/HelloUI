@@ -5,7 +5,19 @@ import { promises as fs } from 'fs'
 import { execa } from 'execa'
 import type { DeviceType } from '../../shared/types.js'
 import type { AppState } from './state.js'
-import { getDefaultSDCppFolder, initDefaultSDCppFolder } from '../utils/paths.js'
+import { getDefaultSDCppFolder, initDefaultSDCppFolder, getRunPath } from '../utils/paths.js'
+import {
+  BUILTIN_MIRRORS,
+  getAllMirrors,
+  addCustomMirror,
+  removeCustomMirror,
+  testAllMirrors,
+  autoSelectMirror,
+  fetchReleases,
+  downloadAndInstallEngine,
+  cancelDownload,
+  setCustomMirrorsPath,
+} from '../utils/sdcppDownloader.js'
 
 interface SDCppDeps {
   getWindow: () => BrowserWindow | null
@@ -119,5 +131,65 @@ export function registerSDCppHandlers({ getWindow, state }: SDCppDeps): void {
   ipcMain.handle('sdcpp:delete-file', async (_, filePath: string) => {
     await fs.unlink(filePath)
     return true
+  })
+
+  // ─── 引擎下载相关 ──────────────────────────────────────────────────
+
+  // 初始化自定义镜像持久化路径
+  const mirrorsConfigPath = join(getRunPath(), 'config', 'custom-mirrors.json')
+  setCustomMirrorsPath(mirrorsConfigPath)
+
+  // 获取可用 Release 列表
+  ipcMain.handle('sdcpp:fetch-releases', async (_, opts: { mirrorId?: string; count?: number }) => {
+    const mirrors = await getAllMirrors()
+    const mirror = mirrors.find((m) => m.id === (opts.mirrorId || 'github')) || mirrors[0]
+    return await fetchReleases(mirror, opts.count || 10)
+  })
+
+  // 下载并安装引擎
+  ipcMain.handle('sdcpp:download-engine', async (_, opts: { asset: any; release: any; mirrorId?: string }) => {
+    try {
+      const engineFolder = state.sdcppFolderPath || getDefaultSDCppFolder()
+      const mirrors = await getAllMirrors()
+      const mirror = mirrors.find((m) => m.id === (opts.mirrorId || 'github')) || mirrors[0]
+
+      await downloadAndInstallEngine(opts.asset, opts.release, mirror, engineFolder, getWindow)
+      return { success: true }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { success: false, error: message }
+    }
+  })
+
+  // 取消下载
+  ipcMain.handle('sdcpp:cancel-download', async () => {
+    return cancelDownload()
+  })
+
+  // 获取所有镜像源
+  ipcMain.handle('sdcpp:get-mirrors', async () => {
+    return await getAllMirrors()
+  })
+
+  // 添加自定义镜像源
+  ipcMain.handle('sdcpp:add-mirror', async (_, mirror: Omit<import('../../shared/types.js').MirrorSource, 'id' | 'builtin'>) => {
+    return await addCustomMirror(mirror)
+  })
+
+  // 删除自定义镜像源
+  ipcMain.handle('sdcpp:remove-mirror', async (_, mirrorId: string) => {
+    return await removeCustomMirror(mirrorId)
+  })
+
+  // 测试所有镜像源
+  ipcMain.handle('sdcpp:test-mirrors', async () => {
+    const mirrors = await getAllMirrors()
+    return await testAllMirrors(mirrors)
+  })
+
+  // 自动选择最快镜像源
+  ipcMain.handle('sdcpp:auto-select-mirror', async () => {
+    const mirrors = await getAllMirrors()
+    return await autoSelectMirror(mirrors)
   })
 }

@@ -57,6 +57,7 @@ export interface ModelGroup {
   clipLModel?: string // CLIP L模型路径（图片编辑任务用，可选）
   t5xxlModel?: string // T5XXL模型路径（图片编辑任务用，可选）
   clipVisionModel?: string // CLIP Vision模型路径（视频生成 I2V/FLF2V 用，可选）
+  hfFiles?: HfFileRef[] // HuggingFace 待下载文件列表（预定义）
   defaultSteps?: number // 推荐的默认采样步数
   defaultCfgScale?: number // 推荐的默认CFG Scale值
   defaultWidth?: number // 推荐的默认图片宽度
@@ -184,3 +185,126 @@ export interface GeneratedImageInfo {
  * 生成的图片对象（包含元数据和预览图片），用于前端显示
  */
 export interface GeneratedImage extends GeneratedImageInfo {}
+
+// ─── SD.cpp 引擎下载 ────────────────────────────────────────────────────
+
+/**
+ * 镜像源类型
+ */
+export type MirrorType = 'github' | 'proxy'
+
+/**
+ * 镜像源配置
+ */
+export interface MirrorSource {
+  id: string
+  name: string
+  type: MirrorType
+  /** proxy 类型: 前缀式代理 URL, 如 "https://ghfast.top" */
+  url: string
+  /** 是否也代理 API 请求 */
+  proxyApi: boolean
+  /** 是否为内置镜像（不可删除） */
+  builtin: boolean
+}
+
+/**
+ * GitHub Release 资产信息
+ */
+export interface SDCppReleaseAsset {
+  name: string
+  size: number
+  downloadUrl: string
+  /** 资产对应的设备类型 */
+  deviceType: DeviceType | 'cudart' | 'unknown'
+  /** CPU 子变体 */
+  cpuVariant?: 'avx' | 'avx2' | 'avx512' | 'noavx'
+}
+
+/**
+ * GitHub Release 信息
+ */
+export interface SDCppRelease {
+  tagName: string
+  name: string
+  publishedAt: string
+  assets: SDCppReleaseAsset[]
+}
+
+/**
+ * 引擎下载进度
+ */
+export interface SDCppDownloadProgress {
+  /** 当前阶段: downloading / extracting / done / error */
+  stage: 'downloading' | 'extracting' | 'done' | 'error'
+  /** 已下载字节数 */
+  downloadedBytes: number
+  /** 总字节数 */
+  totalBytes: number
+  /** 下载速度 bytes/s */
+  speed: number
+  /** 当前下载的文件名 */
+  fileName: string
+  /** 错误信息 */
+  error?: string
+}
+
+/**
+ * 镜像测速结果
+ */
+export interface MirrorTestResult {
+  mirrorId: string
+  latency: number | null
+  success: boolean
+  error?: string
+}
+
+// ─── HuggingFace 模型下载 ────────────────────────────────────────────────
+
+/**
+ * HuggingFace 镜像源
+ */
+export type HfMirrorId = 'huggingface' | 'hf-mirror'
+
+/**
+ * HuggingFace 镜像源配置
+ */
+export interface HfMirror {
+  id: HfMirrorId
+  name: string
+  baseUrl: string
+}
+
+/**
+ * HuggingFace 文件引用 — 模型组中预定义的待下载文件
+ */
+export interface HfFileRef {
+  /** HuggingFace 仓库 ID，如 "user/repo" */
+  repo: string
+  /** 文件在仓库中的路径，如 "model.safetensors" */
+  file: string
+  /** 下载后保存到模型组子文件夹中的相对路径（可选，默认同 file） */
+  savePath?: string
+}
+
+/**
+ * 模型文件下载进度
+ */
+export interface ModelDownloadProgress {
+  /** 当前阶段 */
+  stage: 'downloading' | 'done' | 'error'
+  /** 已下载字节数 */
+  downloadedBytes: number
+  /** 总字节数（-1 表示未知） */
+  totalBytes: number
+  /** 下载速度 bytes/s */
+  speed: number
+  /** 当前下载的文件名 */
+  fileName: string
+  /** 总文件数 */
+  totalFiles: number
+  /** 当前正在下载的文件序号 (1-based) */
+  currentFileIndex: number
+  /** 错误信息 */
+  error?: string
+}
