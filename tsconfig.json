@@ -24,14 +24,12 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@shared/*": ["./shared/*"],
-      "@electron/*": ["./electron/*"]
+      "@shared/*": ["./shared/*"]
     },
 
     /* Node types */
     "types": ["node"]
   },
-  "include": ["src", "src/vite-env.d.ts", "shared"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  "include": ["src", "src/vite-env.d.ts", "shared"]
 }
 

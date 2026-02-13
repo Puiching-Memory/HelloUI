@@ -32,6 +32,7 @@ import {
 } from '@fluentui/react-icons';
 import { useState, useEffect, useRef } from 'react';
 import { useAppStore } from '../hooks/useAppStore';
+import { ipcInvoke } from '../lib/tauriIpc';
 
 const useStyles = makeStyles({
   container: {
@@ -214,7 +215,7 @@ export const AliyunTongyiVideoPage = () => {
     const url = `${selectedRegion?.endpoint}/services/aigc/video-generation/video-synthesis`;
 
     try {
-      const result = await window.ipcRenderer.invoke('aliyun-api:call', {
+      const result = await ipcInvoke('aliyun-api:call', {
         method: 'POST',
         url,
         headers: {
@@ -259,7 +260,7 @@ export const AliyunTongyiVideoPage = () => {
 
     pollingRef.current = setInterval(async () => {
       try {
-        const result = await window.ipcRenderer.invoke('aliyun-api:call', {
+        const result = await ipcInvoke('aliyun-api:call', {
           method: 'GET',
           url,
           headers: {

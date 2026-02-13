@@ -1,4 +1,3 @@
-/// <reference types="../vite-env" />
 import {
   Card,
   Title1,
@@ -40,9 +39,12 @@ import {
   TopSpeedRegular,
 } from '@fluentui/react-icons';
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useIpcListener } from '../hooks/useIpcListener';
+import { ipcInvoke } from '../lib/tauriIpc';
 import type { DeviceType, MirrorSource, SDCppRelease, SDCppReleaseAsset, SDCppDownloadProgress, MirrorTestResult } from '../../shared/types';
 import { formatFileSize } from '@/utils/format';
 import { getDeviceLabel } from '@/utils/modelUtils';
+import { MessageDialog } from '@/components/MessageDialog';
 
 const useStyles = makeStyles({
   container: {
@@ -175,6 +177,14 @@ const useStyles = makeStyles({
     flexWrap: 'wrap',
     alignItems: 'center',
   },
+  folderPath: {
+    display: 'flex',
+    alignItems: 'flex-end',
+    gap: tokens.spacingHorizontalM,
+    padding: tokens.spacingVerticalM,
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: tokens.borderRadiusMedium,
+  },
 });
 
 interface EngineFile {
@@ -218,6 +228,7 @@ export const SDCppPage = () => {
 
   // 引擎文件状态
   const [engineFolder, setEngineFolder] = useState<string>('');
+  const [engineFolderInput, setEngineFolderInput] = useState<string>('');
   const [files, setFiles] = useState<EngineFile[]>([]);
   const [deviceVersions, setDeviceVersions] = useState<Record<DeviceType, string | null>>({
     cpu: null, vulkan: null, cuda: null,
@@ -243,7 +254,10 @@ export const SDCppPage = () => {
   const [newMirrorName, setNewMirrorName] = useState('');
   const [newMirrorUrl, setNewMirrorUrl] = useState('');
 
-  const progressListenerRef = useRef<((event: any, data: SDCppDownloadProgress) => void) | null>(null);
+  // 消息对话框
+  const [messageDialogOpen, setMessageDialogOpen] = useState(false);
+  const [messageDialogContent, setMessageDialogContent] = useState<{ title: string; message: string } | null>(null);
+
   const loadFilesRef = useRef<() => Promise<void>>(undefined);
 
   // ─── 初始化 ────────────────────────────────────────────────────
@@ -269,10 +283,9 @@ export const SDCppPage = () => {
   });
 
   // 监听下载进度事件
-  useEffect(() => {
-    if (!window.ipcRenderer) return;
-
-    const handler = (_event: any, data: SDCppDownloadProgress) => {
+  useIpcListener(
+    'sdcpp:download-progress',
+    (data) => {
       setDownloadProgress(data);
       if (data.stage === 'done') {
         // 下载完成后自动重新扫描引擎版本号
@@ -284,29 +297,20 @@ export const SDCppPage = () => {
       if (data.stage === 'error') {
         setDownloadError(data.error || '下载失败');
       }
-    };
-
-    progressListenerRef.current = handler;
-    window.ipcRenderer.on('sdcpp:download-progress', handler);
-
-    return () => {
-      if (progressListenerRef.current) {
-        window.ipcRenderer.off('sdcpp:download-progress', progressListenerRef.current);
-      }
-    };
-  }, []);
+    },
+  );
 
   // ─── 数据加载 ──────────────────────────────────────────────────
 
   const loadEngineFolder = async () => {
-    if (!window.ipcRenderer) return;
     try {
-      let folder = await window.ipcRenderer.invoke('sdcpp:get-folder');
+      let folder = await ipcInvoke('sdcpp:get-folder');
       if (!folder) {
-        folder = await window.ipcRenderer.invoke('sdcpp:init-default-folder');
+        folder = await ipcInvoke('sdcpp:init-default-folder');
       }
       if (folder) {
         setEngineFolder(folder);
+        setEngineFolderInput(folder);
       }
     } catch (error) {
       console.error('Failed to load engine folder:', error);
@@ -314,13 +318,13 @@ export const SDCppPage = () => {
   };
 
   const loadFiles = async () => {
-    if (!engineFolder || !window.ipcRenderer) return;
+    if (!engineFolder) return;
     setLoading(true);
     try {
       const deviceTypes: DeviceType[] = ['cpu', 'vulkan', 'cuda'];
       const allFilesPromises = deviceTypes.map(async (deviceType) => {
         try {
-          const result = await window.ipcRenderer.invoke('sdcpp:list-files', engineFolder, deviceType);
+          const result = await ipcInvoke('sdcpp:list-files', engineFolder, deviceType);
           const files = (result?.files || []).map((file: Omit<EngineFile, 'deviceType'>) => ({
             ...file,
             deviceType,
@@ -349,10 +353,40 @@ export const SDCppPage = () => {
     }
   };
 
+  const handleSetFolder = async () => {
+    const nextFolder = engineFolderInput.trim();
+
+    if (!nextFolder) {
+      setMessageDialogContent({ title: '提示', message: '请输入有效的文件夹路径' });
+      setMessageDialogOpen(true);
+      return;
+    }
+
+    const exists = await ipcInvoke('sdcpp:check-folder', nextFolder);
+    if (!exists) {
+      setMessageDialogContent({ title: '错误', message: '文件夹不存在，请检查路径是否正确' });
+      setMessageDialogOpen(true);
+      return;
+    }
+
+    const setResult = await ipcInvoke('sdcpp:set-folder', nextFolder);
+    if (!setResult) {
+      setMessageDialogContent({ title: '错误', message: '设置文件夹路径失败，请重试' });
+      setMessageDialogOpen(true);
+      return;
+    }
+
+    setEngineFolder(nextFolder);
+    setEngineFolderInput(nextFolder);
+  };
+
+  const handleFolderPathChange = (value: string) => {
+    setEngineFolderInput(value);
+  };
+
   const loadMirrors = async () => {
-    if (!window.ipcRenderer) return;
     try {
-      const result = await window.ipcRenderer.invoke('sdcpp:get-mirrors');
+      const result = await ipcInvoke('sdcpp:get-mirrors');
       setMirrors(result);
     } catch (error) {
       console.error('Failed to load mirrors:', error);
@@ -362,11 +396,10 @@ export const SDCppPage = () => {
   // ─── Release 操作 ──────────────────────────────────────────────
 
   const fetchReleaseList = useCallback(async () => {
-    if (!window.ipcRenderer) return;
     setLoadingReleases(true);
     setDownloadError(null);
     try {
-      const result = await window.ipcRenderer.invoke('sdcpp:fetch-releases', {
+      const result = await ipcInvoke('sdcpp:fetch-releases', {
         mirrorId: selectedMirrorId,
         count: 10,
       });
@@ -385,7 +418,7 @@ export const SDCppPage = () => {
   // ─── 下载操作 ──────────────────────────────────────────────────
 
   const handleDownload = useCallback(async (asset: SDCppReleaseAsset) => {
-    if (!window.ipcRenderer || !selectedRelease) return;
+    if (!selectedRelease) return;
     setDownloadError(null);
     setDownloadProgress({
       stage: 'downloading',
@@ -396,7 +429,7 @@ export const SDCppPage = () => {
     });
 
     try {
-      const result = await window.ipcRenderer.invoke('sdcpp:download-engine', {
+      const result = await ipcInvoke('sdcpp:download-engine', {
         asset,
         release: selectedRelease,
         mirrorId: selectedMirrorId,
@@ -412,9 +445,8 @@ export const SDCppPage = () => {
   }, [selectedRelease, selectedMirrorId]);
 
   const handleCancelDownload = useCallback(async () => {
-    if (!window.ipcRenderer) return;
     try {
-      await window.ipcRenderer.invoke('sdcpp:cancel-download');
+      await ipcInvoke('sdcpp:cancel-download');
       setDownloadProgress(null);
     } catch (error) {
       console.error('Failed to cancel download:', error);
@@ -424,10 +456,9 @@ export const SDCppPage = () => {
   // ─── 镜像操作 ──────────────────────────────────────────────────
 
   const handleTestMirrors = useCallback(async () => {
-    if (!window.ipcRenderer) return;
     setTestingMirrors(true);
     try {
-      const results = await window.ipcRenderer.invoke('sdcpp:test-mirrors');
+      const results = await ipcInvoke('sdcpp:test-mirrors');
       const resultMap: Record<string, MirrorTestResult> = {};
       results.forEach(r => { resultMap[r.mirrorId] = r; });
       setMirrorTestResults(resultMap);
@@ -439,10 +470,9 @@ export const SDCppPage = () => {
   }, []);
 
   const handleAutoSelectMirror = useCallback(async () => {
-    if (!window.ipcRenderer) return;
     setTestingMirrors(true);
     try {
-      const best = await window.ipcRenderer.invoke('sdcpp:auto-select-mirror');
+      const best = await ipcInvoke('sdcpp:auto-select-mirror');
       setSelectedMirrorId(best.id);
       // 同时更新测速结果
       await handleTestMirrors();
@@ -454,9 +484,9 @@ export const SDCppPage = () => {
   }, [handleTestMirrors]);
 
   const handleAddMirror = useCallback(async () => {
-    if (!window.ipcRenderer || !newMirrorName || !newMirrorUrl) return;
+    if (!newMirrorName || !newMirrorUrl) return;
     try {
-      const mirror = await window.ipcRenderer.invoke('sdcpp:add-mirror', {
+      const mirror = await ipcInvoke('sdcpp:add-mirror', {
         name: newMirrorName,
         type: 'proxy' as const,
         url: newMirrorUrl.replace(/\/+$/, ''),
@@ -472,9 +502,8 @@ export const SDCppPage = () => {
   }, [newMirrorName, newMirrorUrl]);
 
   const handleRemoveMirror = useCallback(async (mirrorId: string) => {
-    if (!window.ipcRenderer) return;
     try {
-      await window.ipcRenderer.invoke('sdcpp:remove-mirror', mirrorId);
+      await ipcInvoke('sdcpp:remove-mirror', mirrorId);
       setMirrors(prev => prev.filter(m => m.id !== mirrorId));
       if (selectedMirrorId === mirrorId) {
         setSelectedMirrorId('github');
@@ -503,6 +532,38 @@ export const SDCppPage = () => {
   return (
     <div className={styles.container}>
       <Title1>SD.cpp 推理引擎</Title1>
+
+      {/* 引擎文件夹路径输入区域 */}
+      <Card className={styles.section}>
+        <Title2>引擎文件夹路径</Title2>
+        <div className={styles.folderPath}>
+          <Field label="引擎文件夹路径" style={{ flex: 1 }}>
+            <Input
+              value={engineFolderInput}
+              onChange={(_, data) => handleFolderPathChange(data.value)}
+              placeholder="默认使用应用数据目录下的 engines/sdcpp 文件夹"
+              style={{ flex: 1 }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleSetFolder();
+                }
+              }}
+            />
+          </Field>
+          <Button
+            onClick={handleSetFolder}
+            appearance="primary"
+            disabled={!engineFolderInput.trim() || loading || engineFolderInput.trim() === engineFolder}
+          >
+            应用路径
+          </Button>
+        </div>
+        <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalXS }}>
+          {engineFolder
+            ? `使用文件夹: ${engineFolder}。引擎文件将按设备类型子目录（cpu/vulkan/cuda）自动扫描。`
+            : '默认使用应用数据目录下的 engines/sdcpp 文件夹，也可以输入自定义路径。'}
+        </Body1>
+      </Card>
 
       {/* 引擎概览 */}
       {loading && files.length === 0 ? (
@@ -792,6 +853,13 @@ export const SDCppPage = () => {
           </div>
         )}
       </Card>
+
+      <MessageDialog
+        open={messageDialogOpen}
+        title={messageDialogContent?.title || ''}
+        message={messageDialogContent?.message || ''}
+        onClose={() => setMessageDialogOpen(false)}
+      />
     </div>
   );
 };

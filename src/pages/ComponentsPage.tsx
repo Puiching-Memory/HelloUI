@@ -876,7 +876,7 @@ export const ComponentsPage = () => {
                 <Tag value="tag1">React</Tag>
                 <Tag value="tag2">TypeScript</Tag>
                 <Tag value="tag3">Fluent UI</Tag>
-                <Tag value="tag4">Electron</Tag>
+                <Tag value="tag4">Tauri</Tag>
               </TagGroup>
             </div>
           </div>

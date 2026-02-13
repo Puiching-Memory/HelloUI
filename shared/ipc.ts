@@ -1,4 +1,4 @@
-import type { DeviceType, ModelGroup, WeightFile, GenerateImageParams, GeneratedImageInfo, MirrorSource, SDCppRelease, SDCppDownloadProgress, MirrorTestResult, SDCppReleaseAsset, HfMirror, HfMirrorId, HfFileRef, ModelDownloadProgress } from './types.js'
+import type { DeviceType, ModelGroup, WeightFile, GenerateImageParams, GeneratedImageInfo, MirrorSource, SDCppRelease, SDCppDownloadProgress, MirrorTestResult, SDCppReleaseAsset, HfMirrorId, ModelDownloadProgress } from './types.js'
 
 // IPC channel allowlists
 export const IPC_INVOKE_CHANNELS = [
@@ -42,9 +42,11 @@ export const IPC_INVOKE_CHANNELS = [
   'sdcpp:download-file',
   'sdcpp:fetch-releases',
   'sdcpp:get-device',
+  'sdcpp:check-folder',
   'sdcpp:get-folder',
   'sdcpp:get-mirrors',
   'sdcpp:init-default-folder',
+  'sdcpp:set-folder',
   'sdcpp:list-files',
   'sdcpp:remove-mirror',
   'sdcpp:set-device',
@@ -71,10 +73,6 @@ export const IPC_EVENT_CHANNELS = [
   'models:download-progress',
 ] as const
 
-export const IPC_EVENT_PATTERNS = [
-  /^sdcpp:(stdout|stderr|exit|error):/,
-]
-
 export type IpcInvokeChannel = typeof IPC_INVOKE_CHANNELS[number]
 export type IpcEventChannel = typeof IPC_EVENT_CHANNELS[number]
 
@@ -90,6 +88,8 @@ export interface IPCRequestMap {
 
   'sdcpp:init-default-folder': { request: void; response: string }
   'sdcpp:get-folder': { request: void; response: string | null }
+  'sdcpp:check-folder': { request: string; response: boolean }
+  'sdcpp:set-folder': { request: string; response: boolean }
   'sdcpp:set-device': { request: DeviceType; response: boolean }
   'sdcpp:get-device': { request: void; response: DeviceType }
   'sdcpp:list-files': { request: [string, DeviceType]; response: { files: WeightFile[]; version: string | null } }
@@ -165,11 +165,3 @@ export type IpcInvokeArgs<C extends IpcInvokeChannel> = IPCRequestMap[C]['reques
     : [IPCRequestMap[C]['request']]
 
 export type IpcInvokeResponse<C extends IpcInvokeChannel> = IPCRequestMap[C]['response']
-
-const invokeChannelSet = new Set<string>(IPC_INVOKE_CHANNELS as readonly string[])
-const eventChannelSet = new Set<string>(IPC_EVENT_CHANNELS as readonly string[])
-
-export const isAllowedInvokeChannel = (channel: string): channel is IpcInvokeChannel => invokeChannelSet.has(channel)
-export const isAllowedSendChannel = (channel: string): channel is IpcInvokeChannel => invokeChannelSet.has(channel)
-export const isAllowedEventChannel = (channel: string): channel is IpcEventChannel =>
-  eventChannelSet.has(channel) || IPC_EVENT_PATTERNS.some((pattern) => pattern.test(channel))

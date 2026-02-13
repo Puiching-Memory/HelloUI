@@ -1,4 +1,5 @@
 import type { DeviceType, ModelGroup } from '../../shared/types'
+import { getPathBaseName } from './tauriPath'
 
 /**
  * 获取设备类型的显示标签
@@ -22,10 +23,11 @@ export function getDeviceLabel(device: DeviceType): string {
 export function getModelInfo(group: ModelGroup | undefined): string {
   if (!group) return ''
   const parts: string[] = []
-  if (group.sdModel) parts.push(`SD: ${group.sdModel.split(/[/\\]/).pop()}`)
-  if (group.vaeModel) parts.push(`VAE: ${group.vaeModel.split(/[/\\]/).pop()}`)
-  if (group.llmModel) parts.push(`LLM: ${group.llmModel.split(/[/\\]/).pop()}`)
-  if (group.clipVisionModel) parts.push(`CLIP: ${group.clipVisionModel.split(/[/\\]/).pop()}`)
+  if (group.sdModel) parts.push(`SD: ${getPathBaseName(group.sdModel, group.sdModel)}`)
+  if (group.diffusionModel) parts.push(`Diffusion: ${getPathBaseName(group.diffusionModel, group.diffusionModel)}`)
+  if (group.vaeModel) parts.push(`VAE: ${getPathBaseName(group.vaeModel, group.vaeModel)}`)
+  if (group.llmModel) parts.push(`LLM: ${getPathBaseName(group.llmModel, group.llmModel)}`)
+  if (group.clipVisionModel) parts.push(`CLIP: ${getPathBaseName(group.clipVisionModel, group.clipVisionModel)}`)
   return parts.join(' | ')
 }
 

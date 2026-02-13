@@ -35,8 +35,10 @@ import {
 } from '@fluentui/react-icons';
 import { PhotoView } from 'react-photo-view';
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { ipcInvoke } from '../lib/tauriIpc';
 import type { GeneratedImage } from '../../shared/types';
 import { formatFileSize } from '@/utils/format';
+import { getPathBaseName, toMediaUrl } from '@/utils/tauriPath';
 import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
 
 const useStyles = makeStyles({
@@ -387,13 +389,8 @@ export const GeneratedImagesPage = () => {
 
   const loadImages = async () => {
     try {
-      // 检查 ipcRenderer 是否可用
-      if (!window.ipcRenderer) {
-        console.error('window.ipcRenderer is not available');
-        return;
-      }
       setLoading(true);
-      const imageList = await window.ipcRenderer.invoke('generated-images:list');
+      const imageList = await ipcInvoke('generated-images:list');
       setImages(imageList || []);
       // 清空选择状态
       setSelectedImages(new Set());
@@ -441,12 +438,7 @@ export const GeneratedImagesPage = () => {
 
   const handleDownload = async (image: GeneratedImage) => {
     try {
-      if (!window.ipcRenderer) {
-        setMessageDialogContent({ title: '错误', message: 'IPC 通信不可用' });
-        setMessageDialogOpen(true);
-        return;
-      }
-      const success = await window.ipcRenderer.invoke('generated-images:download', image.path);
+      const success = await ipcInvoke('generated-images:download', image.path);
       if (success) {
         // 可以显示成功提示
         console.log('图片下载成功');
@@ -465,11 +457,11 @@ export const GeneratedImagesPage = () => {
   };
 
   const handleDeleteConfirm = async () => {
-    if (!deletingImage || !window.ipcRenderer) {
+    if (!deletingImage) {
       return;
     }
     try {
-      await window.ipcRenderer.invoke('generated-images:delete', deletingImage);
+      await ipcInvoke('generated-images:delete', deletingImage);
       // 从列表中移除
       setImages(prev => prev.filter(img => img.path !== deletingImage));
       // 从选择中移除
@@ -490,12 +482,12 @@ export const GeneratedImagesPage = () => {
 
   // 批量下载（打包为 ZIP）
   const handleBatchDownload = async () => {
-    if (selectedImages.size === 0 || !window.ipcRenderer) {
+    if (selectedImages.size === 0) {
       return;
     }
     try {
       const selectedPaths = Array.from(selectedImages);
-      const result = await window.ipcRenderer.invoke('generated-images:batch-download', selectedPaths);
+      const result = await ipcInvoke('generated-images:batch-download', selectedPaths);
       
       if (result.canceled) {
         // 用户取消了保存对话框
@@ -527,7 +519,7 @@ export const GeneratedImagesPage = () => {
 
   // 批量删除确认
   const handleBatchDeleteConfirm = async () => {
-    if (selectedImages.size === 0 || !window.ipcRenderer) {
+    if (selectedImages.size === 0) {
       return;
     }
     try {
@@ -538,7 +530,7 @@ export const GeneratedImagesPage = () => {
 
       for (const path of selectedPaths) {
         try {
-          await window.ipcRenderer.invoke('generated-images:delete', path);
+          await ipcInvoke('generated-images:delete', path);
           successfullyDeleted.add(path);
           successCount++;
         } catch (error) {
@@ -702,14 +694,10 @@ export const GeneratedImagesPage = () => {
       return;
     }
     
-    if (!window.ipcRenderer) {
-      return;
-    }
-    
     setLoadingPreviews(prev => new Set(prev).add(imagePath));
     
     try {
-      const base64 = await window.ipcRenderer.invoke('generated-images:get-preview', imagePath);
+      const base64 = await ipcInvoke('generated-images:get-preview', imagePath);
       setLoadedPreviews(prev => {
         const newMap = new Map(prev);
         newMap.set(imagePath, base64);
@@ -731,12 +719,10 @@ export const GeneratedImagesPage = () => {
     return images.map((image) => {
       const isVideo = image.mediaType === 'video';
       const mimeType = getImageMimeType(image.name);
-      // 使用按需加载的预览图
-      const previewBase64 = loadedPreviews.get(image.path);
-      const imageSrc = previewBase64 
-        ? `data:${mimeType};base64,${previewBase64}`
-        : null;
-      const hasImage = !!previewBase64 && !isVideo;
+      // 使用按需加载的预览图（后端已返回完整 data URL）
+      const previewDataUrl = loadedPreviews.get(image.path);
+      const imageSrc = previewDataUrl || null;
+      const hasImage = !!previewDataUrl && !isVideo;
       
       return {
         ...image,
@@ -1052,8 +1038,8 @@ export const GeneratedImagesPage = () => {
                               setDetailVideoError(null);
                               const mediaType = image.mediaType || 'image';
                               if (mediaType === 'video') {
-                                // 使用 media:/// 协议直接加载本地视频，避免 Electron 安全限制且性能更好
-                                setDetailVideoSrc(`media:///${image.path.replace(/\\/g, '/')}`);
+                                // 使用 media:/// 协议直接加载本地视频
+                                setDetailVideoSrc(toMediaUrl(image.path));
                               }
                               setDetailDialogOpen(true);
                             }}
@@ -1210,8 +1196,8 @@ export const GeneratedImagesPage = () => {
                             setDetailVideoError(null);
                             const mediaType = image.mediaType || 'image';
                             if (mediaType === 'video') {
-                              // 使用 media:/// 协议直接加载本地视频，避免 Electron 安全限制且性能更好
-                              setDetailVideoSrc(`media:///${image.path.replace(/\\/g, '/')}`);
+                              // 使用 media:/// 协议直接加载本地视频
+                              setDetailVideoSrc(toMediaUrl(image.path));
                             } else if (mediaType === 'image') {
                               // 打开详情对话框时，自动加载预览图
                               if (!loadedPreviews.has(image.path) && !loadingPreviews.has(image.path)) {
@@ -1375,7 +1361,6 @@ export const GeneratedImagesPage = () => {
                     // 详情对话框打开时，按需加载预览图
                     const detailPreviewBase64 = loadedPreviews.get(selectedImageForDetail.path);
                     if (detailPreviewBase64) {
-                      const detailMimeType = getImageMimeType(selectedImageForDetail.name);
                       return (
                         <div style={{ 
                           width: '100%', 
@@ -1386,9 +1371,9 @@ export const GeneratedImagesPage = () => {
                           alignItems: 'center',
                           borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
                         }}>
-                          <PhotoView src={`data:${detailMimeType};base64,${detailPreviewBase64}`}>
+                          <PhotoView src={detailPreviewBase64}>
                             <img
-                              src={`data:${detailMimeType};base64,${detailPreviewBase64}`}
+                              src={detailPreviewBase64}
                               alt={selectedImageForDetail.name}
                               style={{
                                 maxWidth: '100%',
@@ -1660,7 +1645,7 @@ export const GeneratedImagesPage = () => {
                                   SD模型
                                 </Text>
                                 <Body1 style={{ fontSize: tokens.fontSizeBase300, wordBreak: 'break-all', marginTop: tokens.spacingVerticalS }}>
-                                  {selectedImageForDetail.modelPath.split(/[/\\]/).pop() || selectedImageForDetail.modelPath}
+                                  {getPathBaseName(selectedImageForDetail.modelPath, selectedImageForDetail.modelPath)}
                                 </Body1>
                               </div>
                             )}
@@ -1670,7 +1655,7 @@ export const GeneratedImagesPage = () => {
                                   VAE模型
                                 </Text>
                                 <Body1 style={{ fontSize: tokens.fontSizeBase300, wordBreak: 'break-all', marginTop: tokens.spacingVerticalS }}>
-                                  {selectedImageForDetail.vaeModelPath.split(/[/\\]/).pop() || selectedImageForDetail.vaeModelPath}
+                                  {getPathBaseName(selectedImageForDetail.vaeModelPath, selectedImageForDetail.vaeModelPath)}
                                 </Body1>
                               </div>
                             )}
@@ -1680,7 +1665,7 @@ export const GeneratedImagesPage = () => {
                                   LLM模型
                                 </Text>
                                 <Body1 style={{ fontSize: tokens.fontSizeBase300, wordBreak: 'break-all', marginTop: tokens.spacingVerticalS }}>
-                                  {selectedImageForDetail.llmModelPath.split(/[/\\]/).pop() || selectedImageForDetail.llmModelPath}
+                                  {getPathBaseName(selectedImageForDetail.llmModelPath, selectedImageForDetail.llmModelPath)}
                                 </Body1>
                               </div>
                             )}
@@ -1769,21 +1754,19 @@ export const GeneratedImagesPage = () => {
                     {(() => {
                       const preview1 = loadedPreviews.get(compareImage1.path);
                       const preview2 = loadedPreviews.get(compareImage2.path);
-                      const mimeType1 = getImageMimeType(compareImage1.name);
-                      const mimeType2 = getImageMimeType(compareImage2.name);
                       
                       if (preview1 && preview2) {
                         return (
                           <ReactCompareSlider
                             itemOne={
                               <ReactCompareSliderImage 
-                                src={`data:${mimeType1};base64,${preview1}`} 
+                                src={preview1} 
                                 alt={compareImage1.name} 
                               />
                             }
                             itemTwo={
                               <ReactCompareSliderImage 
-                                src={`data:${mimeType2};base64,${preview2}`} 
+                                src={preview2} 
                                 alt={compareImage2.name} 
                               />
                             }

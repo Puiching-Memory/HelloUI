@@ -46,7 +46,9 @@ import {
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
 import { useAppStore } from '../hooks/useAppStore';
+import { ipcInvoke } from '../lib/tauriIpc';
 import { formatFileSize } from '@/utils/format';
+import { getPathBaseName } from '@/utils/tauriPath';
 import type { TaskType, ModelGroup, WeightFile, HfMirrorId, ModelDownloadProgress } from '../../shared/types'
 
 const useStyles = makeStyles({
@@ -276,6 +278,7 @@ export const ModelWeightsPage = () => {
   const styles = useStyles();
   const { setIsUploading } = useAppStore();
   const [weightsFolder, setWeightsFolder] = useState<string>('');
+  const [weightsFolderInput, setWeightsFolderInput] = useState<string>('');
   const [files, setFiles] = useState<WeightFile[]>([]);
   const [loading, setLoading] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -302,8 +305,8 @@ export const ModelWeightsPage = () => {
   const [fileStatusMap, setFileStatusMap] = useState<Record<string, Array<{ file: string; exists: boolean; size?: number }>>>({});
 
   // 监听模型下载进度
-  const loadFilesRef = useRef<() => Promise<void>>();
-  const loadModelGroupsRef = useRef<() => Promise<void>>();
+  const loadFilesRef = useRef<() => Promise<void>>(undefined);
+  const loadModelGroupsRef = useRef<() => Promise<void>>(undefined);
 
   useIpcListener('models:download-progress', (data) => {
     setModelDownloadProgress(data);
@@ -328,6 +331,7 @@ export const ModelWeightsPage = () => {
   const [groupName, setGroupName] = useState('');
   const [groupHfRepo, setGroupHfRepo] = useState<string>('');
   const [groupSdModel, setGroupSdModel] = useState<string>('');
+  const [groupDiffusionModel, setGroupDiffusionModel] = useState<string>('');
   const [groupHighNoiseSdModel, setGroupHighNoiseSdModel] = useState<string>('');
   const [groupVaeModel, setGroupVaeModel] = useState<string>('');
   const [groupLlmModel, setGroupLlmModel] = useState<string>('');
@@ -367,27 +371,24 @@ export const ModelWeightsPage = () => {
   }, []);
 
   const loadWeightsFolder = async () => {
-    if (!window.ipcRenderer) {
-      return;
-    }
-    
-    let folder = await window.ipcRenderer.invoke('weights:get-folder');
+    let folder = await ipcInvoke('weights:get-folder');
     
     if (!folder) {
-      folder = await window.ipcRenderer.invoke('weights:init-default-folder');
-      await window.ipcRenderer.invoke('weights:set-folder', folder);
+      folder = await ipcInvoke('weights:init-default-folder');
+      await ipcInvoke('weights:set-folder', folder);
     }
     
     if (folder) {
       setWeightsFolder(folder);
+      setWeightsFolderInput(folder);
     }
   };
 
   const loadFiles = async () => {
-    if (!weightsFolder || !window.ipcRenderer) return;
+    if (!weightsFolder) return;
     setLoading(true);
     try {
-      const fileList = await window.ipcRenderer.invoke('weights:list-files', weightsFolder);
+      const fileList = await ipcInvoke('weights:list-files', weightsFolder);
       setFiles(fileList || []);
     } finally {
       setLoading(false);
@@ -395,35 +396,52 @@ export const ModelWeightsPage = () => {
   };
 
   const handleSetFolder = async () => {
-    if (!weightsFolder.trim() || !window.ipcRenderer) {
-      if (!weightsFolder.trim()) {
+    const nextFolder = weightsFolderInput.trim();
+
+    if (!nextFolder) {
+      if (!nextFolder) {
         setMessageDialogContent({ title: '提示', message: '请输入有效的文件夹路径' });
         setMessageDialogOpen(true);
       }
       return;
     }
     
-    const exists = await window.ipcRenderer.invoke('weights:check-folder', weightsFolder.trim());
+    const exists = await ipcInvoke('weights:check-folder', nextFolder);
     if (!exists) {
       setMessageDialogContent({ title: '错误', message: '文件夹不存在，请检查路径是否正确' });
       setMessageDialogOpen(true);
       return;
     }
     
-    await window.ipcRenderer.invoke('weights:set-folder', weightsFolder.trim());
-    await loadFiles();
+    const setResult = await ipcInvoke('weights:set-folder', nextFolder);
+    if (!setResult) {
+      setMessageDialogContent({ title: '错误', message: '设置文件夹路径失败，请重试' });
+      setMessageDialogOpen(true);
+      return;
+    }
+
+    setWeightsFolder(nextFolder);
+    setWeightsFolderInput(nextFolder);
+
+    // 路径相同时 useEffect 不会触发，手动扫描确保 UI 更新
+    if (nextFolder === weightsFolder) {
+      loadFiles();
+    }
+
+    // 重新加载模型组列表及其文件状态
+    await loadModelGroups();
   };
 
   const handleFolderPathChange = (value: string) => {
-    setWeightsFolder(value);
+    setWeightsFolderInput(value);
   };
 
   const handleUpload = async () => {
-    if (!weightsFolder || !window.ipcRenderer) return;
+    if (!weightsFolder) return;
     try {
-      const folderPath = await window.ipcRenderer.invoke('model-groups:select-folder');
+      const folderPath = await ipcInvoke('model-groups:select-folder');
       if (folderPath) {
-        const folderName = folderPath.split(/[/\\]/).pop() || '模型组';
+        const folderName = getPathBaseName(folderPath, '模型组');
         setLoading(true);
         setImportProgress({ progress: 0, fileName: folderName, copied: 0, total: 0 });
         
@@ -431,7 +449,7 @@ export const ModelWeightsPage = () => {
         setIsUploading(true);
         
         try {
-          const result = await window.ipcRenderer.invoke('model-groups:import', { folderPath, targetFolder: weightsFolder });
+          const result = await ipcInvoke('model-groups:import', { folderPath, targetFolder: weightsFolder });
           
           if (result?.success) {
             setImportProgress((prev) => prev ? { ...prev, progress: 100 } : null);
@@ -462,7 +480,7 @@ export const ModelWeightsPage = () => {
   const handleDownload = async (file: WeightFile) => {
     setLoading(true);
     try {
-      await window.ipcRenderer.invoke('weights:download-file', file.path);
+      await ipcInvoke('weights:download-file', file.path);
     } finally {
       setLoading(false);
     }
@@ -477,7 +495,7 @@ export const ModelWeightsPage = () => {
     if (!fileToDelete) return;
     setLoading(true);
     try {
-      await window.ipcRenderer.invoke('weights:delete-file', fileToDelete.path);
+      await ipcInvoke('weights:delete-file', fileToDelete.path);
       await loadFiles();
       setDeleteDialogOpen(false);
       setFileToDelete(null);
@@ -493,8 +511,7 @@ export const ModelWeightsPage = () => {
   };
 
   const loadModelGroups = async () => {
-    if (!window.ipcRenderer) return;
-    const groups = await window.ipcRenderer.invoke('model-groups:list');
+    const groups = await ipcInvoke('model-groups:list');
     setModelGroups(groups || []);
   };
 
@@ -506,8 +523,7 @@ export const ModelWeightsPage = () => {
 
   // 初始化 HF 镜像
   useEffect(() => {
-    if (!window.ipcRenderer) return;
-    window.ipcRenderer.invoke('models:get-hf-mirror').then((id: HfMirrorId) => {
+    ipcInvoke('models:get-hf-mirror').then((id: HfMirrorId) => {
       setHfMirrorId(id);
     }).catch(console.error);
   }, []);
@@ -520,12 +536,11 @@ export const ModelWeightsPage = () => {
   }, [modelGroups]);
 
   const checkAllGroupFiles = async () => {
-    if (!window.ipcRenderer) return;
     const statusMap: Record<string, Array<{ file: string; exists: boolean; size?: number }>> = {};
     for (const group of modelGroups) {
       if (group.hfFiles && group.hfFiles.length > 0) {
         try {
-          const result = await window.ipcRenderer.invoke('models:check-files', { groupId: group.id });
+          const result = await ipcInvoke('models:check-files', { groupId: group.id });
           statusMap[group.id] = result;
         } catch (error) {
           console.error(`Failed to check files for ${group.id}:`, error);
@@ -536,9 +551,8 @@ export const ModelWeightsPage = () => {
   };
 
   const handleHfMirrorChange = useCallback(async (mirrorId: HfMirrorId) => {
-    if (!window.ipcRenderer) return;
     try {
-      await window.ipcRenderer.invoke('models:set-hf-mirror', mirrorId);
+      await ipcInvoke('models:set-hf-mirror', mirrorId);
       setHfMirrorId(mirrorId);
     } catch (error) {
       console.error('Failed to set HF mirror:', error);
@@ -546,7 +560,6 @@ export const ModelWeightsPage = () => {
   }, []);
 
   const handleDownloadGroupFiles = useCallback(async (groupId: string) => {
-    if (!window.ipcRenderer) return;
     setDownloadingGroupId(groupId);
     setModelDownloadProgress({
       stage: 'downloading',
@@ -559,7 +572,7 @@ export const ModelWeightsPage = () => {
     });
 
     try {
-      const result = await window.ipcRenderer.invoke('models:download-group-files', {
+      const result = await ipcInvoke('models:download-group-files', {
         groupId,
         mirrorId: hfMirrorId,
       });
@@ -578,9 +591,8 @@ export const ModelWeightsPage = () => {
   }, [hfMirrorId]);
 
   const handleCancelModelDownload = useCallback(async () => {
-    if (!window.ipcRenderer) return;
     try {
-      await window.ipcRenderer.invoke('models:cancel-download');
+      await ipcInvoke('models:cancel-download');
       setModelDownloadProgress(null);
       setDownloadingGroupId(null);
     } catch (error) {
@@ -593,6 +605,7 @@ export const ModelWeightsPage = () => {
     setGroupName('');
     setGroupHfRepo('');
     setGroupSdModel('');
+    setGroupDiffusionModel('');
     setGroupHighNoiseSdModel('');
     setGroupVaeModel('');
     setGroupLlmModel('');
@@ -620,11 +633,12 @@ export const ModelWeightsPage = () => {
     // 从 hfFiles 中查找对应模型的文件名，若无则从 model path 中提取文件名
     const findHfFile = (modelPath?: string) => {
       if (!modelPath) return '';
-      const fileName = modelPath.split(/[/\\]/).pop() || modelPath;
+      const fileName = getPathBaseName(modelPath, modelPath);
       const hfEntry = group.hfFiles?.find(f => f.file === fileName || f.savePath === fileName);
       return hfEntry?.file || fileName;
     };
     setGroupSdModel(findHfFile(group.sdModel));
+    setGroupDiffusionModel(findHfFile(group.diffusionModel));
     setGroupHighNoiseSdModel(findHfFile(group.highNoiseSdModel));
     setGroupVaeModel(findHfFile(group.vaeModel));
     setGroupLlmModel(findHfFile(group.llmModel));
@@ -637,7 +651,7 @@ export const ModelWeightsPage = () => {
     setGroupDefaultHeight(group.defaultHeight?.toString() || '512');
     setGroupDefaultSamplingMethod(group.defaultSamplingMethod || 'euler_a');
     setGroupDefaultScheduler(group.defaultScheduler || 'discrete');
-    setGroupDefaultSeed(group.defaultSeed !== undefined && group.defaultSeed >= 0 ? group.defaultSeed.toString() : '');
+    setGroupDefaultSeed(group.defaultSeed != null && group.defaultSeed >= 0 ? group.defaultSeed.toString() : '');
     setGroupDefaultFlowShift(group.defaultFlowShift?.toString() || '3.0');
     setGroupTaskType(group.taskType || 'generate');
     setGroupDialogOpen(true);
@@ -657,8 +671,8 @@ export const ModelWeightsPage = () => {
         setMessageDialogOpen(true);
         return;
       }
-      if (!groupSdModel || !groupSdModel.trim()) {
-        setMessageDialogContent({ title: '提示', message: '请填写 SD 模型文件名' });
+      if ((!groupSdModel || !groupSdModel.trim()) && (!groupDiffusionModel || !groupDiffusionModel.trim())) {
+        setMessageDialogContent({ title: '提示', message: '请填写 SD 模型或扩散模型文件名' });
         setMessageDialogOpen(true);
         return;
       }
@@ -693,6 +707,7 @@ export const ModelWeightsPage = () => {
     };
 
     const sdFile = groupSdModel.trim();
+    const diffusionFile = groupDiffusionModel.trim();
     const highNoiseSdFile = groupHighNoiseSdModel.trim();
     const vaeFile = groupVaeModel.trim();
     const llmFile = groupLlmModel.trim();
@@ -701,6 +716,7 @@ export const ModelWeightsPage = () => {
     const clipVisionFile = groupClipVisionModel.trim();
 
     addHfFile(sdFile);
+    addHfFile(diffusionFile);
     addHfFile(highNoiseSdFile);
     addHfFile(vaeFile);
     addHfFile(llmFile);
@@ -714,6 +730,7 @@ export const ModelWeightsPage = () => {
         name: folderName,
         taskType: groupTaskType,
         sdModel: buildModelPath(sdFile),
+        diffusionModel: buildModelPath(diffusionFile),
         highNoiseSdModel: buildModelPath(highNoiseSdFile),
         vaeModel: buildModelPath(vaeFile),
         llmModel: buildModelPath(llmFile),
@@ -732,12 +749,12 @@ export const ModelWeightsPage = () => {
       };
 
       if (editingGroup) {
-        await window.ipcRenderer.invoke('model-groups:update', {
+        await ipcInvoke('model-groups:update', {
           id: editingGroup.id,
           updates: groupData,
         });
       } else {
-        await window.ipcRenderer.invoke('model-groups:create', groupData);
+        await ipcInvoke('model-groups:create', groupData);
       }
       await loadModelGroups();
       setGroupDialogOpen(false);
@@ -770,7 +787,7 @@ export const ModelWeightsPage = () => {
     setLoading(true);
     setGroupDeleteConfirmOpen(false);
     try {
-      await window.ipcRenderer.invoke('model-groups:delete', { id: groupToDelete.id, deleteFiles });
+      await ipcInvoke('model-groups:delete', { id: groupToDelete.id, deleteFiles });
       await loadModelGroups();
       setMessageDialogContent({ 
         title: '删除成功', 
@@ -792,7 +809,7 @@ export const ModelWeightsPage = () => {
   const getModelFileName = (path: string | undefined): string => {
     if (!path) return '未选择';
     const file = files.find(f => f.path === path);
-    return file ? file.name : path.split(/[/\\]/).pop() || path;
+    return file ? file.name : getPathBaseName(path, path);
   };
 
   return (
@@ -805,27 +822,24 @@ export const ModelWeightsPage = () => {
         <div className={styles.folderPath}>
           <Field label="权重文件夹路径" style={{ flex: 1 }}>
             <Input
-              value={weightsFolder}
+              value={weightsFolderInput}
               onChange={(_, data) => handleFolderPathChange(data.value)}
               placeholder="默认使用应用数据目录下的 models 文件夹"
               style={{ flex: 1 }}
-              readOnly={!!weightsFolder}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.currentTarget.readOnly) {
+                if (e.key === 'Enter') {
                   handleSetFolder();
                 }
               }}
             />
           </Field>
-          {!weightsFolder ? (
-            <Button
-              onClick={handleSetFolder}
-              appearance="primary"
-              disabled={!weightsFolder || loading}
-            >
-              使用自定义路径
-            </Button>
-          ) : null}
+          <Button
+            onClick={handleSetFolder}
+            appearance="primary"
+            disabled={!weightsFolderInput.trim() || loading || weightsFolderInput.trim() === weightsFolder}
+          >
+            应用路径
+          </Button>
         </div>
         <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalXS }}>
           {weightsFolder 
@@ -1050,6 +1064,16 @@ export const ModelWeightsPage = () => {
                         <Tooltip content={getModelFileName(group.sdModel)} relationship="label">
                           <span className={styles.modelValue} title={getModelFileName(group.sdModel)}>
                             {getModelFileName(group.sdModel)}
+                          </span>
+                        </Tooltip>
+                      </div>
+                    )}
+                    {group.diffusionModel && (
+                      <div className={styles.modelItem}>
+                        <span className={styles.modelLabel}>扩散模型</span>
+                        <Tooltip content={getModelFileName(group.diffusionModel)} relationship="label">
+                          <span className={styles.modelValue} title={getModelFileName(group.diffusionModel)}>
+                            {getModelFileName(group.diffusionModel)}
                           </span>
                         </Tooltip>
                       </div>
@@ -1361,6 +1385,7 @@ export const ModelWeightsPage = () => {
           setGroupName('');
           setGroupHfRepo('');
           setGroupSdModel('');
+          setGroupDiffusionModel('');
           setGroupVaeModel('');
           setGroupLlmModel('');
           setGroupClipLModel('');
@@ -1421,8 +1446,8 @@ export const ModelWeightsPage = () => {
                   />
                 </Field>
                 <Field
-                  label={groupTaskType === 'video' ? '基础视频模型文件名（必填，LowNoise）' : 'SD模型文件名（必填）'}
-                  hint={groupTaskType === 'video' ? '例如 Wan2.2-TI2V-5B-Q4_K_M.gguf' : '例如 z_image_turbo-Q4_K.gguf'}
+                  label={groupTaskType === 'video' ? '基础视频模型文件名（LowNoise）' : 'SD模型文件名'}
+                  hint={groupTaskType === 'video' ? '例如 Wan2.2-TI2V-5B-Q4_K_M.gguf' : '完整SD模型（与扩散模型二选一）'}
                 >
                   <Input
                     value={groupSdModel}
@@ -1430,6 +1455,18 @@ export const ModelWeightsPage = () => {
                     placeholder={groupTaskType === 'video' ? '基础视频模型文件名' : 'SD模型文件名'}
                   />
                 </Field>
+                {groupTaskType !== 'video' && (
+                  <Field
+                    label="独立扩散模型文件名"
+                    hint="例如 z_image_turbo-Q4_K.gguf（与SD模型二选一，使用 --diffusion-model）"
+                  >
+                    <Input
+                      value={groupDiffusionModel}
+                      onChange={(_, data) => setGroupDiffusionModel(data.value)}
+                      placeholder="独立扩散模型文件名（可选）"
+                    />
+                  </Field>
+                )}
                 {groupTaskType === 'video' && (
                   <Field
                     label="高噪声视频模型文件名（可选，HighNoise）"

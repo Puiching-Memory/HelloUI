@@ -21,6 +21,7 @@ import {
 import { PhotoView } from 'react-photo-view';
 import { useState, useEffect } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
+import { ipcInvoke, ipcListen } from '../lib/tauriIpc';
 import { useAppStore } from '../hooks/useAppStore';
 import { useCliOutput } from '../hooks/useCliOutput';
 import { useModelGroups, useDeviceType } from '../hooks/useModelGroups';
@@ -117,13 +118,7 @@ export const GeneratePage = () => {
       return;
     }
 
-    // 检查 ipcRenderer 是否可用
-    if (!window.ipcRenderer) {
-      msgDialog.showMessage('错误', 'IPC 通信不可用，请确保应用正常运行');
-      return;
-    }
-
-      try {
+    try {
       setGenerating(true);
       setGeneratedImage(null);
       setGeneratedImagePath(null);
@@ -132,28 +127,32 @@ export const GeneratePage = () => {
       cli.clearOutput(); // 清空之前的输出
 
       // 监听生成进度
-      const progressListener = (_event: unknown, data: { progress: string | number; image?: string }) => {
+      const unlisten = await ipcListen('generate:progress', (data) => {
         if (data.progress) {
           setGenerationProgress(String(data.progress));
         }
         if (data.image) {
           setGeneratedImage(data.image);
         }
-      };
-
-      window.ipcRenderer.on('generate:progress', progressListener);
+      });
 
       try {
         const selectedGroup = modelGroups.find(g => g.id === selectedGroupId);
         if (!selectedGroup) {
           throw new Error('所选模型组不存在');
         }
-        if (!selectedGroup.sdModel) {
-          throw new Error('所选模型组中未配置SD模型');
+        if (!selectedGroup.sdModel && !selectedGroup.diffusionModel) {
+          throw new Error('所选模型组中未配置SD模型或扩散模型');
         }
 
-        const result = await window.ipcRenderer.invoke('generate:start', {
+        const result = await ipcInvoke('generate:start', {
           groupId: selectedGroupId,
+          sdModel: selectedGroup.sdModel,
+          diffusionModel: selectedGroup.diffusionModel,
+          vaeModel: selectedGroup.vaeModel,
+          llmModel: selectedGroup.llmModel,
+          clipLModel: selectedGroup.clipLModel,
+          t5xxlModel: selectedGroup.t5xxlModel,
           deviceType,
           prompt: prompt.trim(),
           negativePrompt: negativePrompt.trim(),
@@ -192,9 +191,7 @@ export const GeneratePage = () => {
           throw new Error(result.error || '生成失败');
         }
       } finally {
-        if (window.ipcRenderer) {
-          window.ipcRenderer.off('generate:progress', progressListener);
-        }
+        unlisten();
         setGenerating(false);
       }
     } catch (error) {
@@ -210,10 +207,8 @@ export const GeneratePage = () => {
   };
 
   const handleCancelGenerate = async () => {
-    if (!window.ipcRenderer) return;
-    
     try {
-      await window.ipcRenderer.invoke('generate:cancel');
+      await ipcInvoke('generate:cancel');
       setGenerationProgress('正在取消...');
     } catch (error) {
       console.error('Failed to cancel generation:', error);
@@ -227,13 +222,8 @@ export const GeneratePage = () => {
       return;
     }
 
-    if (!window.ipcRenderer) {
-      msgDialog.showMessage('错误', 'IPC 通信不可用，无法保存图片。');
-      return;
-    }
-
     try {
-      const success = await window.ipcRenderer.invoke('generated-images:download', generatedImagePath);
+      const success = await ipcInvoke('generated-images:download', generatedImagePath);
       if (!success) {
         msgDialog.showMessage('保存失败', '保存图片失败，请稍后重试。');
       }
@@ -369,27 +359,27 @@ export const GeneratePage = () => {
                   // 应用模型组的默认设置
                   const selectedGroup = modelGroups.find(g => g.id === data.optionValue);
                   if (selectedGroup) {
-                    if (selectedGroup.defaultSteps !== undefined) {
+                    if (typeof selectedGroup.defaultSteps === 'number') {
                       setSteps(selectedGroup.defaultSteps);
                     }
-                    if (selectedGroup.defaultCfgScale !== undefined) {
+                    if (typeof selectedGroup.defaultCfgScale === 'number') {
                       setCfgScale(selectedGroup.defaultCfgScale);
                     }
-                    if (selectedGroup.defaultWidth !== undefined) {
+                    if (typeof selectedGroup.defaultWidth === 'number') {
                       setWidth(selectedGroup.defaultWidth);
                       setWidthInput(selectedGroup.defaultWidth.toString());
                     }
-                    if (selectedGroup.defaultHeight !== undefined) {
+                    if (typeof selectedGroup.defaultHeight === 'number') {
                       setHeight(selectedGroup.defaultHeight);
                       setHeightInput(selectedGroup.defaultHeight.toString());
                     }
-                    if (selectedGroup.defaultSamplingMethod !== undefined) {
+                    if (typeof selectedGroup.defaultSamplingMethod === 'string') {
                       setSamplingMethod(selectedGroup.defaultSamplingMethod);
                     }
-                    if (selectedGroup.defaultScheduler !== undefined) {
+                    if (typeof selectedGroup.defaultScheduler === 'string') {
                       setScheduler(selectedGroup.defaultScheduler);
                     }
-                    if (selectedGroup.defaultSeed !== undefined) {
+                    if (typeof selectedGroup.defaultSeed === 'number') {
                       if (selectedGroup.defaultSeed >= 0) {
                         setSeed(selectedGroup.defaultSeed);
                         setSeedInput(selectedGroup.defaultSeed.toString());

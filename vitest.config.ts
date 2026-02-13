@@ -9,11 +9,11 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
-    include: ['src/**/*.test.{ts,tsx}', 'electron/**/*.test.ts', 'shared/**/*.test.ts'],
+    include: ['src/**/*.test.{ts,tsx}', 'shared/**/*.test.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],
-      include: ['src/**/*.{ts,tsx}', 'electron/**/*.ts', 'shared/**/*.ts'],
+      include: ['src/**/*.{ts,tsx}', 'shared/**/*.ts'],
       exclude: ['**/*.test.*', '**/test/**', '**/*.d.ts'],
     },
   },
@@ -21,7 +21,6 @@ export default defineConfig({
     alias: {
       '@': resolve(__dirname, './src'),
       '@shared': resolve(__dirname, './shared'),
-      '@electron': resolve(__dirname, './electron'),
     },
   },
 })

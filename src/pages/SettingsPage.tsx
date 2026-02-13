@@ -12,6 +12,7 @@ import {
 import { CodeRegular, CheckmarkCircleFilled } from '@fluentui/react-icons';
 import { useState, useEffect } from 'react';
 import { useAppStore, type ThemeMode } from '../hooks/useAppStore';
+import { ipcInvoke } from '../lib/tauriIpc';
 
 const useStyles = makeStyles({
   container: {
@@ -89,14 +90,12 @@ export const SettingsPage = () => {
   // 加载应用版本号
   useEffect(() => {
     const loadVersion = async () => {
-      if (window.ipcRenderer) {
-        try {
-          const version = await window.ipcRenderer.invoke('app:get-version');
-          setAppVersion(version || '');
-        } catch (error) {
-          console.error('Failed to load app version:', error);
-          setAppVersion('');
-        }
+      try {
+        const version = await ipcInvoke('app:get-version');
+        setAppVersion(version || '');
+      } catch (error) {
+        console.error('Failed to load app version:', error);
+        setAppVersion('');
       }
     };
     loadVersion();
@@ -204,15 +203,13 @@ export const SettingsPage = () => {
             <Button
               icon={<CodeRegular />}
               onClick={async () => {
-                if (window.ipcRenderer) {
-                  try {
-                    const result = await window.ipcRenderer.invoke('devtools:toggle');
-                    if (result?.success && result.isOpen !== undefined) {
-                      setDevToolsOpen(result.isOpen);
-                    }
-                  } catch (error) {
-                    console.error('Failed to toggle DevTools:', error);
+                try {
+                  const result = await ipcInvoke('devtools:toggle');
+                  if (result?.success && result.isOpen !== undefined) {
+                    setDevToolsOpen(result.isOpen);
                   }
+                } catch (error) {
+                  console.error('Failed to toggle DevTools:', error);
                 }
               }}
               appearance="secondary"
@@ -227,7 +224,7 @@ export const SettingsPage = () => {
         <Title2>关于</Title2>
         <Body1>HelloUI {appVersion ? `v${appVersion}` : ''}</Body1>
         <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-          基于 Electron + React 19 + Fluent UI 构建
+          基于 Tauri + React 19 + Fluent UI 构建
         </Body1>
       </Card>
     </div>

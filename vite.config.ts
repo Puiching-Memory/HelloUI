@@ -1,7 +1,5 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import electron from 'vite-plugin-electron'
-import renderer from 'vite-plugin-electron-renderer'
 import { resolve } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -11,66 +9,32 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url))
 export default defineConfig({
   plugins: [
     react(),
-    electron([
-      {
-        // Main-Process entry file of the Electron App.
-        entry: 'electron/main.ts',
-        onstart(options: any) {
-          // Notify the Renderer-Process to reload the page when the Main-Process is built
-          options.reload()
-        },
-        vite: {
-          build: {
-            sourcemap: true,
-            minify: process.env.NODE_ENV === 'production',
-            outDir: 'dist-electron',
-            rollupOptions: {
-              external: ['electron', 'archiver'],
-            },
-          },
-        },
-      },
-      {
-        entry: 'electron/preload.ts',
-        onstart(options: any) {
-          // Notify the Renderer-Process to reload the page when the Preload-Scripts build is complete
-          options.reload()
-        },
-        vite: {
-          build: {
-            sourcemap: 'inline',
-            minify: process.env.NODE_ENV === 'production',
-            outDir: 'dist-electron',
-            rollupOptions: {
-              external: ['electron'], // Electron 模块应该保持 external
-              output: [
-                {
-                  format: 'cjs', // 使用 CommonJS 格式
-                  entryFileNames: 'preload.js',
-                },
-              ],
-            },
-          },
-        },
-      },
-    ]),
-    // Use Node.js API in the Renderer-process
-    renderer(),
   ],
   base: './',
   resolve: {
     alias: {
       '@': resolve(__dirname, './src'),
       '@shared': resolve(__dirname, './shared'),
-      '@electron': resolve(__dirname, './electron'),
     },
   },
+  // Prevent vite from obscuring Rust errors
+  clearScreen: false,
   server: {
     port: 5173,
+    // Tauri expects a fixed port
+    strictPort: true,
   },
+  // Env variables starting with TAURI_ will be exposed to the client
+  envPrefix: ['VITE_', 'TAURI_'],
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    // Tauri uses Chromium on Windows and WebKit on macOS/Linux
+    target: process.env.TAURI_PLATFORM === 'windows' ? 'chrome105' : 'safari13',
+    // Don't minify for debug builds
+    minify: !process.env.TAURI_DEBUG ? 'esbuild' : false,
+    // Produce sourcemaps for debug builds
+    sourcemap: !!process.env.TAURI_DEBUG,
   },
 })
 

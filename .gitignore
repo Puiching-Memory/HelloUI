@@ -44,3 +44,5 @@ out
 engines/
 models/
 outputs/
+.husky/
+target/

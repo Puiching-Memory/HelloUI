@@ -1,0 +1,10 @@
+pub mod dialog;
+pub mod generate;
+pub mod generated_images;
+pub mod model_download;
+pub mod model_groups;
+pub mod perfect_pixel;
+pub mod sdcpp;
+pub mod system;
+pub mod video_generate;
+pub mod weights;

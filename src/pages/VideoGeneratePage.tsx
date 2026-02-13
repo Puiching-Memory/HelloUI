@@ -26,12 +26,14 @@ import {
 } from '@fluentui/react-icons';
 import { useState, useEffect } from 'react';
 import { useAppStore } from '../hooks/useAppStore';
+import { ipcInvoke, ipcListen } from '../lib/tauriIpc';
 import { useSharedStyles } from '@/styles/sharedStyles';
 import { useCliOutput } from '@/hooks/useCliOutput';
 import { useModelGroups, useDeviceType } from '@/hooks/useModelGroups';
 import { CliOutputPanel } from '@/components/CliOutputPanel';
 import { MessageDialog, useMessageDialog } from '@/components/MessageDialog';
 import { getDeviceLabel, getModelInfo } from '@/utils/modelUtils';
+import { toMediaUrl } from '@/utils/tauriPath';
 import type { DeviceType } from '../../shared/types';
 
 const useLocalStyles = makeStyles({
@@ -248,11 +250,10 @@ export const VideoGeneratePage = () => {
 
   const handleImageUpload = async () => {
     try {
-      if (!window.ipcRenderer) return;
-      const result = await window.ipcRenderer.invoke('dialog:open-image');
+      const result = await ipcInvoke('dialog:open-image');
       if (result) {
-        // 使用 media:/// 协议加载本地图片，避免 Electron 安全限制
-        setInitImage(`media:///${result.replace(/\\/g, '/')}`);
+        // 使用 media:/// 协议加载本地图片
+        setInitImage(toMediaUrl(result));
       }
     } catch (error) {
       console.error('Failed to upload image:', error);
@@ -264,11 +265,6 @@ export const VideoGeneratePage = () => {
   };
 
   const handleGenerate = async () => {
-    if (!window.ipcRenderer) {
-      msgDialog.showMessage('错误', 'IPC 渲染器不可用');
-      return;
-    }
-
     if (!models.selectedGroupId || !prompt.trim()) {
       msgDialog.showMessage('提示', '请选择模型组并输入提示词');
       return;
@@ -283,7 +279,7 @@ export const VideoGeneratePage = () => {
       cli.clearOutput();
 
       // 监听进度更新
-      const progressListener = (_event: any, data: { progress: string | number; video?: string; frames?: string[] }) => {
+      const unlisten = await ipcListen('generate-video:progress', (data) => {
         if (data.progress) {
           setGenerationProgress(String(data.progress));
         }
@@ -299,14 +295,10 @@ export const VideoGeneratePage = () => {
             return prev;
           });
         }
-      };
-
-      if (window.ipcRenderer) {
-        window.ipcRenderer.on('generate-video:progress', progressListener);
-      }
+      });
 
       try {
-        const result = await window.ipcRenderer.invoke('generate-video:start', {
+        const result = await ipcInvoke('generate-video:start', {
           groupId: models.selectedGroupId,
           deviceType: device.deviceType,
           mode: generationMode,
@@ -358,9 +350,7 @@ export const VideoGeneratePage = () => {
           throw new Error(result.error || '生成失败');
         }
       } finally {
-        if (window.ipcRenderer) {
-          window.ipcRenderer.off('generate-video:progress', progressListener);
-        }
+        unlisten();
         setGenerating(false);
       }
     } catch (error) {
@@ -375,10 +365,8 @@ export const VideoGeneratePage = () => {
   };
 
   const handleCancelGenerate = async () => {
-    if (!window.ipcRenderer) return;
-    
     try {
-      await window.ipcRenderer.invoke('generate-video:cancel');
+      await ipcInvoke('generate-video:cancel');
       setGenerationProgress('正在取消...');
     } catch (error) {
       console.error('Failed to cancel generation:', error);
@@ -388,7 +376,7 @@ export const VideoGeneratePage = () => {
   const handleSaveGeneratedVideo = async () => {
     if (!generatedVideoPath) return;
     try {
-      await window.ipcRenderer.invoke('generated-images:download', generatedVideoPath);
+      await ipcInvoke('generated-images:download', generatedVideoPath);
     } catch (error) {
       console.error('Failed to save video:', error);
     }

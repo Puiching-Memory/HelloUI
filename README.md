@@ -52,6 +52,8 @@
 
 - **Node.js**: >= 18.x
 - **pnpm**: >= 8.x
+- **Rust**: >= 1.77（建议使用 rustup 安装稳定版）
+- **Tauri 构建环境**: 请按 [Tauri 官方文档](https://tauri.app/start/prerequisites/) 安装平台依赖（Windows 需安装 WebView2 与 Visual Studio C++ 构建工具）
 
 ### 安装与运行
 
@@ -59,24 +61,26 @@
 # 克隆仓库并安装依赖
 pnpm install
 
-# 启动开发服务器（支持热重载）
+# 启动桌面应用开发模式（Tauri + Vite，支持热重载）
 pnpm run dev
 
-# 构建安装包 (Windows .exe)
-pnpm run build:electron
+# 构建桌面安装包（由 Tauri bundle 生成）
+pnpm run build
 ```
 
 ### 常用命令
 
 ```bash
-pnpm run dev              # 启动开发服务器 (Vite + Electron)
-pnpm run build            # 仅构建前端与 Electron 代码
-pnpm run build:electron   # 构建并打包为 Windows 安装程序 (.exe)
-pnpm run build:dir        # 构建并打包为目录（快速测试用）
+pnpm run dev              # 启动开发模式（Tauri 桌面应用）
+pnpm run dev:frontend     # 仅启动前端 Vite 开发服务器
+pnpm run build            # 构建并打包桌面应用（Tauri）
+pnpm run build:frontend   # 仅构建前端静态资源
+pnpm run preview          # 预览前端构建产物
 pnpm run typecheck        # TypeScript 类型检查
 pnpm run lint             # ESLint 代码检查
 pnpm run lint:fix         # ESLint 自动修复
 pnpm run format           # Prettier 格式化
+pnpm run format:check     # Prettier 格式检查
 pnpm run test             # 运行测试
 pnpm run test:watch       # 监听模式运行测试
 pnpm run test:coverage    # 运行测试并生成覆盖率报告
@@ -88,22 +92,24 @@ pnpm run test:coverage    # 运行测试并生成覆盖率报告
 
 ```text
 HelloUI/
-├── electron/             # 主进程：AI 引擎调度、文件系统交互及 IPC 通信
-│   ├── main.ts           # Electron 主进程入口
-│   ├── preload.ts        # 预加载脚本（IPC Bridge）
-│   ├── ipc/              # IPC 处理器（按功能模块拆分）
-│   │   ├── generate.ts   #   图片生成
-│   │   ├── videoGenerate.ts # 视频生成
-│   │   ├── weights.ts    #   权重文件管理
-│   │   ├── modelGroups.ts #  模型组管理
-│   │   ├── sdcpp.ts      #   SD.cpp 引擎管理
-│   │   ├── dialog.ts     #   系统对话框
-│   │   ├── system.ts     #   系统信息
-│   │   ├── generatedImages.ts # 生成结果管理
-│   │   └── state.ts      #   全局状态
-│   └── utils/            # 工具函数
+├── src-tauri/            # 桌面宿主层（Tauri v2 / Rust）
+│   ├── src/main.rs       # Tauri 主进程入口
+│   ├── src/lib.rs        # 命令注册与应用初始化
+│   ├── src/state.rs      # 后端全局状态
+│   ├── src/commands/     # Tauri commands（按功能拆分）
+│   │   ├── generate.rs
+│   │   ├── video_generate.rs
+│   │   ├── weights.rs
+│   │   ├── model_groups.rs
+│   │   ├── sdcpp.rs
+│   │   ├── dialog.rs
+│   │   ├── system.rs
+│   │   ├── generated_images.rs
+│   │   ├── model_download.rs
+│   │   └── perfect_pixel.rs
+│   └── tauri.conf.json   # Tauri 构建、窗口与资源配置
 ├── src/                  # 渲染进程：React UI 层
-│   ├── pages/            # 页面组件（12 个功能页面）
+│   ├── pages/            # 页面组件（13 个功能页面）
 │   ├── components/       # 通用组件（布局、命令行面板、对话框）
 │   ├── hooks/            # 自定义 Hooks（状态、IPC 监听、模型组）
 │   ├── styles/           # 样式文件
@@ -123,7 +129,8 @@ HelloUI/
 
 | 层级         | 技术                                    |
 | ------------ | --------------------------------------- |
-| **框架**     | Electron 40 + Vite 7                    |
+| **桌面框架** | Tauri 2 + Vite 7                        |
+| **后端**     | Rust 2021 + Tauri Plugins               |
 | **前端**     | React 19 + TypeScript 5                 |
 | **UI 组件**  | Fluent UI React v9                      |
 | **状态管理** | Zustand                                 |

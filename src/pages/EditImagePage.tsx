@@ -24,6 +24,7 @@ import {
 import { PhotoView } from 'react-photo-view';
 import { useState, useEffect } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
+import { ipcInvoke, ipcListen } from '../lib/tauriIpc';
 import { useAppStore } from '../hooks/useAppStore';
 import { useCliOutput } from '../hooks/useCliOutput';
 import { useModelGroups, useDeviceType } from '../hooks/useModelGroups';
@@ -31,6 +32,7 @@ import { useSharedStyles } from '../styles/sharedStyles';
 import { CliOutputPanel } from '../components/CliOutputPanel';
 import { MessageDialog, useMessageDialog } from '../components/MessageDialog';
 import { getDeviceLabel, getModelInfo, DEFAULT_NEGATIVE_PROMPT } from '../utils/modelUtils';
+import { toMediaUrl } from '@/utils/tauriPath';
 import type { DeviceType } from '../../shared/types';
 
 // 页面特有的样式（上传区域）
@@ -158,13 +160,7 @@ export const EditImagePage = () => {
       return;
     }
 
-    // 检查 ipcRenderer 是否可用
-    if (!window.ipcRenderer) {
-      msgDialog.showMessage('错误', 'IPC 通信不可用，请确保应用正常运行');
-      return;
-    }
-
-      try {
+    try {
       setGenerating(true);
       setGeneratedImage(null);
       setPreviewImage(null); // 清空预览图片
@@ -172,27 +168,25 @@ export const EditImagePage = () => {
       cli.clearOutput(); // 清空之前的输出
 
       // 监听生成进度
-      const progressListener = (_event: unknown, data: { progress: string | number; image?: string }) => {
+      const unlisten = await ipcListen('generate:progress', (data) => {
         if (data.progress) {
           setGenerationProgress(String(data.progress));
         }
         if (data.image) {
           setGeneratedImage(data.image);
         }
-      };
-
-      window.ipcRenderer.on('generate:progress', progressListener);
+      });
 
       try {
         const selectedGroup = modelGroups.find(g => g.id === selectedGroupId);
         if (!selectedGroup) {
           throw new Error('所选模型组不存在');
         }
-        if (!selectedGroup.sdModel) {
-          throw new Error('所选模型组中未配置SD模型');
+        if (!selectedGroup.sdModel && !selectedGroup.diffusionModel) {
+          throw new Error('所选模型组中未配置SD模型或扩散模型');
         }
 
-        const result = await window.ipcRenderer.invoke('generate:start', {
+        const result = await ipcInvoke('generate:start', {
           groupId: selectedGroupId,
           deviceType,
           prompt: prompt.trim(),
@@ -233,9 +227,7 @@ export const EditImagePage = () => {
           throw new Error(result.error || '生成失败');
         }
       } finally {
-        if (window.ipcRenderer) {
-          window.ipcRenderer.off('generate:progress', progressListener);
-        }
+        unlisten();
         setGenerating(false);
       }
     } catch (error) {
@@ -251,10 +243,8 @@ export const EditImagePage = () => {
   };
 
   const handleCancelGenerate = async () => {
-    if (!window.ipcRenderer) return;
-    
     try {
-      await window.ipcRenderer.invoke('generate:cancel');
+      await ipcInvoke('generate:cancel');
       setGenerationProgress('正在取消...');
     } catch (error) {
       console.error('Failed to cancel generation:', error);
@@ -264,25 +254,19 @@ export const EditImagePage = () => {
   const handleSaveGeneratedImage = async () => {
     if (!generatedImagePath) return;
     try {
-      await window.ipcRenderer.invoke('generated-images:download', generatedImagePath);
+      await ipcInvoke('generated-images:download', generatedImagePath);
     } catch (error) {
       console.error('Failed to save image:', error);
     }
   };
 
   const handleSelectImage = async () => {
-    if (!window.ipcRenderer) {
-      msgDialog.showMessage('错误', 'IPC 通信不可用，请确保应用正常运行');
-      return;
-    }
-
     try {
-      const filePath = await window.ipcRenderer.invoke('edit-image:select-file');
+      const filePath = await ipcInvoke('edit-image:select-file');
       if (filePath) {
         setInputImagePath(filePath);
-        // 使用 media:/// 协议加载本地图片，避免 Electron 安全限制且性能更好
-        const normalizedPath = filePath.replace(/\\/g, '/');
-        setInputImagePreview(`media:///${normalizedPath}`);
+        // 使用 media:/// 协议加载本地图片
+        setInputImagePreview(toMediaUrl(filePath));
       }
     } catch (error) {
       console.error('Failed to select image:', error);

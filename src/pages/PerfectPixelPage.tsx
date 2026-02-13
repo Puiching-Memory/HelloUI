@@ -26,6 +26,7 @@ import { PhotoView } from 'react-photo-view';
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useSharedStyles } from '../styles/sharedStyles';
 import { MessageDialog, useMessageDialog } from '../components/MessageDialog';
+import { ipcInvoke } from '../lib/tauriIpc';
 import {
   getPerfectPixel,
   imageToRGB,
@@ -172,7 +173,7 @@ const useLocalStyles = makeStyles({
 export const PerfectPixelPage = () => {
   const sharedStyles = useSharedStyles();
   const styles = useLocalStyles();
-  const { dialogState, showDialog, hideDialog } = useMessageDialog();
+  const msgDialog = useMessageDialog();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -208,18 +209,14 @@ export const PerfectPixelPage = () => {
     img.src = dataUrl;
   }, []);
 
-  // 支持两种选图方式：Electron IPC 或浏览器文件选择
+  // 选择图片：Tauri IPC 或浏览器文件选择
   const selectImage = useCallback(async () => {
-    if (window.ipcRenderer) {
-      try {
-        const filePath = await window.ipcRenderer.invoke('perfect-pixel:select-image' as any);
-        if (!filePath) return;
-        const dataUrl = await window.ipcRenderer.invoke('perfect-pixel:read-image' as any, filePath);
-        loadImageFromDataUrl(dataUrl);
-      } catch {
-        fileInputRef.current?.click();
-      }
-    } else {
+    try {
+      const filePath = await ipcInvoke('perfect-pixel:select-image');
+      if (!filePath) return;
+      const dataUrl = await ipcInvoke('perfect-pixel:read-image', filePath);
+      loadImageFromDataUrl(dataUrl);
+    } catch {
       fileInputRef.current?.click();
     }
   }, [loadImageFromDataUrl]);
@@ -263,7 +260,7 @@ export const PerfectPixelPage = () => {
         });
 
         if (!result) {
-          showDialog('处理失败', '无法检测网格大小。请尝试手动设置网格尺寸，或选择一张网格更明显的像素风格图片。');
+          msgDialog.showMessage('处理失败', '无法检测网格大小。请尝试手动设置网格尺寸，或选择一张网格更明显的像素风格图片。');
           setProcessing(false);
           return;
         }
@@ -272,12 +269,12 @@ export const PerfectPixelPage = () => {
         setResultOriginalUrl(resultToDataURL(result, 1));
         setResultScaledUrl(resultToDataURL(result, outputScale));
       } catch (err: any) {
-        showDialog('错误', err.message || '处理过程中出错');
+        msgDialog.showMessage('错误', err.message || '处理过程中出错');
       } finally {
         setProcessing(false);
       }
     }, 50);
-  }, [loadedImage, sampleMethod, manualGrid, gridWidth, gridHeight, minSize, peakWidth, refineIntensity, fixSquare, outputScale, showDialog]);
+  }, [loadedImage, sampleMethod, manualGrid, gridWidth, gridHeight, minSize, peakWidth, refineIntensity, fixSquare, outputScale, msgDialog]);
 
   // 参数变化时自动处理（防抖 300ms）
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -322,19 +319,15 @@ export const PerfectPixelPage = () => {
   }, []);
 
   const saveImage = useCallback(async (dataUrl: string, suffix: string) => {
-    if (window.ipcRenderer) {
-      try {
-        const result = await window.ipcRenderer.invoke('perfect-pixel:save' as any, dataUrl);
-        if (result.success) {
-          showDialog('保存成功', `文件已保存到: ${result.filePath}`);
-        }
-      } catch {
-        downloadImage(dataUrl, suffix);
+    try {
+      const result = await ipcInvoke('perfect-pixel:save', dataUrl);
+      if (result.success) {
+        msgDialog.showMessage('保存成功', `文件已保存到: ${result.filePath}`);
       }
-    } else {
+    } catch {
       downloadImage(dataUrl, suffix);
     }
-  }, [showDialog, downloadImage]);
+  }, [msgDialog, downloadImage]);
 
   // 当前输出图
   const currentOutputUrl = outputView === 'scaled' ? resultScaledUrl : resultOriginalUrl;
@@ -588,7 +581,7 @@ export const PerfectPixelPage = () => {
         </div>
       </Card>
 
-      <MessageDialog {...dialogState} onClose={hideDialog} />
+      <MessageDialog open={msgDialog.open} title={msgDialog.title} message={msgDialog.message} onClose={msgDialog.close} />
     </div>
   );
 };

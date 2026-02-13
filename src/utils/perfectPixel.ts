@@ -307,7 +307,6 @@ function arrayMedian(arr: number[]): number {
 function estimateGridFFT(gray: Float32Array, W: number, H: number, peakWidth = 6): [number, number] | null {
   const { mag, magW, magH } = computeFFTMagnitude(gray, W, H)
 
-  const halfW = magW >> 1
   const halfH = magH >> 1
 
   const rowSum = new Float32Array(magH)

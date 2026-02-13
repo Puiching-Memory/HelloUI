@@ -51,6 +51,7 @@ export interface ModelGroup {
   name: string
   taskType?: TaskType // 任务类型：generate（图片生成）、edit（图片编辑）、video（视频生成）、upscale（图像超分辨率）
   sdModel?: string // SD/基础模型路径（图片或视频）
+  diffusionModel?: string // 独立扩散模型路径（如 Z-Image，使用 --diffusion-model 而非 -m）
   highNoiseSdModel?: string // 高噪声SD模型路径（视频生成用，可选）
   vaeModel?: string // VAE模型路径
   llmModel?: string // LLM/CLIP/T5 文本编码器模型路径
@@ -81,6 +82,12 @@ export interface ModelGroup {
  */
 export interface GenerateImageParams {
   groupId?: string // 使用模型组ID
+  sdModel?: string
+  diffusionModel?: string // 独立扩散模型路径（如 Z-Image）
+  vaeModel?: string
+  llmModel?: string
+  clipLModel?: string
+  t5xxlModel?: string
   deviceType: DeviceType
   prompt: string
   negativePrompt?: string
