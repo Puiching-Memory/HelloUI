@@ -46,6 +46,11 @@ export async function ipcInvoke<C extends IpcInvokeChannel>(
     } else if (channel === 'generated-images:batch-download') {
       payload = { value: args[0] } as Record<string, unknown>
     }
+  } else if (args.length === 1 && typeof args[0] === 'object' && args[0] !== null) {
+    // 对于只有一个对象参数的情况，展开该对象作为命名参数
+    if (channel === 'sdcpp:fetch-releases') {
+      payload = args[0] as Record<string, unknown>
+    }
   }
 
   return invoke(command, payload) as Promise<IpcInvokeResponse<C>>

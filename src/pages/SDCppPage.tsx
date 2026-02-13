@@ -6,6 +6,7 @@ import {
   Body1,
   Body2,
   Caption1,
+  Text,
   makeStyles,
   tokens,
   Spinner,
@@ -57,7 +58,7 @@ const useStyles = makeStyles({
   },
   summaryGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+    gridTemplateColumns: 'repeat(3, 1fr)',
     gap: tokens.spacingVerticalL,
   },
   engineCard: {
@@ -193,6 +194,31 @@ interface EngineFile {
   path: string;
   modified: number;
   deviceType: DeviceType;
+  cpuVariant?: 'avx2' | 'avx' | 'avx512' | 'noavx';
+}
+
+type CpuVariant = 'avx2' | 'avx' | 'avx512' | 'noavx';
+
+interface CpuVariantInfo {
+  variant: CpuVariant;
+  label: string;
+  files: EngineFile[];
+  totalSize: number;
+  hasFiles: boolean;
+  version: string | null;
+}
+
+interface EngineSummary {
+  type: DeviceType;
+  label: string;
+  hasFiles: boolean;
+  cpuVariants?: CpuVariantInfo[];
+  cudaRuntime?: {
+    hasFiles: boolean;
+    totalSize: number;
+  };
+  totalSize: number;
+  version: string | null;
 }
 
 // ─── 辅助函数 ─────────────────────────────────────────────────────
@@ -409,7 +435,8 @@ export const SDCppPage = () => {
       }
     } catch (error: any) {
       console.error('Failed to fetch releases:', error);
-      setDownloadError(`获取版本列表失败: ${error?.message || '未知错误'}`);
+      const errorMsg = error?.message || error?.toString() || '未知错误';
+      setDownloadError(`获取版本列表失败: ${errorMsg}`);
     } finally {
       setLoadingReleases(false);
     }
@@ -515,15 +542,60 @@ export const SDCppPage = () => {
 
   // ─── 渲染引擎概览 ─────────────────────────────────────────────
 
-  const engineSummaries = (['cpu', 'vulkan', 'cuda'] as DeviceType[]).map((deviceType) => {
+  const cpuVariantLabels: Record<CpuVariant, string> = {
+    avx2: 'AVX2',
+    avx: 'AVX',
+    avx512: 'AVX512',
+    noavx: '无AVX',
+  };
+
+  const engineSummaries: EngineSummary[] = (['cpu', 'vulkan', 'cuda'] as const).map((deviceType) => {
     const deviceFiles = files.filter(f => f.deviceType === deviceType);
-    const totalSize = deviceFiles.reduce((sum, file) => sum + file.size, 0);
+
+    if (deviceType === 'cpu') {
+      const cpuVariants: CpuVariant[] = ['avx2', 'avx512', 'avx', 'noavx'];
+      const variantInfos = cpuVariants.map((variant) => {
+        const variantFiles = deviceFiles.filter(f => f.cpuVariant === variant);
+        return {
+          variant,
+          label: cpuVariantLabels[variant],
+          files: variantFiles,
+          totalSize: variantFiles.reduce((sum, file) => sum + file.size, 0),
+          hasFiles: variantFiles.length > 0,
+          version: deviceVersions.cpu,
+        };
+      });
+      return {
+        type: deviceType,
+        label: 'CPU',
+        hasFiles: deviceFiles.length > 0,
+        cpuVariants: variantInfos,
+        totalSize: deviceFiles.reduce((sum, file) => sum + file.size, 0),
+        version: deviceVersions.cpu,
+      };
+    }
+
+    if (deviceType === 'cuda') {
+      const cudartFiles = deviceFiles.filter(f => f.name.toLowerCase().includes('cudart'));
+      return {
+        type: deviceType,
+        label: 'CUDA',
+        hasFiles: deviceFiles.length > 0,
+        cudaRuntime: {
+          hasFiles: cudartFiles.length > 0,
+          totalSize: cudartFiles.reduce((sum, file) => sum + file.size, 0),
+        },
+        totalSize: deviceFiles.reduce((sum, file) => sum + file.size, 0),
+        version: deviceVersions.cuda,
+      };
+    }
+
     return {
       type: deviceType,
       label: getDeviceLabel(deviceType),
-      totalSize,
-      version: deviceVersions[deviceType],
       hasFiles: deviceFiles.length > 0,
+      totalSize: deviceFiles.reduce((sum, file) => sum + file.size, 0),
+      version: deviceVersions[deviceType],
     };
   });
 
@@ -584,10 +656,37 @@ export const SDCppPage = () => {
                 </Body1>
               ) : (
                 <>
-                  <div className={styles.engineInfoRow} style={{ marginTop: tokens.spacingVerticalM }}>
-                    <span className={styles.infoLabel}>当前版本</span>
-                    <span className={styles.infoValue}>{summary.version || '未知'}</span>
-                  </div>
+                  {summary.type === 'cpu' && summary.cpuVariants && (
+                    <div style={{ marginTop: tokens.spacingVerticalM }}>
+                      <Text weight="semibold" style={{ fontSize: tokens.fontSizeBase200, marginBottom: tokens.spacingVerticalS }}>
+                        CPU 变体
+                      </Text>
+                      {summary.cpuVariants.map((variant) => (
+                        <div key={variant.variant} className={styles.engineInfoRow}>
+                          <span className={styles.infoLabel}>{variant.label}</span>
+                          <span className={styles.infoValue}>
+                            {variant.hasFiles ? formatFileSize(variant.totalSize) : '未安装'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {summary.type === 'cuda' && summary.cudaRuntime && (
+                    <div style={{ marginTop: tokens.spacingVerticalM }}>
+                      <div className={styles.engineInfoRow}>
+                        <span className={styles.infoLabel}>CUDA 引擎</span>
+                        <span className={styles.infoValue}>{formatFileSize(summary.totalSize - summary.cudaRuntime.totalSize)}</span>
+                      </div>
+                      <div className={styles.engineInfoRow}>
+                        <span className={styles.infoLabel}>CUDA Runtime</span>
+                        <span className={styles.infoValue}>
+                          {summary.cudaRuntime.hasFiles ? formatFileSize(summary.cudaRuntime.totalSize) : '未安装'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
                   <div className={styles.engineInfoRow}>
                     <span className={styles.infoLabel}>占用空间</span>
                     <span className={styles.infoValue}>{formatFileSize(summary.totalSize)}</span>

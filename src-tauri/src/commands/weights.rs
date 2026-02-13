@@ -11,6 +11,8 @@ pub struct WeightFile {
     pub size: u64,
     pub path: String,
     pub modified: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_variant: Option<String>,
 }
 
 /// Initialize default folders on app startup
@@ -116,6 +118,7 @@ fn list_files_recursive(
                 size: metadata.len(),
                 path: path.to_string_lossy().to_string(),
                 modified,
+                cpu_variant: None,
             });
         }
     }

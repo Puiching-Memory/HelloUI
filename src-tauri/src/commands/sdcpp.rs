@@ -1,6 +1,6 @@
 use crate::state::{self, AppState};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 use tokio::time::{timeout, Duration};
@@ -112,44 +112,82 @@ pub async fn sdcpp_list_files(
     folder: String,
     device_type: String,
 ) -> Result<serde_json::Value, String> {
-    let device_folder = Path::new(&folder).join(&device_type);
-    let mut files = Vec::new();
+    let base_folder = Path::new(&folder);
+    let mut all_files = Vec::new();
+    let mut variant_folders: Vec<PathBuf> = Vec::new();
 
-    if device_folder.is_dir() {
-        let entries = std::fs::read_dir(&device_folder).map_err(|e| e.to_string())?;
-        for entry in entries {
-            let entry = entry.map_err(|e| e.to_string())?;
-            let path = entry.path();
-            if path.is_file() {
-                let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
-                let modified = metadata
-                    .modified()
-                    .map(|t| {
-                        t.duration_since(std::time::UNIX_EPOCH)
+    if device_type == "cpu" {
+        let variants = ["cpu-avx2", "cpu-avx512", "cpu-avx", "cpu-noavx"];
+        for variant in variants {
+            let variant_path = base_folder.join(variant);
+            if variant_path.is_dir() {
+                variant_folders.push(variant_path);
+            }
+        }
+        let legacy_cpu_folder = base_folder.join("cpu");
+        if legacy_cpu_folder.is_dir() {
+            variant_folders.push(legacy_cpu_folder);
+        }
+    } else {
+        variant_folders.push(base_folder.join(&device_type));
+    }
+
+    for device_folder in variant_folders {
+        if device_folder.is_dir() {
+            let folder_name = device_folder.file_name()
+                .and_then(|n: &std::ffi::OsStr| n.to_str())
+                .unwrap_or("");
+            
+            let folder_cpu_variant = if folder_name.starts_with("cpu-") {
+                folder_name.strip_prefix("cpu-").map(|s: &str| s.to_string())
+            } else {
+                None
+            };
+
+            let entries = std::fs::read_dir(&device_folder).map_err(|e| e.to_string())?;
+            for entry in entries {
+                let entry = entry.map_err(|e| e.to_string())?;
+                let path = entry.path();
+                if path.is_file() {
+                    let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+                    let modified = metadata
+                        .modified()
+                        .map(|t| {
+                            t.duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64
+                        })
+                        .unwrap_or(0);
+
+                    let cpu_variant = if device_type == "cpu" {
+                        folder_cpu_variant.clone().or_else(|| {
+                            classify_cpu_variant(&path.file_name().unwrap_or_default().to_string_lossy())
+                        })
+                    } else {
+                        None
+                    };
+
+                    all_files.push(WeightFile {
+                        name: path
+                            .file_name()
                             .unwrap_or_default()
-                            .as_millis() as u64
-                    })
-                    .unwrap_or(0);
-
-                files.push(WeightFile {
-                    name: path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string(),
-                    size: metadata.len(),
-                    path: path.to_string_lossy().to_string(),
-                    modified,
-                });
+                            .to_string_lossy()
+                            .to_string(),
+                        size: metadata.len(),
+                        path: path.to_string_lossy().to_string(),
+                        modified,
+                        cpu_variant,
+                    });
+                }
             }
         }
     }
 
-    // Try to get version from sd cli
+    let device_folder = base_folder.join(&device_type);
     let version = get_sdcpp_version(&device_folder).await;
 
     Ok(serde_json::json!({
-        "files": files,
+        "files": all_files,
         "version": version
     }))
 }
@@ -272,7 +310,16 @@ pub async fn sdcpp_fetch_releases(
         .await
         .map_err(|e| e.to_string())?;
 
-    let releases: Vec<serde_json::Value> = response.json().await.map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        if status.as_u16() == 403 && body.contains("rate limit") {
+            return Err("GitHub API 限流已达上限（每小时60次）。请稍后再试，或使用镜像站下载文件。".to_string());
+        }
+        return Err(format!("GitHub API error: {} - {}", status, body));
+    }
+
+    let releases: Vec<serde_json::Value> = response.json().await.map_err(|e| format!("Failed to parse JSON: {}", e))?;
 
     let result: Vec<SDCppRelease> = releases
         .into_iter()
@@ -450,7 +497,15 @@ pub async fn sdcpp_download_engine(
         .clone()
         .ok_or("SD.cpp folder not set")?;
 
-    let device_folder = Path::new(&sdcpp_folder).join(&asset.device_type);
+    let device_folder = if asset.device_type == "cpu" {
+        if let Some(ref variant) = asset.cpu_variant {
+            Path::new(&sdcpp_folder).join(format!("cpu-{}", variant))
+        } else {
+            Path::new(&sdcpp_folder).join("cpu")
+        }
+    } else {
+        Path::new(&sdcpp_folder).join(&asset.device_type)
+    };
     std::fs::create_dir_all(&device_folder).map_err(|e| e.to_string())?;
 
     let download_url = asset.download_url.clone();

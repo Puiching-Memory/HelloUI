@@ -4,15 +4,8 @@ import {
   Title2,
   Body1,
   Button,
-  Table,
-  TableHeader,
-  TableHeaderCell,
-  TableBody,
-  TableRow,
-  TableCell,
   makeStyles,
   tokens,
-  Spinner,
   Dialog,
   DialogSurface,
   DialogTitle,
@@ -49,7 +42,7 @@ import { useAppStore } from '../hooks/useAppStore';
 import { ipcInvoke } from '../lib/tauriIpc';
 import { formatFileSize } from '@/utils/format';
 import { getPathBaseName } from '@/utils/tauriPath';
-import type { TaskType, ModelGroup, WeightFile, HfMirrorId, ModelDownloadProgress } from '../../shared/types'
+import type { TaskType, ModelGroup, HfMirrorId, ModelDownloadProgress } from '../../shared/types'
 
 const useStyles = makeStyles({
   container: {
@@ -78,35 +71,10 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalM,
     flexWrap: 'wrap',
   },
-  tableContainer: {
-    overflowX: 'auto',
-  },
   emptyState: {
     textAlign: 'center',
     padding: tokens.spacingVerticalXXL,
     color: tokens.colorNeutralForeground3,
-  },
-  truncatedText: {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    display: 'block',
-    width: '100%',
-  },
-  tableCellFileName: {
-    maxWidth: '400px',
-    minWidth: '200px',
-    overflow: 'hidden',
-  },
-  tableCellSize: {
-    maxWidth: '150px',
-    minWidth: '100px',
-    overflow: 'hidden',
-  },
-  tableCellDate: {
-    maxWidth: '200px',
-    minWidth: '150px',
-    overflow: 'hidden',
   },
   modelGroupGrid: {
     display: 'grid',
@@ -279,10 +247,7 @@ export const ModelWeightsPage = () => {
   const { setIsUploading } = useAppStore();
   const [weightsFolder, setWeightsFolder] = useState<string>('');
   const [weightsFolderInput, setWeightsFolderInput] = useState<string>('');
-  const [files, setFiles] = useState<WeightFile[]>([]);
   const [loading, setLoading] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [fileToDelete, setFileToDelete] = useState<WeightFile | null>(null);
   const [importProgress, setImportProgress] = useState<{
     progress: number;
     fileName: string;
@@ -305,7 +270,6 @@ export const ModelWeightsPage = () => {
   const [fileStatusMap, setFileStatusMap] = useState<Record<string, Array<{ file: string; exists: boolean; size?: number }>>>({});
 
   // 监听模型下载进度
-  const loadFilesRef = useRef<() => Promise<void>>(undefined);
   const loadModelGroupsRef = useRef<() => Promise<void>>(undefined);
 
   useIpcListener('models:download-progress', (data) => {
@@ -314,8 +278,7 @@ export const ModelWeightsPage = () => {
       setTimeout(() => {
         setModelDownloadProgress(null);
         setDownloadingGroupId(null);
-        // 刷新文件列表和文件状态
-        loadFilesRef.current?.();
+        // 刷新模型组文件状态
         loadModelGroupsRef.current?.();
       }, 1500);
     }
@@ -358,13 +321,6 @@ export const ModelWeightsPage = () => {
     loadWeightsFolder().catch(console.error);
   }, []);
 
-  // 当文件夹路径改变时，加载文件列表
-  useEffect(() => {
-    if (weightsFolder) {
-      loadFiles();
-    }
-  }, [weightsFolder]);
-
   // 加载模型组列表
   useEffect(() => {
     loadModelGroups().catch(console.error);
@@ -381,17 +337,6 @@ export const ModelWeightsPage = () => {
     if (folder) {
       setWeightsFolder(folder);
       setWeightsFolderInput(folder);
-    }
-  };
-
-  const loadFiles = async () => {
-    if (!weightsFolder) return;
-    setLoading(true);
-    try {
-      const fileList = await ipcInvoke('weights:list-files', weightsFolder);
-      setFiles(fileList || []);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -423,11 +368,6 @@ export const ModelWeightsPage = () => {
     setWeightsFolder(nextFolder);
     setWeightsFolderInput(nextFolder);
 
-    // 路径相同时 useEffect 不会触发，手动扫描确保 UI 更新
-    if (nextFolder === weightsFolder) {
-      loadFiles();
-    }
-
     // 重新加载模型组列表及其文件状态
     await loadModelGroups();
   };
@@ -453,7 +393,6 @@ export const ModelWeightsPage = () => {
           
           if (result?.success) {
             setImportProgress((prev) => prev ? { ...prev, progress: 100 } : null);
-            await loadFiles();
             await loadModelGroups();
             setMessageDialogContent({ title: '导入成功', message: `模型组 "${result.group?.name}" 已成功导入并注册。` });
             setMessageDialogOpen(true);
@@ -477,63 +416,12 @@ export const ModelWeightsPage = () => {
     }
   };
 
-  const handleDownload = async (file: WeightFile) => {
-    setLoading(true);
-    try {
-      await ipcInvoke('weights:download-file', file.path);
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const handleDeleteClick = (file: WeightFile) => {
-    setFileToDelete(file);
-    setDeleteDialogOpen(true);
-  };
-
-  const handleDeleteConfirm = async () => {
-    if (!fileToDelete) return;
-    setLoading(true);
-    try {
-      await ipcInvoke('weights:delete-file', fileToDelete.path);
-      await loadFiles();
-      setDeleteDialogOpen(false);
-      setFileToDelete(null);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-
-
-  const formatDate = (timestamp: number): string => {
-    return new Date(timestamp).toLocaleString('zh-CN');
-  };
 
   const loadModelGroups = async () => {
     const groups = await ipcInvoke('model-groups:list');
     setModelGroups(groups || []);
   };
-
-  // 保持 ref 始终最新
-  useEffect(() => {
-    loadFilesRef.current = loadFiles;
-    loadModelGroupsRef.current = loadModelGroups;
-  });
-
-  // 初始化 HF 镜像
-  useEffect(() => {
-    ipcInvoke('models:get-hf-mirror').then((id: HfMirrorId) => {
-      setHfMirrorId(id);
-    }).catch(console.error);
-  }, []);
-
-  // 加载模型组时检查文件状态
-  useEffect(() => {
-    if (modelGroups.length > 0) {
-      checkAllGroupFiles();
-    }
-  }, [modelGroups]);
 
   const checkAllGroupFiles = async () => {
     const statusMap: Record<string, Array<{ file: string; exists: boolean; size?: number }>> = {};
@@ -549,6 +437,26 @@ export const ModelWeightsPage = () => {
     }
     setFileStatusMap(statusMap);
   };
+
+  // 保持 ref 始终最新
+  useEffect(() => {
+    loadModelGroupsRef.current = loadModelGroups;
+  });
+
+  // 初始化 HF 镜像
+  useEffect(() => {
+    ipcInvoke('models:get-hf-mirror').then((id: HfMirrorId) => {
+      setHfMirrorId(id);
+    }).catch(console.error);
+  }, []);
+
+  // 加载模型组时检查文件状态
+  useEffect(() => {
+    if (modelGroups.length > 0) {
+      checkAllGroupFiles();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelGroups]);
 
   const handleHfMirrorChange = useCallback(async (mirrorId: HfMirrorId) => {
     try {
@@ -582,8 +490,8 @@ export const ModelWeightsPage = () => {
         setModelDownloadProgress(null);
         setDownloadingGroupId(null);
       }
-    } catch (error: any) {
-      setMessageDialogContent({ title: '下载失败', message: error?.message || '下载失败' });
+    } catch (error) {
+      setMessageDialogContent({ title: '下载失败', message: (error as Error)?.message || '下载失败' });
       setMessageDialogOpen(true);
       setModelDownloadProgress(null);
       setDownloadingGroupId(null);
@@ -808,8 +716,7 @@ export const ModelWeightsPage = () => {
 
   const getModelFileName = (path: string | undefined): string => {
     if (!path) return '未选择';
-    const file = files.find(f => f.path === path);
-    return file ? file.name : getPathBaseName(path, path);
+    return getPathBaseName(path, path);
   };
 
   return (
@@ -858,12 +765,6 @@ export const ModelWeightsPage = () => {
             appearance="primary"
           >
             导入模型组文件夹
-          </Button>
-          <Button
-            onClick={loadFiles}
-            disabled={!weightsFolder || loading}
-          >
-            刷新列表
           </Button>
         </div>
         {/* 导入进度条 */}
@@ -1298,85 +1199,6 @@ export const ModelWeightsPage = () => {
         )}
       </Card>
 
-      {/* 文件列表 */}
-      <Card className={styles.section}>
-        <Title2>权重文件列表</Title2>
-        {loading && files.length === 0 ? (
-          <div className={styles.emptyState}>
-            <Spinner size="large" />
-            <Body1 style={{ marginTop: tokens.spacingVerticalM }}>加载中...</Body1>
-          </div>
-        ) : files.length === 0 ? (
-          <div className={styles.emptyState}>
-            <Body1>暂无权重文件</Body1>
-            <Body1 style={{ fontSize: tokens.fontSizeBase200, marginTop: tokens.spacingVerticalS }}>
-              {weightsFolder ? '请上传权重文件' : '请先选择权重文件夹'}
-            </Body1>
-          </div>
-        ) : (
-          <div className={styles.tableContainer}>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHeaderCell>文件名</TableHeaderCell>
-                  <TableHeaderCell>大小</TableHeaderCell>
-                  <TableHeaderCell>修改时间</TableHeaderCell>
-                  <TableHeaderCell>操作</TableHeaderCell>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {files.map((file) => (
-                  <TableRow key={file.path}>
-                    <TableCell className={styles.tableCellFileName}>
-                      <Tooltip content={file.name} relationship="label">
-                        <div className={styles.truncatedText} title={file.name}>
-                          <Body1>{file.name}</Body1>
-                        </div>
-                      </Tooltip>
-                    </TableCell>
-                    <TableCell className={styles.tableCellSize}>
-                      <Tooltip content={formatFileSize(file.size)} relationship="label">
-                        <div className={styles.truncatedText} title={formatFileSize(file.size)}>
-                          <Body1>{formatFileSize(file.size)}</Body1>
-                        </div>
-                      </Tooltip>
-                    </TableCell>
-                    <TableCell className={styles.tableCellDate}>
-                      <Tooltip content={formatDate(file.modified)} relationship="label">
-                        <div className={styles.truncatedText} title={formatDate(file.modified)}>
-                          <Body1>{formatDate(file.modified)}</Body1>
-                        </div>
-                      </Tooltip>
-                    </TableCell>
-                    <TableCell>
-                      <div style={{ display: 'flex', gap: tokens.spacingHorizontalS }}>
-                        <Button
-                          icon={<ArrowDownloadRegular />}
-                          size="small"
-                          onClick={() => handleDownload(file)}
-                          disabled={loading}
-                        >
-                          下载
-                        </Button>
-                        <Button
-                          icon={<DeleteRegular />}
-                          size="small"
-                          appearance="secondary"
-                          onClick={() => handleDeleteClick(file)}
-                          disabled={loading}
-                        >
-                          删除
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </Card>
-
       {/* 模型组编辑对话框 */}
       <Dialog open={groupDialogOpen} onOpenChange={(_, data) => {
         setGroupDialogOpen(data.open);
@@ -1705,38 +1527,6 @@ export const ModelWeightsPage = () => {
                 }
               >
                 {editingGroup ? '保存' : '创建'}
-              </Button>
-            </DialogActions>
-          </DialogBody>
-        </DialogSurface>
-      </Dialog>
-
-      {/* 删除确认对话框 */}
-      <Dialog open={deleteDialogOpen} onOpenChange={(_, data) => setDeleteDialogOpen(data.open)}>
-        <DialogSurface>
-          <DialogTitle>确认删除</DialogTitle>
-          <DialogBody>
-            <DialogContent>
-              <Body1>
-                确定要删除文件 "{fileToDelete?.name}" 吗？此操作无法撤销。
-              </Body1>
-            </DialogContent>
-            <DialogActions>
-              <Button
-                appearance="secondary"
-                onClick={() => {
-                  setDeleteDialogOpen(false);
-                  setFileToDelete(null);
-                }}
-              >
-                取消
-              </Button>
-              <Button
-                appearance="primary"
-                onClick={handleDeleteConfirm}
-                disabled={loading}
-              >
-                删除
               </Button>
             </DialogActions>
           </DialogBody>
