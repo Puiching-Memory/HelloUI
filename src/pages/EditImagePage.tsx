@@ -20,9 +20,11 @@ import {
   DocumentArrowDownRegular,
   ArrowUploadRegular,
   DismissRegular,
+  ArrowDownloadRegular,
 } from '@fluentui/react-icons';
 import { PhotoView } from 'react-photo-view';
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useIpcListener } from '../hooks/useIpcListener';
 import { ipcInvoke, ipcListen } from '../lib/tauriIpc';
 import { useAppStore } from '../hooks/useAppStore';
@@ -87,8 +89,9 @@ const useLocalStyles = makeStyles({
 export const EditImagePage = () => {
   const styles = useSharedStyles();
   const localStyles = useLocalStyles();
+  const navigate = useNavigate();
   const { setIsGenerating } = useAppStore();
-  const { modelGroups, loading, selectedGroupId, setSelectedGroupId, selectedGroup, reloadModelGroups } = useModelGroups('edit');
+  const { modelGroups, loading, selectedGroupId, setSelectedGroupId, selectedGroup, isGroupComplete, reloadModelGroups } = useModelGroups('edit');
   const { deviceType, handleDeviceTypeChange, availableEngines } = useDeviceType();
   const cli = useCliOutput('generate:cli-output');
   const msgDialog = useMessageDialog();
@@ -471,11 +474,19 @@ export const EditImagePage = () => {
                 }
               }}
             >
-              {modelGroups.map((group) => (
-                <Option key={group.id} value={group.id} text={group.name}>
-                  {group.name}
-                </Option>
-              ))}
+              {modelGroups.map((group) => {
+                const complete = isGroupComplete(group.id)
+                return (
+                  <Option 
+                    key={group.id} 
+                    value={group.id} 
+                    text={group.name}
+                    disabled={!complete}
+                  >
+                    {group.name}{!complete ? ' (文件缺失)' : ''}
+                  </Option>
+                )
+              })}
             </Dropdown>
           </Field>
           <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
@@ -483,7 +494,9 @@ export const EditImagePage = () => {
               ? '暂无可用模型组，请先在"模型权重管理"页面创建模型组'
               : selectedGroup
               ? `已选择: ${selectedGroup.name}${getModelInfo(selectedGroup) ? ` (${getModelInfo(selectedGroup)})` : ''}`
-              : '未选择'}
+              : modelGroups.some(g => !isGroupComplete(g.id))
+              ? '部分模型组文件缺失，请先在"模型权重管理"页面下载缺失文件'
+              : '请选择模型组'}
           </Body1>
           {selectedGroup?.sdModel?.toLowerCase().includes('qwen-image-edit-2511') && (
             <div style={{ 
@@ -544,21 +557,37 @@ export const EditImagePage = () => {
               </Text>
             </div>
             <div style={{ marginBottom: tokens.spacingVerticalM }}>
-              <Field label="推理引擎" hint="选择主要的推理引擎（CUDA/Vulkan/CPU）">
-                <Dropdown
-                  value={getDeviceLabel(deviceType)}
-                  selectedOptions={[deviceType]}
-                  onOptionSelect={(_, data) => {
-                    if (data.optionValue) {
-                      handleDeviceTypeChange(data.optionValue as DeviceType);
-                    }
-                  }}
-                >
-                  <Option disabled={!availableEngines.includes('cpu')} value="cpu">CPU</Option>
-                  <Option disabled={!availableEngines.includes('vulkan')} value="vulkan">Vulkan</Option>
-                  <Option disabled={!availableEngines.includes('cuda')} value="cuda">CUDA</Option>
-                  <Option disabled={!availableEngines.includes('rocm')} value="rocm">ROCm</Option>
-                </Dropdown>
+              <Field label="推理引擎" hint={availableEngines.length === 0 ? "请先在「SD.cpp 管理」页面下载推理引擎" : "选择主要的推理引擎（CUDA/Vulkan/CPU）"}>
+                {availableEngines.length === 0 ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+                    <Body1 style={{ color: tokens.colorPaletteRedForeground2, fontStyle: 'italic' }}>
+                      未检测到已安装的推理引擎
+                    </Body1>
+                    <Button
+                      size="small"
+                      appearance="primary"
+                      icon={<ArrowDownloadRegular />}
+                      onClick={() => navigate('/sdcpp')}
+                    >
+                      前往下载
+                    </Button>
+                  </div>
+                ) : (
+                  <Dropdown
+                    value={getDeviceLabel(deviceType)}
+                    selectedOptions={[deviceType]}
+                    onOptionSelect={(_, data) => {
+                      if (data.optionValue) {
+                        handleDeviceTypeChange(data.optionValue as DeviceType);
+                      }
+                    }}
+                  >
+                    <Option disabled={!availableEngines.includes('cpu')} value="cpu">CPU</Option>
+                    <Option disabled={!availableEngines.includes('vulkan')} value="vulkan">Vulkan</Option>
+                    <Option disabled={!availableEngines.includes('cuda')} value="cuda">CUDA</Option>
+                    <Option disabled={!availableEngines.includes('rocm')} value="rocm">ROCm</Option>
+                  </Dropdown>
+                )}
               </Field>
             </div>
             <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginBottom: tokens.spacingVerticalM }}>

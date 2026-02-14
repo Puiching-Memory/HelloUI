@@ -9,6 +9,7 @@ use tauri_plugin_dialog::DialogExt;
 pub struct ModelGroup {
     pub id: String,
     pub name: String,
+    pub folder: String,
     pub task_type: Option<String>,
     pub sd_model: Option<String>,
     pub diffusion_model: Option<String>,
@@ -133,11 +134,10 @@ pub async fn model_groups_delete(
     let original_len = groups.len();
 
     if delete_files.unwrap_or(false) {
-        // Find the group and delete its folder
         if let Some(group) = groups.iter().find(|g| g.id == id) {
             let weights_folder = state.weights_folder.lock().unwrap().clone();
             let models_folder = state::get_active_models_folder(weights_folder.as_deref());
-            let group_folder = models_folder.join(&group.id);
+            let group_folder = models_folder.join(&group.folder);
             if group_folder.exists() {
                 let _ = std::fs::remove_dir_all(&group_folder);
             }
@@ -186,18 +186,25 @@ pub async fn model_groups_import(
         return Err("Source folder not found".to_string());
     }
 
-    // Check for config.json in source
+    let folder_name = src
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "imported".to_string());
+
     let config_path = src.join("config.json");
-    if !config_path.exists() {
-        return Err("No config.json found in source folder".to_string());
-    }
+    let config: serde_json::Value = if config_path.exists() {
+        let config_data = std::fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
+        serde_json::from_str(&config_data).map_err(|e| e.to_string())?
+    } else {
+        serde_json::json!({
+            "name": folder_name,
+            "taskType": "generate"
+        })
+    };
 
-    let config_data = std::fs::read_to_string(&config_path).map_err(|e| e.to_string())?;
-    let config: serde_json::Value = serde_json::from_str(&config_data).map_err(|e| e.to_string())?;
-
-    let group_name = config["name"].as_str().unwrap_or("Imported Group").to_string();
+    let group_name = config["name"].as_str().unwrap_or(&folder_name).to_string();
     let group_id = uuid::Uuid::new_v4().to_string();
-    let dest = Path::new(&target_folder).join(&group_id);
+    let dest = Path::new(&target_folder).join(&folder_name);
     std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
 
     // Copy files with progress
@@ -234,6 +241,7 @@ pub async fn model_groups_import(
     let mut group_config = config.clone();
     if let Some(obj) = group_config.as_object_mut() {
         obj.insert("id".to_string(), serde_json::json!(group_id));
+        obj.insert("folder".to_string(), serde_json::json!(folder_name));
         obj.insert("createdAt".to_string(), serde_json::json!(now));
         obj.insert("updatedAt".to_string(), serde_json::json!(now));
     }

@@ -34,8 +34,7 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../models/model-groups.json",
-      "../models/**/config.json"
+      "./models/model-groups.json"
     ]
   },
   "plugins": {

@@ -21,7 +21,6 @@ import {
   Option,
 } from '@fluentui/react-components';
 import {
-  ArrowUploadRegular,
   ArrowDownloadRegular,
   DeleteRegular,
   AddRegular,
@@ -39,7 +38,6 @@ import {
 } from '@fluentui/react-icons';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
-import { useAppStore } from '../hooks/useAppStore';
 import { ipcInvoke } from '../lib/tauriIpc';
 import { formatFileSize } from '@/utils/format';
 import { getPathBaseName } from '@/utils/tauriPath';
@@ -245,24 +243,9 @@ const useStyles = makeStyles({
 
 export const ModelWeightsPage = () => {
   const styles = useStyles();
-  const { setIsUploading } = useAppStore();
   const [weightsFolder, setWeightsFolder] = useState<string>('');
   const [weightsFolderInput, setWeightsFolderInput] = useState<string>('');
   const [loading, setLoading] = useState(false);
-  const [importProgress, setImportProgress] = useState<{
-    progress: number;
-    fileName: string;
-    copied: number;
-    total: number;
-  } | null>(null);
-
-
-  // 监听导入进度
-  useIpcListener('model-groups:import-progress', (data) => {
-    setImportProgress(data);
-  });
-
-
 
   // HF 下载相关状态
   const [hfMirrorId, setHfMirrorId] = useState<HfMirrorId>('hf-mirror');
@@ -377,46 +360,6 @@ export const ModelWeightsPage = () => {
     setWeightsFolderInput(value);
   };
 
-  const handleUpload = async () => {
-    if (!weightsFolder) return;
-    try {
-      const folderPath = await ipcInvoke('model-groups:select-folder');
-      if (folderPath) {
-        const folderName = getPathBaseName(folderPath, '模型组');
-        setLoading(true);
-        setImportProgress({ progress: 0, fileName: folderName, copied: 0, total: 0 });
-        
-        // 通知父组件开始上传，禁用导航
-        setIsUploading(true);
-        
-        try {
-          const result = await ipcInvoke('model-groups:import', { folderPath, targetFolder: weightsFolder });
-          
-          if (result?.success) {
-            setImportProgress((prev) => prev ? { ...prev, progress: 100 } : null);
-            await loadModelGroups();
-            setMessageDialogContent({ title: '导入成功', message: `模型组 "${result.group?.name}" 已成功导入并注册。` });
-            setMessageDialogOpen(true);
-          } else {
-            throw new Error(result?.message || '导入失败');
-          }
-        } finally {
-          setLoading(false);
-          setIsUploading(false);
-          setTimeout(() => setImportProgress(null), 1000);
-        }
-      }
-    } catch (error) {
-      setImportProgress(null);
-      setLoading(false);
-      setIsUploading(false);
-      
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      setMessageDialogContent({ title: '导入失败', message: `导入模型组失败: ${errorMessage}` });
-      setMessageDialogOpen(true);
-    }
-  };
-
 
 
   const loadModelGroups = async () => {
@@ -492,7 +435,8 @@ export const ModelWeightsPage = () => {
         setDownloadingGroupId(null);
       }
     } catch (error) {
-      setMessageDialogContent({ title: '下载失败', message: (error as Error)?.message || '下载失败' });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setMessageDialogContent({ title: '下载失败', message: errorMessage || '下载失败' });
       setMessageDialogOpen(true);
       setModelDownloadProgress(null);
       setDownloadingGroupId(null);
@@ -605,7 +549,6 @@ export const ModelWeightsPage = () => {
     // 构建 hfFiles 数组和模型相对路径
     const repo = groupHfRepo.trim();
     const folderName = groupName.trim();
-    const buildModelPath = (fileName: string) => fileName ? `${folderName}/${fileName}` : undefined;
     const hfFiles: { repo: string; file: string }[] = [];
     const addHfFile = (fileName: string) => {
       if (fileName && repo) {
@@ -637,15 +580,16 @@ export const ModelWeightsPage = () => {
     try {
       const groupData = {
         name: folderName,
+        folder: folderName,
         taskType: groupTaskType,
-        sdModel: buildModelPath(sdFile),
-        diffusionModel: buildModelPath(diffusionFile),
-        highNoiseSdModel: buildModelPath(highNoiseSdFile),
-        vaeModel: buildModelPath(vaeFile),
-        llmModel: buildModelPath(llmFile),
-        clipLModel: buildModelPath(clipLFile),
-        t5xxlModel: buildModelPath(t5xxlFile),
-        clipVisionModel: buildModelPath(clipVisionFile),
+        sdModel: sdFile || undefined,
+        diffusionModel: diffusionFile || undefined,
+        highNoiseSdModel: highNoiseSdFile || undefined,
+        vaeModel: vaeFile || undefined,
+        llmModel: llmFile || undefined,
+        clipLModel: clipLFile || undefined,
+        t5xxlModel: t5xxlFile || undefined,
+        clipVisionModel: clipVisionFile || undefined,
         hfFiles: hfFiles.length > 0 ? hfFiles : undefined,
         defaultSteps: groupDefaultSteps,
         defaultCfgScale: groupDefaultCfgScale,
@@ -756,32 +700,19 @@ export const ModelWeightsPage = () => {
         </Body1>
       </Card>
 
-      {/* 操作按钮 */}
+      {/* 模型组管理 */}
       <Card className={styles.section}>
-        <div className={styles.actions}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalM }}>
+          <Title2>模型组管理</Title2>
           <Button
-            icon={<ArrowUploadRegular />}
-            onClick={handleUpload}
-            disabled={!weightsFolder || loading}
+            icon={<AddRegular />}
+            onClick={handleCreateGroup}
+            disabled={loading || !weightsFolder}
             appearance="primary"
           >
-            导入模型组文件夹
+            创建模型组
           </Button>
         </div>
-        {/* 导入进度条 */}
-        {importProgress && (
-          <div style={{ marginTop: tokens.spacingVerticalM }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalXS }}>
-              <Body1>
-                正在导入: {importProgress.fileName || '文件'} ({importProgress.progress}%)
-              </Body1>
-            </div>
-            <ProgressBar value={importProgress.progress} max={100} />
-            <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalXS }}>
-              {formatFileSize(importProgress.copied)} / {formatFileSize(importProgress.total)}
-            </Body1>
-          </div>
-        )}
       </Card>
 
       {/* HF 下载源切换 */}
@@ -848,22 +779,8 @@ export const ModelWeightsPage = () => {
         )}
       </Card>
 
-      {/* 模型组管理 */}
+      {/* 模型组列表 */}
       <Card className={styles.section}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalM }}>
-          <Title2>模型组管理</Title2>
-          <Button
-            icon={<AddRegular />}
-            onClick={handleCreateGroup}
-            disabled={loading || !weightsFolder}
-            appearance="primary"
-          >
-            创建模型组
-          </Button>
-        </div>
-        <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginBottom: tokens.spacingVerticalM }}>
-          模型组用于组合SD模型、VAE模型和LLM/CLIP模型，便于在生成图片时统一使用。
-        </Body1>
         {modelGroups.length === 0 ? (
           <div className={styles.emptyState}>
             <Body1>暂无模型组</Body1>
@@ -1226,7 +1143,7 @@ export const ModelWeightsPage = () => {
         <DialogSurface style={{ minWidth: '600px' }}>
           <DialogTitle>{editingGroup ? '编辑模型组' : '创建模型组'}</DialogTitle>
           <DialogBody>
-            <DialogContent>
+            <DialogContent style={{ maxHeight: '70vh', overflowY: 'auto' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM }}>
                 <Field label="组名称" required>
                   <Input

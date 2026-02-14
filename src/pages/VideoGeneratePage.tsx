@@ -23,8 +23,10 @@ import {
   ImageAddRegular,
   ArrowUploadRegular,
   DismissRegular,
+  ArrowDownloadRegular,
 } from '@fluentui/react-icons';
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../hooks/useAppStore';
 import { ipcInvoke, ipcListen } from '../lib/tauriIpc';
 import { useSharedStyles } from '@/styles/sharedStyles';
@@ -171,6 +173,7 @@ const DEFAULT_NEGATIVE_PROMPT = '色调艳丽，过曝，静态，细节模糊�
 export const VideoGeneratePage = () => {
   const styles = useSharedStyles();
   const localStyles = useLocalStyles();
+  const navigate = useNavigate();
   const { setIsGenerating } = useAppStore();
   const models = useModelGroups('video');
   const device = useDeviceType();
@@ -566,11 +569,19 @@ export const VideoGeneratePage = () => {
                 }
               }}
             >
-              {models.modelGroups.map((group) => (
-                <Option key={group.id} value={group.id} text={group.name}>
-                  {group.name}
-                </Option>
-              ))}
+              {models.modelGroups.map((group) => {
+                const complete = models.isGroupComplete(group.id)
+                return (
+                  <Option 
+                    key={group.id} 
+                    value={group.id} 
+                    text={group.name}
+                    disabled={!complete}
+                  >
+                    {group.name}{!complete ? ' (文件缺失)' : ''}
+                  </Option>
+                )
+              })}
             </Dropdown>
           </Field>
           <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
@@ -578,7 +589,9 @@ export const VideoGeneratePage = () => {
               ? '暂无可用模型组，请先在"模型权重管理"页面创建支持视频生成的模型组'
               : models.selectedGroup
               ? `已选择: ${models.selectedGroup.name}${getModelInfo(models.selectedGroup) ? ` (${getModelInfo(models.selectedGroup)})` : ''}`
-              : '未选择'}
+              : models.modelGroups.some(g => !models.isGroupComplete(g.id))
+              ? '部分模型组文件缺失，请先在"模型权重管理"页面下载缺失文件'
+              : '请选择模型组'}
           </Body1>
 
           {/* 生成模式选择 */}
@@ -694,21 +707,37 @@ export const VideoGeneratePage = () => {
               </Text>
             </div>
             <div style={{ marginBottom: tokens.spacingVerticalM }}>
-              <Field label="推理引擎" hint="选择主要的推理引擎（CUDA/Vulkan/CPU）">
-                <Dropdown
-                  value={getDeviceLabel(device.deviceType)}
-                  selectedOptions={[device.deviceType]}
-                  onOptionSelect={(_, data) => {
-                    if (data.optionValue) {
-                      device.handleDeviceTypeChange(data.optionValue as DeviceType);
-                    }
-                  }}
-                >
-                  <Option disabled={!device.availableEngines.includes('cpu')} value="cpu">CPU</Option>
-                  <Option disabled={!device.availableEngines.includes('vulkan')} value="vulkan">Vulkan</Option>
-                  <Option disabled={!device.availableEngines.includes('cuda')} value="cuda">CUDA</Option>
-                  <Option disabled={!device.availableEngines.includes('rocm')} value="rocm">ROCm</Option>
-                </Dropdown>
+              <Field label="推理引擎" hint={device.availableEngines.length === 0 ? "请先在「SD.cpp 管理」页面下载推理引擎" : "选择主要的推理引擎（CUDA/Vulkan/CPU）"}>
+                {device.availableEngines.length === 0 ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS }}>
+                    <Body1 style={{ color: tokens.colorPaletteRedForeground2, fontStyle: 'italic' }}>
+                      未检测到已安装的推理引擎
+                    </Body1>
+                    <Button
+                      size="small"
+                      appearance="primary"
+                      icon={<ArrowDownloadRegular />}
+                      onClick={() => navigate('/sdcpp')}
+                    >
+                      前往下载
+                    </Button>
+                  </div>
+                ) : (
+                  <Dropdown
+                    value={getDeviceLabel(device.deviceType)}
+                    selectedOptions={[device.deviceType]}
+                    onOptionSelect={(_, data) => {
+                      if (data.optionValue) {
+                        device.handleDeviceTypeChange(data.optionValue as DeviceType);
+                      }
+                    }}
+                  >
+                    <Option disabled={!device.availableEngines.includes('cpu')} value="cpu">CPU</Option>
+                    <Option disabled={!device.availableEngines.includes('vulkan')} value="vulkan">Vulkan</Option>
+                    <Option disabled={!device.availableEngines.includes('cuda')} value="cuda">CUDA</Option>
+                    <Option disabled={!device.availableEngines.includes('rocm')} value="rocm">ROCm</Option>
+                  </Dropdown>
+                )}
               </Field>
             </div>
             <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginBottom: tokens.spacingVerticalM }}>

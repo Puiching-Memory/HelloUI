@@ -441,53 +441,63 @@ fn build_generate_args(
     // Model paths
     if !model_paths_injected {
         if let Some(group_id) = params["groupId"].as_str() {
-        // Load model group to get model paths
         let groups_path = state::get_model_groups_path(Some(&weights_folder));
         if groups_path.exists() {
             let data = std::fs::read_to_string(&groups_path).map_err(|e| e.to_string())?;
             let groups: Vec<serde_json::Value> =
                 serde_json::from_str(&data).map_err(|e| e.to_string())?;
             if let Some(group) = groups.iter().find(|g| g["id"].as_str() == Some(group_id)) {
-                // 独立扩散模型（如 Z-Image）使用 --diffusion-model
+                let group_folder = group["folder"].as_str().unwrap_or("");
+                let resolve_path = |model_path: &str| -> String {
+                    if model_path.is_empty() {
+                        return String::new();
+                    }
+                    if group_folder.is_empty() {
+                        resolve_model_path_with_fallback(model_path, &weights_folder)
+                    } else {
+                        state::resolve_model_path_in_group(model_path, &weights_folder, group_folder)
+                    }
+                };
                 if let Some(diff_model) = group["diffusionModel"].as_str() {
                     if !diff_model.is_empty() {
-                        let resolved = resolve_model_path_with_fallback(diff_model, &weights_folder);
                         args.push("--diffusion-model".to_string());
-                        args.push(resolved);
+                        args.push(resolve_path(diff_model));
                     }
                 }
-                // 完整 SD 模型使用 -m
                 if let Some(sd_model) = group["sdModel"].as_str() {
-                    let resolved = resolve_model_path_with_fallback(sd_model, &weights_folder);
-                    args.push("-m".to_string());
-                    args.push(resolved);
+                    if !sd_model.is_empty() {
+                        args.push("-m".to_string());
+                        args.push(resolve_path(sd_model));
+                    }
                 }
                 if let Some(vae) = group["vaeModel"].as_str() {
                     if !vae.is_empty() {
-                        let resolved = resolve_model_path_with_fallback(vae, &weights_folder);
                         args.push("--vae".to_string());
-                        args.push(resolved);
+                        args.push(resolve_path(vae));
                     }
                 }
                 if let Some(llm) = group["llmModel"].as_str() {
                     if !llm.is_empty() {
-                        let resolved = resolve_model_path_with_fallback(llm, &weights_folder);
                         args.push("--llm".to_string());
-                        args.push(resolved);
+                        args.push(resolve_path(llm));
                     }
                 }
                 if let Some(clip_l) = group["clipLModel"].as_str() {
                     if !clip_l.is_empty() {
-                        let resolved = resolve_model_path_with_fallback(clip_l, &weights_folder);
                         args.push("--clip_l".to_string());
-                        args.push(resolved);
+                        args.push(resolve_path(clip_l));
                     }
                 }
                 if let Some(t5xxl) = group["t5xxlModel"].as_str() {
                     if !t5xxl.is_empty() {
-                        let resolved = resolve_model_path_with_fallback(t5xxl, &weights_folder);
                         args.push("--t5xxl".to_string());
-                        args.push(resolved);
+                        args.push(resolve_path(t5xxl));
+                    }
+                }
+                if let Some(clip_vision) = group["clipVisionModel"].as_str() {
+                    if !clip_vision.is_empty() {
+                        args.push("--clip-vision".to_string());
+                        args.push(resolve_path(clip_vision));
                     }
                 }
             }

@@ -68,25 +68,13 @@ pub async fn models_download_group_files(
         return Ok(serde_json::json!({ "success": true }));
     }
 
-    // Determine target folder based on sdModel path
-    let target_folder = if let Some(sd_model) = group["sdModel"].as_str() {
-        let abs_path = Path::new(&models_folder).join(sd_model);
-        abs_path
-            .parent()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| {
-                Path::new(&models_folder)
-                    .join(&group_id)
-                    .to_string_lossy()
-                    .to_string()
-            })
-    } else {
-        let name = group["name"].as_str().unwrap_or(&group_id);
-        Path::new(&models_folder)
-            .join(name)
-            .to_string_lossy()
-            .to_string()
-    };
+    let group_folder = group["folder"].as_str().unwrap_or_else(|| {
+        group["name"].as_str().unwrap_or(&group_id)
+    });
+    let target_folder = Path::new(&models_folder)
+        .join(group_folder)
+        .to_string_lossy()
+        .to_string();
 
     let mirror = mirror_id.unwrap_or_else(|| state.hf_mirror_id.lock().unwrap().clone());
     let base_url = match mirror.as_str() {
@@ -125,7 +113,7 @@ pub async fn models_download_group_files(
             .map_err(|e| e.to_string())?;
 
         if !response.status().is_success() {
-            return Err(format!("HTTP {}: download failed for {}", response.status(), file));
+            return Err(format!("HTTP {}: download failed\nURL: {}", response.status(), url));
         }
 
         let total_bytes = response.content_length().unwrap_or(0);

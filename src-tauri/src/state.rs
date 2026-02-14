@@ -82,7 +82,23 @@ pub fn resolve_model_path(model_path: &str, base_folder: &str) -> String {
         model_path.to_string()
     } else {
         let full_path = std::path::Path::new(base_folder).join(model_path);
-        // Use 'dunce' if we want to ensure we don't have the UNC prefix when absolute
+        dunce::simplified(&full_path).to_string_lossy().to_string()
+    }
+}
+
+/// Resolve a model file path within a model group folder
+/// If the path is already absolute, return as-is
+/// If the path contains path separators, treat as relative to models folder
+/// Otherwise, treat as filename within the group's folder
+pub fn resolve_model_path_in_group(model_path: &str, models_folder: &str, group_folder: &str) -> String {
+    let path = std::path::Path::new(model_path);
+    if path.is_absolute() {
+        model_path.to_string()
+    } else if model_path.contains('/') || model_path.contains('\\') {
+        let full_path = std::path::Path::new(models_folder).join(model_path);
+        dunce::simplified(&full_path).to_string_lossy().to_string()
+    } else {
+        let full_path = std::path::Path::new(models_folder).join(group_folder).join(model_path);
         dunce::simplified(&full_path).to_string_lossy().to_string()
     }
 }

@@ -49,6 +49,7 @@ export interface WeightFile {
 export interface ModelGroup {
   id: string
   name: string
+  folder: string
   taskType?: TaskType // 任务类型：generate（图片生成）、edit（图片编辑）、video（视频生成）、upscale（图像超分辨率）
   sdModel?: string // SD/基础模型路径（图片或视频）
   diffusionModel?: string // 独立扩散模型路径（如 Z-Image，使用 --diffusion-model 而非 -m）
