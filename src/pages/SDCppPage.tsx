@@ -58,7 +58,7 @@ const useStyles = makeStyles({
   },
   summaryGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(3, 1fr)',
+    gridTemplateColumns: 'repeat(2, 1fr)',
     gap: tokens.spacingVerticalL,
   },
   engineCard: {
@@ -226,7 +226,7 @@ interface EngineSummary {
 function getAssetLabel(asset: SDCppReleaseAsset): string {
   if (asset.deviceType === 'cuda') return 'CUDA 12';
   if (asset.deviceType === 'vulkan') return 'Vulkan';
-  if (asset.deviceType === 'cudart') return 'CUDA Runtime';
+  if (asset.deviceType === 'rocm') return 'ROCm';
   if (asset.cpuVariant === 'avx2') return 'CPU (AVX2)';
   if (asset.cpuVariant === 'avx') return 'CPU (AVX)';
   if (asset.cpuVariant === 'avx512') return 'CPU (AVX512)';
@@ -235,8 +235,9 @@ function getAssetLabel(asset: SDCppReleaseAsset): string {
 }
 
 function getAssetBadgeColor(asset: SDCppReleaseAsset): 'brand' | 'success' | 'warning' | 'informative' {
-  if (asset.deviceType === 'cuda' || asset.deviceType === 'cudart') return 'success';
+  if (asset.deviceType === 'cuda') return 'success';
   if (asset.deviceType === 'vulkan') return 'brand';
+  if (asset.deviceType === 'rocm') return 'warning';
   return 'informative';
 }
 
@@ -257,7 +258,7 @@ export const SDCppPage = () => {
   const [engineFolderInput, setEngineFolderInput] = useState<string>('');
   const [files, setFiles] = useState<EngineFile[]>([]);
   const [deviceVersions, setDeviceVersions] = useState<Record<DeviceType, string | null>>({
-    cpu: null, vulkan: null, cuda: null,
+    cpu: null, vulkan: null, cuda: null, rocm: null,
   });
   const [loading, setLoading] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -347,7 +348,7 @@ export const SDCppPage = () => {
     if (!engineFolder) return;
     setLoading(true);
     try {
-      const deviceTypes: DeviceType[] = ['cpu', 'vulkan', 'cuda'];
+      const deviceTypes: DeviceType[] = ['cpu', 'vulkan', 'cuda', 'rocm'];
       const allFilesPromises = deviceTypes.map(async (deviceType) => {
         try {
           const result = await ipcInvoke('sdcpp:list-files', engineFolder, deviceType);
@@ -364,7 +365,7 @@ export const SDCppPage = () => {
 
       const results = await Promise.all(allFilesPromises);
       const allFiles = results.flatMap(r => r.files);
-      const versions: Record<DeviceType, string | null> = { cpu: null, vulkan: null, cuda: null };
+      const versions: Record<DeviceType, string | null> = { cpu: null, vulkan: null, cuda: null, rocm: null };
       results.forEach(r => { versions[r.deviceType] = r.version; });
       allFiles.sort((a, b) => b.modified - a.modified);
 
@@ -373,7 +374,7 @@ export const SDCppPage = () => {
     } catch (error) {
       console.error('Failed to load file list:', error);
       setFiles([]);
-      setDeviceVersions({ cpu: null, vulkan: null, cuda: null });
+      setDeviceVersions({ cpu: null, vulkan: null, cuda: null, rocm: null });
     } finally {
       setLoading(false);
     }
@@ -549,7 +550,7 @@ export const SDCppPage = () => {
     noavx: '无AVX',
   };
 
-  const engineSummaries: EngineSummary[] = (['cpu', 'vulkan', 'cuda'] as const).map((deviceType) => {
+  const engineSummaries: EngineSummary[] = (['cpu', 'vulkan', 'cuda', 'rocm'] as const).map((deviceType) => {
     const deviceFiles = files.filter(f => f.deviceType === deviceType);
 
     if (deviceType === 'cpu') {
@@ -576,7 +577,11 @@ export const SDCppPage = () => {
     }
 
     if (deviceType === 'cuda') {
-      const cudartFiles = deviceFiles.filter(f => f.name.toLowerCase().includes('cudart'));
+      const cudaRuntimeFiles = ['cudart64', 'cublas64', 'cublasLt64'];
+      const cudartFiles = deviceFiles.filter(f => {
+        const lower = f.name.toLowerCase();
+        return cudaRuntimeFiles.some(ext => lower.includes(ext.toLowerCase()));
+      });
       return {
         type: deviceType,
         label: 'CUDA',

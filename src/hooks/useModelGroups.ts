@@ -46,6 +46,7 @@ export function useModelGroups(taskType: TaskType) {
  */
 export function useDeviceType() {
   const [deviceType, setDeviceType] = useState<DeviceType>('cuda')
+  const [availableEngines, setAvailableEngines] = useState<DeviceType[]>([])
 
   const loadDeviceType = useCallback(async () => {
     try {
@@ -56,9 +57,20 @@ export function useDeviceType() {
     }
   }, [])
 
+  const loadAvailableEngines = useCallback(async () => {
+    try {
+      const engines = await ipcInvoke('system:get-available-engines')
+      setAvailableEngines(engines as DeviceType[])
+    } catch (error) {
+      console.error('Failed to load available engines:', error)
+      setAvailableEngines([])
+    }
+  }, [])
+
   useEffect(() => {
     loadDeviceType().catch(console.error)
-  }, [loadDeviceType])
+    loadAvailableEngines().catch(console.error)
+  }, [loadDeviceType, loadAvailableEngines])
 
   const handleDeviceTypeChange = useCallback(async (value: DeviceType) => {
     setDeviceType(value)
@@ -69,5 +81,5 @@ export function useDeviceType() {
     }
   }, [])
 
-  return { deviceType, setDeviceType, handleDeviceTypeChange }
+  return { deviceType, setDeviceType, handleDeviceTypeChange, availableEngines }
 }

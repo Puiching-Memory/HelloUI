@@ -14,6 +14,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // system
             commands::system::app_get_version,
+            commands::system::get_available_engines,
             commands::system::devtools_toggle,
             commands::system::aliyun_api_call,
             // dialog

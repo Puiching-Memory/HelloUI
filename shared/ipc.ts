@@ -4,6 +4,7 @@ import type { DeviceType, ModelGroup, WeightFile, GenerateImageParams, Generated
 export const IPC_INVOKE_CHANNELS = [
   'aliyun-api:call',
   'app:get-version',
+  'system:get-available-engines',
   'devtools:toggle',
   'dialog:open-image',
   'edit-image:read-image-base64',
@@ -138,6 +139,7 @@ export interface IPCRequestMap {
 
   'devtools:toggle': { request: void; response: { success: boolean; isOpen?: boolean; error?: string } }
   'app:get-version': { request: void; response: string }
+  'system:get-available-engines': { request: void; response: string[] }
 
   'aliyun-api:call': { request: { method: string; url: string; headers?: Record<string, string>; body?: unknown }; response: { status: number; statusText: string; data?: unknown; error?: string } }
 

@@ -11,7 +11,7 @@ import {
   Textarea,
   Dropdown,
   Option,
-  Input,
+  SpinButton,
   Checkbox,
   Text,
 } from '@fluentui/react-components';
@@ -89,7 +89,7 @@ export const EditImagePage = () => {
   const localStyles = useLocalStyles();
   const { setIsGenerating } = useAppStore();
   const { modelGroups, loading, selectedGroupId, setSelectedGroupId, selectedGroup, reloadModelGroups } = useModelGroups('edit');
-  const { deviceType, handleDeviceTypeChange } = useDeviceType();
+  const { deviceType, handleDeviceTypeChange, availableEngines } = useDeviceType();
   const cli = useCliOutput('generate:cli-output');
   const msgDialog = useMessageDialog();
   const [prompt, setPrompt] = useState<string>('');
@@ -97,8 +97,6 @@ export const EditImagePage = () => {
   const [steps, setSteps] = useState<number>(20);
   const [width, setWidth] = useState<number>(512);
   const [height, setHeight] = useState<number>(512);
-  const [widthInput, setWidthInput] = useState<string>('512');
-  const [heightInput, setHeightInput] = useState<string>('512');
   const [cfgScale, setCfgScale] = useState<number>(7.0);
   const [generating, setGenerating] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
@@ -110,10 +108,8 @@ export const EditImagePage = () => {
   const [samplingMethod, setSamplingMethod] = useState<string>('euler_a');
   const [scheduler, setScheduler] = useState<string>('discrete');
   const [seed, setSeed] = useState<number>(-1); // -1 表示随机种子
-  const [seedInput, setSeedInput] = useState<string>('');
   const [batchCount, setBatchCount] = useState<number>(1);
   const [threads, setThreads] = useState<number>(-1); // -1 表示自动
-  const [threadsInput, setThreadsInput] = useState<string>('');
   const [preview, setPreview] = useState<string>('proj');
   const [previewInterval, setPreviewInterval] = useState<number>(1);
   const [verbose, setVerbose] = useState<boolean>(false);
@@ -283,9 +279,9 @@ export const EditImagePage = () => {
     <div className={styles.container}>
       <Title1>图片编辑</Title1>
 
-      {/* 浮动控制面板 - 固定在底部 */}
-      <div className={styles.floatingControlPanel}>
-        <div className={styles.actions}>
+      {/* 浮动控制面板 - 固定在底部，集成 CLI 输出 */}
+      <div className={styles.floatingControlPanelWithCli}>
+        <div className={styles.floatingControlPanelActions}>
           {generating ? (
             <Button
               onClick={handleCancelGenerate}
@@ -319,6 +315,17 @@ export const EditImagePage = () => {
             刷新模型组列表
           </Button>
         </div>
+        <CliOutputPanel
+          cliOutput={cli.cliOutput}
+          cliOutputExpanded={cli.cliOutputExpanded}
+          unreadCount={cli.unreadCount}
+          copySuccess={cli.copySuccess}
+          cliOutputRef={cli.cliOutputRef}
+          onToggleExpanded={cli.toggleExpanded}
+          onCopy={cli.handleCopyOutput}
+          onExport={cli.handleExportOutput}
+          variant="floating"
+        />
       </div>
 
       {/* 预览区域 - 在上方，占据主要区域 */}
@@ -374,18 +381,6 @@ export const EditImagePage = () => {
           )}
         </div>
       </Card>
-
-      {/* CLI 输出窗口 - 在第二个位置 */}
-      <CliOutputPanel
-        cliOutput={cli.cliOutput}
-        cliOutputExpanded={cli.cliOutputExpanded}
-        unreadCount={cli.unreadCount}
-        copySuccess={cli.copySuccess}
-        cliOutputRef={cli.cliOutputRef}
-        onToggleExpanded={cli.toggleExpanded}
-        onCopy={cli.handleCopyOutput}
-        onExport={cli.handleExportOutput}
-      />
 
       {/* 配置区域 - 在下方 */}
       <Card className={styles.configCard}>
@@ -455,11 +450,9 @@ export const EditImagePage = () => {
                     }
                     if (selectedGroup.defaultWidth !== undefined) {
                       setWidth(selectedGroup.defaultWidth);
-                      setWidthInput(selectedGroup.defaultWidth.toString());
                     }
                     if (selectedGroup.defaultHeight !== undefined) {
                       setHeight(selectedGroup.defaultHeight);
-                      setHeightInput(selectedGroup.defaultHeight.toString());
                     }
                     if (selectedGroup.defaultSamplingMethod !== undefined) {
                       setSamplingMethod(selectedGroup.defaultSamplingMethod);
@@ -470,10 +463,8 @@ export const EditImagePage = () => {
                     if (selectedGroup.defaultSeed !== undefined) {
                       if (selectedGroup.defaultSeed >= 0) {
                         setSeed(selectedGroup.defaultSeed);
-                        setSeedInput(selectedGroup.defaultSeed.toString());
                       } else {
                         setSeed(-1);
-                        setSeedInput('');
                       }
                     }
                   }
@@ -563,9 +554,10 @@ export const EditImagePage = () => {
                     }
                   }}
                 >
-                  <Option value="cpu">CPU</Option>
-                  <Option value="vulkan">Vulkan</Option>
-                  <Option value="cuda">CUDA</Option>
+                  <Option disabled={!availableEngines.includes('cpu')} value="cpu">CPU</Option>
+                  <Option disabled={!availableEngines.includes('vulkan')} value="vulkan">Vulkan</Option>
+                  <Option disabled={!availableEngines.includes('cuda')} value="cuda">CUDA</Option>
+                  <Option disabled={!availableEngines.includes('rocm')} value="rocm">ROCm</Option>
                 </Dropdown>
               </Field>
             </div>
@@ -707,107 +699,54 @@ export const EditImagePage = () => {
           </Title2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: tokens.spacingHorizontalM }}>
             <Field label="采样步数" hint="默认: 20">
-              <Input
-                type="number"
-                value={steps.toString()}
-                onChange={(_, data) => {
-                  const val = parseInt(data.value) || 20;
-                  setSteps(Math.max(1, Math.min(100, val)));
-                }}
+              <SpinButton
+                value={steps}
+                onChange={(_, data) => setSteps(data.value ?? 20)}
                 min={1}
                 max={100}
+                step={1}
               />
             </Field>
             <Field label="CFG Scale" hint="默认: 7.0">
-              <Input
-                type="number"
-                value={cfgScale.toString()}
-                onChange={(_, data) => {
-                  const val = parseFloat(data.value) || 7.0;
-                  setCfgScale(Math.max(0.1, Math.min(30, val)));
-                }}
+              <SpinButton
+                value={cfgScale}
+                onChange={(_, data) => setCfgScale(data.value ?? 7.0)}
                 min={0.1}
                 max={30}
                 step={0.1}
               />
             </Field>
             <Field label="Flow Shift" hint="默认: 3.0 (仅适用于 Qwen 2511)">
-              <Input
-                type="number"
-                value={flowShift.toString()}
-                onChange={(_, data) => {
-                  const val = parseFloat(data.value) || 3.0;
-                  setFlowShift(Math.max(0.1, Math.min(10, val)));
-                }}
+              <SpinButton
+                value={flowShift}
+                onChange={(_, data) => setFlowShift(data.value ?? 3.0)}
                 min={0.1}
                 max={10}
                 step={0.1}
               />
             </Field>
-            <Field label="图片宽度" hint="默认: 512">
-              <Input
-                type="number"
-                value={widthInput}
+            <Field label="图片宽度" hint="默认: 512，自动对齐到 16 的倍数">
+              <SpinButton
+                value={width}
                 onChange={(_, data) => {
-                  // 允许用户自由输入，不立即限制
-                  setWidthInput(data.value);
-                  const val = parseInt(data.value);
-                  // 如果输入是有效数字且在范围内，更新实际值
-                  if (!isNaN(val) && val >= 64 && val <= 2048) {
-                    setWidth(val);
-                  }
-                }}
-                onBlur={() => {
-                  const val = parseInt(widthInput);
-                  if (isNaN(val) || val < 64) {
-                    // 无效值或小于最小值，重置为默认值
-                    setWidthInput('512');
-                    setWidth(512);
-                  } else if (val > 2048) {
-                    // 超过最大值，设置为最大值
-                    setWidthInput('2048');
-                    setWidth(2048);
-                  } else {
-                    // 对齐到16的倍数
-                    const aligned = Math.round(val / 16) * 16;
-                    setWidthInput(aligned.toString());
-                    setWidth(aligned);
-                  }
+                  const val = data.value ?? 512;
+                  const aligned = Math.round(val / 16) * 16;
+                  const clamped = Math.max(64, Math.min(2048, aligned));
+                  setWidth(clamped);
                 }}
                 min={64}
                 max={2048}
                 step={16}
               />
             </Field>
-            <Field label="图片高度" hint="默认: 512">
-              <Input
-                type="number"
-                value={heightInput}
+            <Field label="图片高度" hint="默认: 512，自动对齐到 16 的倍数">
+              <SpinButton
+                value={height}
                 onChange={(_, data) => {
-                  // 允许用户自由输入，不立即限制
-                  setHeightInput(data.value);
-                  const val = parseInt(data.value);
-                  // 如果输入是有效数字且在范围内，更新实际值
-                  if (!isNaN(val) && val >= 64 && val <= 2048) {
-                    setHeight(val);
-                  }
-                }}
-                onBlur={() => {
-                  const val = parseInt(heightInput);
-                  if (isNaN(val) || val < 64) {
-                    // 无效值或小于最小值，重置为默认值
-                    setHeightInput('512');
-                    setHeight(512);
-                  } else if (val > 2048) {
-                    // 超过最大值，设置为最大值
-                    setHeightInput('2048');
-                    setHeight(2048);
-                  } else {
-                    // 对齐到16的倍数
-                    const aligned = Math.round(val / 16) * 16;
-                    setHeightInput(aligned.toString());
-                    setHeight(aligned);
-                  }
+                  const val = data.value ?? 512;
+                  const aligned = Math.round(val / 16) * 16;
+                  const clamped = Math.max(64, Math.min(2048, aligned));
+                  setHeight(clamped);
                 }}
                 min={64}
                 max={2048}
@@ -859,42 +798,20 @@ export const EditImagePage = () => {
                 <Option value="lcm">LCM</Option>
               </Dropdown>
             </Field>
-            <Field label="种子" hint="留空或-1表示随机">
-              <Input
-                type="number"
-                value={seedInput}
-                placeholder="随机"
-                onChange={(_, data) => {
-                  setSeedInput(data.value);
-                  const val = parseInt(data.value);
-                  if (!isNaN(val) && val >= 0) {
-                    setSeed(val);
-                  } else {
-                    setSeed(-1);
-                  }
-                }}
-                onBlur={() => {
-                  const val = parseInt(seedInput);
-                  if (isNaN(val) || val < 0) {
-                    setSeedInput('');
-                    setSeed(-1);
-                  } else {
-                    setSeed(val);
-                  }
-                }}
-                min={0}
+            <Field label="种子" hint="-1 表示随机">
+              <SpinButton
+                value={seed}
+                onChange={(_, data) => setSeed(data.value ?? -1)}
+                min={-1}
               />
             </Field>
             <Field label="批次数量" hint="默认: 1">
-              <Input
-                type="number"
-                value={batchCount.toString()}
-                onChange={(_, data) => {
-                  const val = parseInt(data.value) || 1;
-                  setBatchCount(Math.max(1, Math.min(10, val)));
-                }}
+              <SpinButton
+                value={batchCount}
+                onChange={(_, data) => setBatchCount(data.value ?? 1)}
                 min={1}
                 max={10}
+                step={1}
               />
             </Field>
           </div>
@@ -913,30 +830,11 @@ export const EditImagePage = () => {
           {/* 更多高级选项 */}
           {showAdvanced && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: tokens.spacingHorizontalM, marginTop: tokens.spacingVerticalM }}>
-              <Field label="线程数" hint="留空或-1表示自动">
-                <Input
-                  type="number"
-                  value={threadsInput}
-                  placeholder="自动"
-                  onChange={(_, data) => {
-                    setThreadsInput(data.value);
-                    const val = parseInt(data.value);
-                    if (!isNaN(val) && val > 0) {
-                      setThreads(val);
-                    } else {
-                      setThreads(-1);
-                    }
-                  }}
-                  onBlur={() => {
-                    const val = parseInt(threadsInput);
-                    if (isNaN(val) || val <= 0) {
-                      setThreadsInput('');
-                      setThreads(-1);
-                    } else {
-                      setThreads(val);
-                    }
-                  }}
-                  min={1}
+              <Field label="线程数" hint="-1 表示自动">
+                <SpinButton
+                  value={threads}
+                  onChange={(_, data) => setThreads(data.value ?? -1)}
+                  min={-1}
                 />
               </Field>
               <Field label="预览方法" hint="默认: proj">
@@ -957,15 +855,12 @@ export const EditImagePage = () => {
               </Field>
               {preview !== 'none' && (
                 <Field label="预览间隔" hint="默认: 1">
-                  <Input
-                    type="number"
-                    value={previewInterval.toString()}
-                    onChange={(_, data) => {
-                      const val = parseInt(data.value) || 1;
-                      setPreviewInterval(Math.max(1, Math.min(100, val)));
-                    }}
+                  <SpinButton
+                    value={previewInterval}
+                    onChange={(_, data) => setPreviewInterval(data.value ?? 1)}
                     min={1}
                     max={100}
+                    step={1}
                   />
                 </Field>
               )}

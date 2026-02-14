@@ -12,6 +12,7 @@ import {
   Dropdown,
   Option,
   Input,
+  SpinButton,
   Checkbox,
   MessageBar,
   MessageBarBody,
@@ -399,12 +400,11 @@ export const AliyunTongyiVideoPage = () => {
                 <Option value="15">15 秒</Option>
               </Dropdown>
             </Field>
-            <Field label="随机种子 (可选)" className={styles.field}>
-              <Input
-                type="number"
-                value={seed?.toString() || ''}
-                onChange={(_, data) => setSeed(data.value ? parseInt(data.value) : undefined)}
-                placeholder="留空则随机"
+            <Field label="随机种子 (可选)" className={styles.field} hint="-1 表示随机">
+              <SpinButton
+                value={seed ?? -1}
+                onChange={(_, data) => setSeed(data.value && data.value >= 0 ? data.value : undefined)}
+                min={-1}
               />
             </Field>
           </div>

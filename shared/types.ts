@@ -7,7 +7,7 @@
 /**
  * 设备类型
  */
-export type DeviceType = 'cpu' | 'vulkan' | 'cuda'
+export type DeviceType = 'cpu' | 'vulkan' | 'cuda' | 'rocm'
 
 /**
  * 任务类型
@@ -223,7 +223,7 @@ export interface SDCppReleaseAsset {
   size: number
   downloadUrl: string
   /** 资产对应的设备类型 */
-  deviceType: DeviceType | 'cudart' | 'unknown'
+  deviceType: DeviceType | 'unknown'
   /** CPU 子变体 */
   cpuVariant?: 'avx' | 'avx2' | 'avx512' | 'noavx'
 }

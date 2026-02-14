@@ -11,7 +11,7 @@ import {
   Textarea,
   Dropdown,
   Option,
-  Input,
+  SpinButton,
   Checkbox,
   Text,
   TabList,
@@ -183,8 +183,6 @@ export const VideoGeneratePage = () => {
   const [steps, setSteps] = useState<number>(20);
   const [width, setWidth] = useState<number>(512);
   const [height, setHeight] = useState<number>(512);
-  const [widthInput, setWidthInput] = useState<string>('512');
-  const [heightInput, setHeightInput] = useState<string>('512');
   const [cfgScale, setCfgScale] = useState<number>(7.0);
   const [generating, setGenerating] = useState(false);
   const [generatedVideo, setGeneratedVideo] = useState<string | null>(null);
@@ -205,10 +203,8 @@ export const VideoGeneratePage = () => {
   const [highNoiseSamplingMethod, setHighNoiseSamplingMethod] = useState<string | undefined>(undefined);
   const [scheduler, setScheduler] = useState<string>('discrete');
   const [seed, setSeed] = useState<number>(-1);
-  const [seedInput, setSeedInput] = useState<string>('');
   const [batchCount, setBatchCount] = useState<number>(1);
   const [threads, setThreads] = useState<number>(-1);
-  const [threadsInput, setThreadsInput] = useState<string>('');
   const [preview, setPreview] = useState<string>('proj');
   const [previewInterval, setPreviewInterval] = useState<number>(1);
   const [verbose, setVerbose] = useState<boolean>(false);
@@ -237,11 +233,9 @@ export const VideoGeneratePage = () => {
         if (group.defaultCfgScale) setCfgScale(group.defaultCfgScale);
         if (group.defaultWidth) {
           setWidth(group.defaultWidth);
-          setWidthInput(group.defaultWidth.toString());
         }
         if (group.defaultHeight) {
           setHeight(group.defaultHeight);
-          setHeightInput(group.defaultHeight.toString());
         }
         if (group.defaultFlowShift) setFlowShift(group.defaultFlowShift);
       }
@@ -386,9 +380,9 @@ export const VideoGeneratePage = () => {
     <div className={styles.container}>
       <Title1>视频生成</Title1>
 
-      {/* 浮动控制面板 - 固定在底部 */}
-      <div className={styles.floatingControlPanel}>
-        <div className={styles.actions}>
+      {/* 浮动控制面板 - 固定在底部，集成 CLI 输出 */}
+      <div className={styles.floatingControlPanelWithCli}>
+        <div className={styles.floatingControlPanelActions}>
           {generating ? (
             <Button
               onClick={handleCancelGenerate}
@@ -422,6 +416,18 @@ export const VideoGeneratePage = () => {
             刷新模型组列表
           </Button>
         </div>
+        <CliOutputPanel
+          cliOutput={cli.cliOutput}
+          cliOutputExpanded={cli.cliOutputExpanded}
+          unreadCount={cli.unreadCount}
+          copySuccess={cli.copySuccess}
+          cliOutputRef={cli.cliOutputRef}
+          onToggleExpanded={cli.toggleExpanded}
+          onCopy={cli.handleCopyOutput}
+          onExport={cli.handleExportOutput}
+          emptyMessage="暂无输出，开始生成后将显示 SD.cpp 的 CLI 输出"
+          variant="floating"
+        />
       </div>
 
       {/* 预览区域 */}
@@ -500,19 +506,6 @@ export const VideoGeneratePage = () => {
         </div>
       </Card>
 
-      {/* CLI 输出窗口 */}
-      <CliOutputPanel
-        cliOutput={cli.cliOutput}
-        cliOutputExpanded={cli.cliOutputExpanded}
-        unreadCount={cli.unreadCount}
-        copySuccess={cli.copySuccess}
-        cliOutputRef={cli.cliOutputRef}
-        onToggleExpanded={cli.toggleExpanded}
-        onCopy={cli.handleCopyOutput}
-        onExport={cli.handleExportOutput}
-        emptyMessage="暂无输出，开始生成后将显示 SD.cpp 的 CLI 输出"
-      />
-
       {/* 配置区域 */}
       <Card className={styles.configCard}>
         <Title2>生成配置</Title2>
@@ -537,11 +530,9 @@ export const VideoGeneratePage = () => {
                     }
                     if (group.defaultWidth !== undefined) {
                       setWidth(group.defaultWidth);
-                      setWidthInput(group.defaultWidth.toString());
                     }
                     if (group.defaultHeight !== undefined) {
                       setHeight(group.defaultHeight);
-                      setHeightInput(group.defaultHeight.toString());
                     }
                     if (group.defaultSamplingMethod !== undefined) {
                       setSamplingMethod(group.defaultSamplingMethod);
@@ -567,10 +558,8 @@ export const VideoGeneratePage = () => {
                     if (group.defaultSeed !== undefined) {
                       if (group.defaultSeed >= 0) {
                         setSeed(group.defaultSeed);
-                        setSeedInput(group.defaultSeed.toString());
                       } else {
                         setSeed(-1);
-                        setSeedInput('');
                       }
                     }
                   }
@@ -678,27 +667,21 @@ export const VideoGeneratePage = () => {
           {/* 视频生成特有参数 */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: tokens.spacingHorizontalM }}>
             <Field label="视频帧数" hint="默认: 16">
-              <Input
-                type="number"
-                value={frames.toString()}
-                onChange={(_, data) => {
-                  const val = parseInt(data.value) || 16;
-                  setFrames(Math.max(1, Math.min(128, val)));
-                }}
+              <SpinButton
+                value={frames}
+                onChange={(_, data) => setFrames(data.value ?? 16)}
                 min={1}
                 max={128}
+                step={1}
               />
             </Field>
             <Field label="帧率 (FPS)" hint="默认: 8">
-              <Input
-                type="number"
-                value={fps.toString()}
-                onChange={(_, data) => {
-                  const val = parseInt(data.value) || 8;
-                  setFps(Math.max(1, Math.min(60, val)));
-                }}
+              <SpinButton
+                value={fps}
+                onChange={(_, data) => setFps(data.value ?? 8)}
                 min={1}
                 max={60}
+                step={1}
               />
             </Field>
           </div>
@@ -721,9 +704,10 @@ export const VideoGeneratePage = () => {
                     }
                   }}
                 >
-                  <Option value="cpu">CPU</Option>
-                  <Option value="vulkan">Vulkan</Option>
-                  <Option value="cuda">CUDA</Option>
+                  <Option disabled={!device.availableEngines.includes('cpu')} value="cpu">CPU</Option>
+                  <Option disabled={!device.availableEngines.includes('vulkan')} value="vulkan">Vulkan</Option>
+                  <Option disabled={!device.availableEngines.includes('cuda')} value="cuda">CUDA</Option>
+                  <Option disabled={!device.availableEngines.includes('rocm')} value="rocm">ROCm</Option>
                 </Dropdown>
               </Field>
             </div>
@@ -823,84 +807,45 @@ export const VideoGeneratePage = () => {
           </Title2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: tokens.spacingHorizontalM }}>
             <Field label="采样步数" hint="默认: 20">
-              <Input
-                type="number"
-                value={steps.toString()}
-                onChange={(_, data) => {
-                  const val = parseInt(data.value) || 20;
-                  setSteps(Math.max(1, Math.min(100, val)));
-                }}
+              <SpinButton
+                value={steps}
+                onChange={(_, data) => setSteps(data.value ?? 20)}
                 min={1}
                 max={100}
+                step={1}
               />
             </Field>
             <Field label="CFG Scale" hint="默认: 7.0">
-              <Input
-                type="number"
-                value={cfgScale.toString()}
-                onChange={(_, data) => {
-                  const val = parseFloat(data.value) || 7.0;
-                  setCfgScale(Math.max(0.1, Math.min(30, val)));
-                }}
+              <SpinButton
+                value={cfgScale}
+                onChange={(_, data) => setCfgScale(data.value ?? 7.0)}
                 min={0.1}
                 max={30}
                 step={0.1}
               />
             </Field>
-            <Field label="视频宽度" hint="默认: 512">
-              <Input
-                type="number"
-                value={widthInput}
+            <Field label="视频宽度" hint="默认: 512，自动对齐到 16 的倍数">
+              <SpinButton
+                value={width}
                 onChange={(_, data) => {
-                  setWidthInput(data.value);
-                  const val = parseInt(data.value);
-                  if (!isNaN(val) && val >= 64 && val <= 2048) {
-                    setWidth(val);
-                  }
-                }}
-                onBlur={() => {
-                  const val = parseInt(widthInput);
-                  if (isNaN(val) || val < 64) {
-                    setWidthInput('512');
-                    setWidth(512);
-                  } else if (val > 2048) {
-                    setWidthInput('2048');
-                    setWidth(2048);
-                  } else {
-                    const aligned = Math.round(val / 16) * 16;
-                    setWidthInput(aligned.toString());
-                    setWidth(aligned);
-                  }
+                  const val = data.value ?? 512;
+                  const aligned = Math.round(val / 16) * 16;
+                  const clamped = Math.max(64, Math.min(2048, aligned));
+                  setWidth(clamped);
                 }}
                 min={64}
                 max={2048}
                 step={16}
               />
             </Field>
-            <Field label="视频高度" hint="默认: 512">
-              <Input
-                type="number"
-                value={heightInput}
+            <Field label="视频高度" hint="默认: 512，自动对齐到 16 的倍数">
+              <SpinButton
+                value={height}
                 onChange={(_, data) => {
-                  setHeightInput(data.value);
-                  const val = parseInt(data.value);
-                  if (!isNaN(val) && val >= 64 && val <= 2048) {
-                    setHeight(val);
-                  }
-                }}
-                onBlur={() => {
-                  const val = parseInt(heightInput);
-                  if (isNaN(val) || val < 64) {
-                    setHeightInput('512');
-                    setHeight(512);
-                  } else if (val > 2048) {
-                    setHeightInput('2048');
-                    setHeight(2048);
-                  } else {
-                    const aligned = Math.round(val / 16) * 16;
-                    setHeightInput(aligned.toString());
-                    setHeight(aligned);
-                  }
+                  const val = data.value ?? 512;
+                  const aligned = Math.round(val / 16) * 16;
+                  const clamped = Math.max(64, Math.min(2048, aligned));
+                  setHeight(clamped);
                 }}
                 min={64}
                 max={2048}
@@ -933,13 +878,9 @@ export const VideoGeneratePage = () => {
             </Field>
 
             <Field label="Flow Shift" hint="Wan2.2 默认: 3.0">
-              <Input
-                type="number"
-                value={flowShift.toString()}
-                onChange={(_, data) => {
-                  const val = parseFloat(data.value) || 3.0;
-                  setFlowShift(val);
-                }}
+              <SpinButton
+                value={flowShift}
+                onChange={(_, data) => setFlowShift(data.value ?? 3.0)}
                 step={0.1}
               />
             </Field>
@@ -961,42 +902,20 @@ export const VideoGeneratePage = () => {
                 <Option value="gits">GITS</Option>
               </Dropdown>
             </Field>
-            <Field label="种子" hint="留空或-1表示随机">
-              <Input
-                type="number"
-                value={seedInput}
-                placeholder="随机"
-                onChange={(_, data) => {
-                  setSeedInput(data.value);
-                  const val = parseInt(data.value);
-                  if (!isNaN(val) && val >= 0) {
-                    setSeed(val);
-                  } else {
-                    setSeed(-1);
-                  }
-                }}
-                onBlur={() => {
-                  const val = parseInt(seedInput);
-                  if (isNaN(val) || val < 0) {
-                    setSeedInput('');
-                    setSeed(-1);
-                  } else {
-                    setSeed(val);
-                  }
-                }}
-                min={0}
+            <Field label="种子" hint="-1 表示随机">
+              <SpinButton
+                value={seed}
+                onChange={(_, data) => setSeed(data.value ?? -1)}
+                min={-1}
               />
             </Field>
             <Field label="批次数量" hint="默认: 1">
-              <Input
-                type="number"
-                value={batchCount.toString()}
-                onChange={(_, data) => {
-                  const val = parseInt(data.value) || 1;
-                  setBatchCount(Math.max(1, Math.min(10, val)));
-                }}
+              <SpinButton
+                value={batchCount}
+                onChange={(_, data) => setBatchCount(data.value ?? 1)}
                 min={1}
                 max={10}
+                step={1}
               />
             </Field>
           </div>
@@ -1015,30 +934,11 @@ export const VideoGeneratePage = () => {
           {/* 更多高级选项 */}
           {showAdvanced && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: tokens.spacingHorizontalM, marginTop: tokens.spacingVerticalM }}>
-              <Field label="线程数" hint="留空或-1表示自动">
-                <Input
-                  type="number"
-                  value={threadsInput}
-                  placeholder="自动"
-                  onChange={(_, data) => {
-                    setThreadsInput(data.value);
-                    const val = parseInt(data.value);
-                    if (!isNaN(val) && val > 0) {
-                      setThreads(val);
-                    } else {
-                      setThreads(-1);
-                    }
-                  }}
-                  onBlur={() => {
-                    const val = parseInt(threadsInput);
-                    if (isNaN(val) || val <= 0) {
-                      setThreadsInput('');
-                      setThreads(-1);
-                    } else {
-                      setThreads(val);
-                    }
-                  }}
-                  min={1}
+              <Field label="线程数" hint="-1 表示自动">
+                <SpinButton
+                  value={threads}
+                  onChange={(_, data) => setThreads(data.value ?? -1)}
+                  min={-1}
                 />
               </Field>
               <Field label="预览方法" hint="默认: proj">
@@ -1059,15 +959,12 @@ export const VideoGeneratePage = () => {
               </Field>
               {preview !== 'none' && (
                 <Field label="预览间隔" hint="默认: 1">
-                  <Input
-                    type="number"
-                    value={previewInterval.toString()}
-                    onChange={(_, data) => {
-                      const val = parseInt(data.value) || 1;
-                      setPreviewInterval(Math.max(1, Math.min(100, val)));
-                    }}
+                  <SpinButton
+                    value={previewInterval}
+                    onChange={(_, data) => setPreviewInterval(data.value ?? 1)}
                     min={1}
                     max={100}
+                    step={1}
                   />
                 </Field>
               )}

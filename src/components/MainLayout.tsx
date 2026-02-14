@@ -151,7 +151,13 @@ export const MainLayout = ({ children }: { children: ReactNode }) => {
         {/* SD.cpp引擎功能页面组 */}
         <div className={styles.navGroup}>
           <div className={styles.navGroupTitle}>SD.cpp引擎</div>
-          {navItems.filter(item => ['weights', 'sdcpp', 'generate', 'edit-image', 'video-generate', 'image-upscale', 'perfect-pixel', 'images'].includes(item.id)).map(renderNavButton)}
+          {navItems.filter(item => ['weights', 'sdcpp', 'generate', 'edit-image', 'video-generate', 'image-upscale', 'images'].includes(item.id)).map(renderNavButton)}
+        </div>
+
+        {/* 像素画工具页面组 */}
+        <div className={styles.navGroup}>
+          <div className={styles.navGroupTitle}>像素画工具</div>
+          {navItems.filter(item => ['perfect-pixel'].includes(item.id)).map(renderNavButton)}
         </div>
 
         {/* 阿里通义API页面组 */}

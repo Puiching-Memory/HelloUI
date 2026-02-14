@@ -3,6 +3,7 @@ import {
   Title2,
   Button,
   CounterBadge,
+  Text,
   tokens,
 } from '@fluentui/react-components'
 import {
@@ -24,6 +25,7 @@ interface CliOutputPanelProps {
   onCopy: () => void
   onExport: () => void
   emptyMessage?: string
+  variant?: 'card' | 'floating'
 }
 
 export function CliOutputPanel({
@@ -36,8 +38,80 @@ export function CliOutputPanel({
   onCopy,
   onExport,
   emptyMessage = '暂无输出，开始生成后将显示 SD.cpp 的 CLI 输出',
+  variant = 'card',
 }: CliOutputPanelProps) {
   const styles = useSharedStyles()
+
+  if (variant === 'floating') {
+    return (
+      <div className={styles.floatingControlPanelCli}>
+        <div className={styles.floatingCliHeader} onClick={onToggleExpanded}>
+          <div className={styles.floatingCliHeaderLeft}>
+            <Text
+              weight="semibold"
+              style={{ fontSize: tokens.fontSizeBase300, whiteSpace: 'nowrap' }}
+            >
+              CLI 输出
+            </Text>
+            {!cliOutputExpanded && unreadCount > 0 && (
+              <CounterBadge
+                count={unreadCount}
+                color="brand"
+                size="small"
+                style={{ position: 'absolute', top: '-4px', right: '-8px' }}
+              />
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS }}>
+            <Button
+              size="small"
+              icon={<CopyRegular />}
+              onClick={(e) => {
+                e.stopPropagation()
+                onCopy()
+              }}
+              disabled={cliOutput.length === 0}
+              appearance="subtle"
+              style={copySuccess ? { color: tokens.colorPaletteGreenForeground1 } : undefined}
+            >
+              {copySuccess ? '已复制' : '复制'}
+            </Button>
+            <Button
+              size="small"
+              icon={<DocumentArrowDownRegular />}
+              onClick={(e) => {
+                e.stopPropagation()
+                onExport()
+              }}
+              disabled={cliOutput.length === 0}
+              appearance="subtle"
+            >
+              导出
+            </Button>
+            {cliOutputExpanded ? <ChevronUpRegular /> : <ChevronDownRegular />}
+          </div>
+        </div>
+        {cliOutputExpanded && (
+          <div ref={cliOutputRef} className={styles.floatingCliContent}>
+            {cliOutput.length === 0 ? (
+              <div className={styles.cliOutputEmpty}>{emptyMessage}</div>
+            ) : (
+              cliOutput.map((line, index) => (
+                <div
+                  key={index}
+                  className={`${styles.cliOutputLine} ${
+                    line.type === 'stderr' ? styles.cliOutputLineStderr : styles.cliOutputLineStdout
+                  }`}
+                >
+                  {line.text}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <Card

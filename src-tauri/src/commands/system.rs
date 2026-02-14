@@ -1,9 +1,53 @@
-use tauri::{AppHandle, Manager};
+use std::path::PathBuf;
+
+use tauri::{AppHandle, Manager, State};
+
+use crate::state::{get_default_sdcpp_folder, AppState};
 
 /// Get the application version
 #[tauri::command]
 pub fn app_get_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
+}
+
+/// Get available inference engines (CUDA, Vulkan, CPU)
+#[tauri::command]
+pub async fn get_available_engines(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let mut available: Vec<String> = Vec::new();
+
+    let sdcpp_folder = {
+        let mut folder = state.sdcpp_folder.lock().unwrap();
+        if folder.is_none() {
+            let default_folder = get_default_sdcpp_folder();
+            if !default_folder.exists() {
+                let _ = std::fs::create_dir_all(&default_folder);
+            }
+            *folder = Some(default_folder.to_string_lossy().to_string());
+        }
+        folder.clone().map(PathBuf::from).unwrap_or_else(get_default_sdcpp_folder)
+    };
+
+    let candidates = ["cpu", "cuda", "vulkan", "rocm"];
+
+    for device in candidates.iter() {
+        let device_folder = sdcpp_folder.join(device);
+        if device_folder.exists() {
+            let executables = if cfg!(target_os = "windows") {
+                &["sd.exe", "sd-cli.exe", "sd_server.exe", "sd-server.exe"][..]
+            } else {
+                &["sd", "sd-cli", "sd_server", "sd-server"][..]
+            };
+
+            for exe in executables {
+                if device_folder.join(exe).exists() {
+                    available.push(device.to_string());
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(available)
 }
 
 /// Toggle DevTools (development only)

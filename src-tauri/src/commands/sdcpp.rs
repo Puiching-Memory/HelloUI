@@ -449,12 +449,12 @@ fn is_cpu_variant_supported(cpu_variant: Option<&str>) -> bool {
 
 fn classify_asset_device(name: &str) -> String {
     let lower = name.to_lowercase();
-    if lower.contains("cuda") && !lower.contains("cudart") {
+    if lower.contains("cuda") || lower.contains("cudart") {
         "cuda".to_string()
-    } else if lower.contains("cudart") {
-        "cudart".to_string()
     } else if lower.contains("vulkan") {
         "vulkan".to_string()
+    } else if lower.contains("rocm") {
+        "rocm".to_string()
     } else if lower.contains("cpu")
         || lower.contains("avx")
         || lower.contains("noavx")

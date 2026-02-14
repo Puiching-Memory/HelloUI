@@ -12,6 +12,8 @@ export function getDeviceLabel(device: DeviceType): string {
       return 'Vulkan'
     case 'cuda':
       return 'CUDA'
+    case 'rocm':
+      return 'ROCm'
     default:
       return device
   }

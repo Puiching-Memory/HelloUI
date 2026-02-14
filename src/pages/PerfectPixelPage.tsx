@@ -10,7 +10,7 @@ import {
   Field,
   Dropdown,
   Option,
-  Input,
+  SpinButton,
   Checkbox,
   Text,
   Slider,
@@ -532,18 +532,18 @@ export const PerfectPixelPage = () => {
 
           <div className={styles.paramRow}>
             <Field label="最小像素尺寸" className={styles.paramField}>
-              <Input
-                type="number"
-                value={minSize.toString()}
-                onChange={(_, data) => setMinSize(Number(data.value) || 4)}
+              <SpinButton
+                value={minSize}
+                onChange={(_, data) => setMinSize(data.value ?? 4)}
+                min={1}
               />
             </Field>
 
             <Field label="峰值检测宽度" className={styles.paramField}>
-              <Input
-                type="number"
-                value={peakWidth.toString()}
-                onChange={(_, data) => setPeakWidth(Number(data.value) || 6)}
+              <SpinButton
+                value={peakWidth}
+                onChange={(_, data) => setPeakWidth(data.value ?? 6)}
+                min={1}
               />
             </Field>
           </div>
@@ -563,17 +563,17 @@ export const PerfectPixelPage = () => {
           {manualGrid && (
             <div className={styles.paramRow}>
               <Field label="网格宽度" className={styles.paramField}>
-                <Input
-                  type="number"
-                  value={gridWidth.toString()}
-                  onChange={(_, data) => setGridWidth(Number(data.value) || 32)}
+                <SpinButton
+                  value={gridWidth}
+                  onChange={(_, data) => setGridWidth(data.value ?? 32)}
+                  min={1}
                 />
               </Field>
               <Field label="网格高度" className={styles.paramField}>
-                <Input
-                  type="number"
-                  value={gridHeight.toString()}
-                  onChange={(_, data) => setGridHeight(Number(data.value) || 32)}
+                <SpinButton
+                  value={gridHeight}
+                  onChange={(_, data) => setGridHeight(data.value ?? 32)}
+                  min={1}
                 />
               </Field>
             </div>

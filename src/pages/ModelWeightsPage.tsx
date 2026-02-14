@@ -13,6 +13,7 @@ import {
   DialogActions,
   DialogContent,
   Input,
+  SpinButton,
   Field,
   ProgressBar,
   Tooltip,
@@ -301,14 +302,14 @@ export const ModelWeightsPage = () => {
   const [groupClipLModel, setGroupClipLModel] = useState<string>('');
   const [groupT5xxlModel, setGroupT5xxlModel] = useState<string>('');
   const [groupClipVisionModel, setGroupClipVisionModel] = useState<string>('');
-  const [groupDefaultSteps, setGroupDefaultSteps] = useState<string>('20');
-  const [groupDefaultCfgScale, setGroupDefaultCfgScale] = useState<string>('7.0');
-  const [groupDefaultWidth, setGroupDefaultWidth] = useState<string>('512');
-  const [groupDefaultHeight, setGroupDefaultHeight] = useState<string>('512');
+  const [groupDefaultSteps, setGroupDefaultSteps] = useState<number>(20);
+  const [groupDefaultCfgScale, setGroupDefaultCfgScale] = useState<number>(7.0);
+  const [groupDefaultWidth, setGroupDefaultWidth] = useState<number>(512);
+  const [groupDefaultHeight, setGroupDefaultHeight] = useState<number>(512);
   const [groupDefaultSamplingMethod, setGroupDefaultSamplingMethod] = useState<string>('euler_a');
   const [groupDefaultScheduler, setGroupDefaultScheduler] = useState<string>('discrete');
-  const [groupDefaultSeed, setGroupDefaultSeed] = useState<string>('');
-  const [groupDefaultFlowShift, setGroupDefaultFlowShift] = useState<string>('3.0');
+  const [groupDefaultSeed, setGroupDefaultSeed] = useState<number>(-1);
+  const [groupDefaultFlowShift, setGroupDefaultFlowShift] = useState<number>(3.0);
   const [groupTaskType, setGroupTaskType] = useState<TaskType>('generate');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [messageDialogOpen, setMessageDialogOpen] = useState(false);
@@ -520,14 +521,14 @@ export const ModelWeightsPage = () => {
     setGroupClipLModel('');
     setGroupT5xxlModel('');
     setGroupClipVisionModel('');
-    setGroupDefaultSteps('20');
-    setGroupDefaultCfgScale('7.0');
-    setGroupDefaultWidth('512');
-    setGroupDefaultHeight('512');
+    setGroupDefaultSteps(20);
+    setGroupDefaultCfgScale(7.0);
+    setGroupDefaultWidth(512);
+    setGroupDefaultHeight(512);
     setGroupDefaultSamplingMethod('euler_a');
     setGroupDefaultScheduler('discrete');
-    setGroupDefaultSeed('');
-    setGroupDefaultFlowShift('3.0');
+    setGroupDefaultSeed(-1);
+    setGroupDefaultFlowShift(3.0);
     setGroupTaskType('generate');
     setGroupDialogOpen(true);
   };
@@ -553,14 +554,14 @@ export const ModelWeightsPage = () => {
     setGroupClipLModel(findHfFile(group.clipLModel));
     setGroupT5xxlModel(findHfFile(group.t5xxlModel));
     setGroupClipVisionModel(findHfFile(group.clipVisionModel));
-    setGroupDefaultSteps(group.defaultSteps?.toString() || '20');
-    setGroupDefaultCfgScale(group.defaultCfgScale?.toString() || '7.0');
-    setGroupDefaultWidth(group.defaultWidth?.toString() || '512');
-    setGroupDefaultHeight(group.defaultHeight?.toString() || '512');
+    setGroupDefaultSteps(group.defaultSteps ?? 20);
+    setGroupDefaultCfgScale(group.defaultCfgScale ?? 7.0);
+    setGroupDefaultWidth(group.defaultWidth ?? 512);
+    setGroupDefaultHeight(group.defaultHeight ?? 512);
     setGroupDefaultSamplingMethod(group.defaultSamplingMethod || 'euler_a');
     setGroupDefaultScheduler(group.defaultScheduler || 'discrete');
-    setGroupDefaultSeed(group.defaultSeed != null && group.defaultSeed >= 0 ? group.defaultSeed.toString() : '');
-    setGroupDefaultFlowShift(group.defaultFlowShift?.toString() || '3.0');
+    setGroupDefaultSeed(group.defaultSeed ?? -1);
+    setGroupDefaultFlowShift(group.defaultFlowShift ?? 3.0);
     setGroupTaskType(group.taskType || 'generate');
     setGroupDialogOpen(true);
   };
@@ -646,14 +647,14 @@ export const ModelWeightsPage = () => {
         t5xxlModel: buildModelPath(t5xxlFile),
         clipVisionModel: buildModelPath(clipVisionFile),
         hfFiles: hfFiles.length > 0 ? hfFiles : undefined,
-        defaultSteps: groupDefaultSteps ? parseFloat(groupDefaultSteps) : undefined,
-        defaultCfgScale: groupDefaultCfgScale ? parseFloat(groupDefaultCfgScale) : undefined,
-        defaultWidth: groupDefaultWidth ? parseInt(groupDefaultWidth) : undefined,
-        defaultHeight: groupDefaultHeight ? parseInt(groupDefaultHeight) : undefined,
+        defaultSteps: groupDefaultSteps,
+        defaultCfgScale: groupDefaultCfgScale,
+        defaultWidth: groupDefaultWidth,
+        defaultHeight: groupDefaultHeight,
         defaultSamplingMethod: groupDefaultSamplingMethod || undefined,
         defaultScheduler: groupDefaultScheduler || undefined,
-        defaultSeed: groupDefaultSeed ? parseInt(groupDefaultSeed) : undefined,
-        defaultFlowShift: groupDefaultFlowShift ? parseFloat(groupDefaultFlowShift) : undefined,
+        defaultSeed: groupDefaultSeed >= 0 ? groupDefaultSeed : undefined,
+        defaultFlowShift: groupDefaultFlowShift,
       };
 
       if (editingGroup) {
@@ -1212,14 +1213,14 @@ export const ModelWeightsPage = () => {
           setGroupLlmModel('');
           setGroupClipLModel('');
           setGroupT5xxlModel('');
-          setGroupDefaultSteps('20');
-          setGroupDefaultCfgScale('7.0');
-          setGroupDefaultWidth('512');
-          setGroupDefaultHeight('512');
+          setGroupDefaultSteps(20);
+          setGroupDefaultCfgScale(7.0);
+          setGroupDefaultWidth(512);
+          setGroupDefaultHeight(512);
           setGroupDefaultSamplingMethod('euler_a');
           setGroupDefaultScheduler('discrete');
-          setGroupDefaultSeed('');
-          setGroupDefaultFlowShift('3.0');
+          setGroupDefaultSeed(-1);
+          setGroupDefaultFlowShift(3.0);
         }
       }}>
         <DialogSurface style={{ minWidth: '600px' }}>
@@ -1341,25 +1342,18 @@ export const ModelWeightsPage = () => {
                 </Title2>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: tokens.spacingHorizontalM }}>
                   <Field label={groupTaskType === 'video' ? '采样步数' : '采样步数'} hint="默认: 20">
-                    <Input
-                      type="number"
+                    <SpinButton
                       value={groupDefaultSteps}
-                      onChange={(_, data) => {
-                        const val = parseInt(data.value) || 20;
-                        setGroupDefaultSteps(Math.max(1, Math.min(100, val)).toString());
-                      }}
+                      onChange={(_, data) => setGroupDefaultSteps(data.value ?? 20)}
                       min={1}
                       max={100}
+                      step={1}
                     />
                   </Field>
                   <Field label={groupTaskType === 'video' ? 'CFG Scale' : 'CFG Scale'} hint="默认: 7.0">
-                    <Input
-                      type="number"
+                    <SpinButton
                       value={groupDefaultCfgScale}
-                      onChange={(_, data) => {
-                        const val = parseFloat(data.value) || 7.0;
-                        setGroupDefaultCfgScale(Math.max(0.1, Math.min(30, val)).toString());
-                      }}
+                      onChange={(_, data) => setGroupDefaultCfgScale(data.value ?? 7.0)}
                       min={0.1}
                       max={30}
                       step={0.1}
@@ -1367,65 +1361,35 @@ export const ModelWeightsPage = () => {
                   </Field>
                   {(groupTaskType === 'video' || groupTaskType === 'edit') && (
                     <Field label="Flow Shift" hint={groupTaskType === 'video' ? "Wan2.2 默认: 3.0" : "Qwen 2511 默认: 3.0"}>
-                      <Input
-                        type="number"
+                      <SpinButton
                         value={groupDefaultFlowShift}
-                        onChange={(_, data) => {
-                          const val = parseFloat(data.value) || 3.0;
-                          setGroupDefaultFlowShift(val.toString());
-                        }}
+                        onChange={(_, data) => setGroupDefaultFlowShift(data.value ?? 3.0)}
                         step={0.1}
                       />
                     </Field>
                   )}
-                  <Field label={groupTaskType === 'video' ? '视频宽度' : '图片宽度'} hint="默认: 512">
-                    <Input
-                      type="number"
+                  <Field label={groupTaskType === 'video' ? '视频宽度' : '图片宽度'} hint="默认: 512，自动对齐到 16 的倍数">
+                    <SpinButton
                       value={groupDefaultWidth}
                       onChange={(_, data) => {
-                        // 允许用户自由输入，不立即限制
-                        setGroupDefaultWidth(data.value);
-                      }}
-                      onBlur={() => {
-                        const val = parseInt(groupDefaultWidth);
-                        if (isNaN(val) || val < 16) {
-                          // 无效值或小于最小值，重置为默认值
-                          setGroupDefaultWidth('512');
-                        } else if (val > 2048) {
-                          // 超过最大值，设置为最大值
-                          setGroupDefaultWidth('2048');
-                        } else {
-                          // 对齐到16的倍数
-                          const aligned = Math.round(val / 16) * 16;
-                          setGroupDefaultWidth(aligned.toString());
-                        }
+                        const val = data.value ?? 512;
+                        const aligned = Math.round(val / 16) * 16;
+                        const clamped = Math.max(16, Math.min(2048, aligned));
+                        setGroupDefaultWidth(clamped);
                       }}
                       min={16}
                       max={2048}
                       step={16}
                     />
                   </Field>
-                  <Field label={groupTaskType === 'video' ? '视频高度' : '图片高度'} hint="默认: 512">
-                    <Input
-                      type="number"
+                  <Field label={groupTaskType === 'video' ? '视频高度' : '图片高度'} hint="默认: 512，自动对齐到 16 的倍数">
+                    <SpinButton
                       value={groupDefaultHeight}
                       onChange={(_, data) => {
-                        // 允许用户自由输入，不立即限制
-                        setGroupDefaultHeight(data.value);
-                      }}
-                      onBlur={() => {
-                        const val = parseInt(groupDefaultHeight);
-                        if (isNaN(val) || val < 16) {
-                          // 无效值或小于最小值，重置为默认值
-                          setGroupDefaultHeight('512');
-                        } else if (val > 2048) {
-                          // 超过最大值，设置为最大值
-                          setGroupDefaultHeight('2048');
-                        } else {
-                          // 对齐到16的倍数
-                          const aligned = Math.round(val / 16) * 16;
-                          setGroupDefaultHeight(aligned.toString());
-                        }
+                        const val = data.value ?? 512;
+                        const aligned = Math.round(val / 16) * 16;
+                        const clamped = Math.max(16, Math.min(2048, aligned));
+                        setGroupDefaultHeight(clamped);
                       }}
                       min={16}
                       max={2048}
@@ -1479,21 +1443,11 @@ export const ModelWeightsPage = () => {
                       </Dropdown>
                     </Field>
                   )}
-                  <Field label="种子" hint="留空表示随机">
-                    <Input
-                      type="number"
+                  <Field label="种子" hint="-1 表示随机">
+                    <SpinButton
                       value={groupDefaultSeed}
-                      placeholder="随机"
-                      onChange={(_, data) => {
-                        setGroupDefaultSeed(data.value);
-                      }}
-                      onBlur={() => {
-                        const val = parseInt(groupDefaultSeed);
-                        if (isNaN(val) || val < 0) {
-                          setGroupDefaultSeed('');
-                        }
-                      }}
-                      min={0}
+                      onChange={(_, data) => setGroupDefaultSeed(data.value ?? -1)}
+                      min={-1}
                     />
                   </Field>
                 </div>
