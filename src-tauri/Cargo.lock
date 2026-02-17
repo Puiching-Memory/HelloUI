@@ -1366,13 +1366,14 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "helloui"
-version = "2.0.3"
+version = "2.0.4"
 dependencies = [
  "base64 0.22.1",
  "chrono",
  "dunce",
  "futures",
  "glob",
+ "libc",
  "md5",
  "reqwest 0.12.28",
  "serde",
@@ -1388,6 +1389,7 @@ dependencies = [
  "tokio",
  "urlencoding",
  "uuid",
+ "windows-sys 0.59.0",
  "zip",
 ]
 

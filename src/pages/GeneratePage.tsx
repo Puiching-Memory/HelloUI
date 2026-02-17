@@ -23,6 +23,7 @@ import { PhotoView } from 'react-photo-view';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useIpcListener } from '../hooks/useIpcListener';
+import { useTaskbarProgress } from '../hooks/useTaskbarProgress';
 import { ipcInvoke, ipcListen } from '../lib/tauriIpc';
 import { useAppStore } from '../hooks/useAppStore';
 import { useCliOutput } from '../hooks/useCliOutput';
@@ -30,17 +31,18 @@ import { useModelGroups, useDeviceType } from '../hooks/useModelGroups';
 import { useSharedStyles } from '../styles/sharedStyles';
 import { CliOutputPanel } from '../components/CliOutputPanel';
 import { MessageDialog, useMessageDialog } from '../components/MessageDialog';
-import { getDeviceLabel, getModelInfo, DEFAULT_NEGATIVE_PROMPT } from '../utils/modelUtils';
-import type { DeviceType } from '../../shared/types';
+import { getDeviceLabel, getEngineValue, getModelInfo, DEFAULT_NEGATIVE_PROMPT } from '../utils/modelUtils';
+import type { AvailableEngine } from '../../shared/types';
 
 export const GeneratePage = () => {
   const styles = useSharedStyles();
   const navigate = useNavigate();
   const { setIsGenerating } = useAppStore();
-  const { modelGroups, loading, selectedGroupId, setSelectedGroupId, selectedGroup, isGroupComplete, reloadModelGroups, checkAllGroupFiles } = useModelGroups('generate');
-  const { deviceType, handleDeviceTypeChange, availableEngines } = useDeviceType();
+  const { modelGroups, loading, selectedGroupId, setSelectedGroupId, selectedGroup, isGroupComplete, reloadModelGroups } = useModelGroups('generate');
+  const { deviceType, cpuVariant, handleDeviceTypeChange, availableEngines } = useDeviceType();
   const cli = useCliOutput('generate:cli-output');
   const msgDialog = useMessageDialog();
+  const { setIndeterminate, clearProgress } = useTaskbarProgress();
   const [prompt, setPrompt] = useState<string>('');
   const [negativePrompt, setNegativePrompt] = useState<string>(DEFAULT_NEGATIVE_PROMPT);
   const [steps, setSteps] = useState<number>(20);
@@ -122,6 +124,7 @@ export const GeneratePage = () => {
       setPreviewImage(null); // 清空预览图片
       setGenerationProgress('正在初始化...');
       cli.clearOutput(); // 清空之前的输出
+      setIndeterminate(); // 设置任务栏进度条为不确定状态
 
       // 监听生成进度
       const unlisten = await ipcListen('generate:progress', (data) => {
@@ -150,7 +153,7 @@ export const GeneratePage = () => {
           llmModel: selectedGroup.llmModel,
           clipLModel: selectedGroup.clipLModel,
           t5xxlModel: selectedGroup.t5xxlModel,
-          deviceType,
+          deviceType: cpuVariant ? `cpu-${cpuVariant}` : deviceType,
           prompt: prompt.trim(),
           negativePrompt: negativePrompt.trim(),
           steps,
@@ -190,6 +193,7 @@ export const GeneratePage = () => {
       } finally {
         unlisten();
         setGenerating(false);
+        clearProgress();
       }
     } catch (error) {
       console.error('Failed to generate image:', error);
@@ -200,6 +204,7 @@ export const GeneratePage = () => {
       }
       setGenerationProgress('');
       setGenerating(false);
+      clearProgress();
     }
   };
 
@@ -207,6 +212,7 @@ export const GeneratePage = () => {
     try {
       await ipcInvoke('generate:cancel');
       setGenerationProgress('正在取消...');
+      clearProgress();
     } catch (error) {
       console.error('Failed to cancel generation:', error);
     }
@@ -280,6 +286,7 @@ export const GeneratePage = () => {
           onToggleExpanded={cli.toggleExpanded}
           onCopy={cli.handleCopyOutput}
           onExport={cli.handleExportOutput}
+          onClear={cli.clearOutput}
           variant="floating"
         />
       </div>
@@ -384,28 +391,22 @@ export const GeneratePage = () => {
                 }
               }}
             >
-              {modelGroups.map((group) => {
-                const complete = isGroupComplete(group.id)
-                return (
-                  <Option 
-                    key={group.id} 
-                    value={group.id} 
-                    text={group.name}
-                    disabled={!complete}
-                  >
-                    {group.name}{!complete ? ' (文件缺失)' : ''}
-                  </Option>
-                )
-              })}
+              {modelGroups.filter(group => isGroupComplete(group.id)).map((group) => (
+                <Option 
+                  key={group.id} 
+                  value={group.id} 
+                  text={group.name}
+                >
+                  {group.name}
+                </Option>
+              ))}
             </Dropdown>
           </Field>
           <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-            {modelGroups.length === 0
-              ? '暂无可用模型组，请先在"模型权重管理"页面创建模型组'
+            {modelGroups.filter(g => isGroupComplete(g.id)).length === 0
+              ? '暂无可用模型组，请先在"模型权重管理"页面创建模型组并下载所需文件'
               : selectedGroup
               ? `已选择: ${selectedGroup.name}${getModelInfo(selectedGroup) ? ` (${getModelInfo(selectedGroup)})` : ''}`
-              : modelGroups.some(g => !isGroupComplete(g.id))
-              ? '部分模型组文件缺失，请先在"模型权重管理"页面下载缺失文件'
               : '请选择模型组'}
           </Body1>
 
@@ -471,18 +472,22 @@ export const GeneratePage = () => {
                   </div>
                 ) : (
                   <Dropdown
-                    value={getDeviceLabel(deviceType)}
-                    selectedOptions={[deviceType]}
+                    value={getDeviceLabel(deviceType, cpuVariant)}
+                    selectedOptions={[getEngineValue({ deviceType, cpuVariant } as AvailableEngine)]}
                     onOptionSelect={(_, data) => {
                       if (data.optionValue) {
-                        handleDeviceTypeChange(data.optionValue as DeviceType);
+                        const engine = availableEngines.find(e => getEngineValue(e) === data.optionValue);
+                        if (engine) {
+                          handleDeviceTypeChange(engine);
+                        }
                       }
                     }}
                   >
-                    <Option disabled={!availableEngines.includes('cpu')} value="cpu">CPU</Option>
-                    <Option disabled={!availableEngines.includes('vulkan')} value="vulkan">Vulkan</Option>
-                    <Option disabled={!availableEngines.includes('cuda')} value="cuda">CUDA</Option>
-                    <Option disabled={!availableEngines.includes('rocm')} value="rocm">ROCm</Option>
+                    {availableEngines.map(engine => (
+                      <Option key={getEngineValue(engine)} value={getEngineValue(engine)}>
+                        {engine.label}
+                      </Option>
+                    ))}
                   </Dropdown>
                 )}
               </Field>
@@ -517,7 +522,7 @@ export const GeneratePage = () => {
                 <div className={styles.modelDeviceItemRight}>
                   <Dropdown
                     className={styles.modelDeviceSelector}
-                    value={controlNetCpu ? 'CPU' : getDeviceLabel(deviceType)}
+                    value={controlNetCpu ? 'CPU' : getDeviceLabel(deviceType, cpuVariant)}
                     selectedOptions={[controlNetCpu ? 'force-cpu' : 'main-device']}
                     onOptionSelect={(_, data) => {
                       if (data.optionValue) {
@@ -526,7 +531,7 @@ export const GeneratePage = () => {
                     }}
                   >
                     <Option value="force-cpu">CPU</Option>
-                    <Option value="main-device">{getDeviceLabel(deviceType)}</Option>
+                    <Option value="main-device">{getDeviceLabel(deviceType, cpuVariant)}</Option>
                   </Dropdown>
                 </div>
               </div>
@@ -556,7 +561,7 @@ export const GeneratePage = () => {
                 <div className={styles.modelDeviceItemRight}>
                   <Dropdown
                     className={styles.modelDeviceSelector}
-                    value={clipOnCpu ? 'CPU' : getDeviceLabel(deviceType)}
+                    value={clipOnCpu ? 'CPU' : getDeviceLabel(deviceType, cpuVariant)}
                     selectedOptions={[clipOnCpu ? 'force-cpu' : 'main-device']}
                     onOptionSelect={(_, data) => {
                       if (data.optionValue) {
@@ -565,7 +570,7 @@ export const GeneratePage = () => {
                     }}
                   >
                     <Option value="force-cpu">CPU</Option>
-                    <Option value="main-device">{getDeviceLabel(deviceType)}</Option>
+                    <Option value="main-device">{getDeviceLabel(deviceType, cpuVariant)}</Option>
                   </Dropdown>
                 </div>
               </div>
@@ -595,7 +600,7 @@ export const GeneratePage = () => {
                 <div className={styles.modelDeviceItemRight}>
                   <Dropdown
                     className={styles.modelDeviceSelector}
-                    value={vaeOnCpu ? 'CPU' : getDeviceLabel(deviceType)}
+                    value={vaeOnCpu ? 'CPU' : getDeviceLabel(deviceType, cpuVariant)}
                     selectedOptions={[vaeOnCpu ? 'force-cpu' : 'main-device']}
                     onOptionSelect={(_, data) => {
                       if (data.optionValue) {
@@ -604,7 +609,7 @@ export const GeneratePage = () => {
                     }}
                   >
                     <Option value="force-cpu">CPU</Option>
-                    <Option value="main-device">{getDeviceLabel(deviceType)}</Option>
+                    <Option value="main-device">{getDeviceLabel(deviceType, cpuVariant)}</Option>
                   </Dropdown>
                 </div>
               </div>

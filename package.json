@@ -1,6 +1,6 @@
 {
   "name": "helloui",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "Tauri app with React 19, TypeScript and Vite",
   "type": "module",
   "scripts": {
@@ -62,6 +62,7 @@
   "dependencies": {
     "@fluentui/react-components": "^9.72.11",
     "@fluentui/react-icons": "^2.0.318",
+    "@fluentui/react-motion-components-preview": "^0.15.0",
     "@tauri-apps/api": "^2.10.1",
     "react": "^19.2.4",
     "react-compare-slider": "^3.1.0",

@@ -33,9 +33,9 @@ import { useModelGroups, useDeviceType } from '../hooks/useModelGroups';
 import { useSharedStyles } from '../styles/sharedStyles';
 import { CliOutputPanel } from '../components/CliOutputPanel';
 import { MessageDialog, useMessageDialog } from '../components/MessageDialog';
-import { getDeviceLabel, getModelInfo } from '../utils/modelUtils';
+import { getDeviceLabel, getEngineValue, getModelInfo } from '../utils/modelUtils';
 import { toMediaUrl } from '@/utils/tauriPath';
-import type { DeviceType } from '../../shared/types';
+import type { AvailableEngine } from '../../shared/types';
 
 // 页面特有的样式（上传区域）
 const useLocalStyles = makeStyles({
@@ -88,7 +88,7 @@ export const ImageUpscalePage = () => {
   const navigate = useNavigate();
   const { setIsGenerating } = useAppStore();
   const { modelGroups, loading, selectedGroupId, setSelectedGroupId, selectedGroup, isGroupComplete, reloadModelGroups } = useModelGroups('upscale');
-  const { deviceType, handleDeviceTypeChange, availableEngines } = useDeviceType();
+  const { deviceType, cpuVariant, handleDeviceTypeChange, availableEngines } = useDeviceType();
   const cli = useCliOutput('generate:cli-output');
   const msgDialog = useMessageDialog();
   const [prompt, setPrompt] = useState<string>('');
@@ -184,7 +184,7 @@ export const ImageUpscalePage = () => {
 
         const result = await ipcInvoke('generate:start', {
           groupId: selectedGroupId,
-          deviceType,
+          deviceType: cpuVariant ? `cpu-${cpuVariant}` : deviceType,
           prompt: prompt.trim() || 'upscale image, high quality, detailed',
           negativePrompt: negativePrompt.trim(),
           steps,
@@ -332,6 +332,7 @@ export const ImageUpscalePage = () => {
           onToggleExpanded={cli.toggleExpanded}
           onCopy={cli.handleCopyOutput}
           onExport={cli.handleExportOutput}
+          onClear={cli.clearOutput}
           variant="floating"
         />
       </div>
@@ -487,28 +488,22 @@ export const ImageUpscalePage = () => {
                 }
               }}
             >
-              {modelGroups.map((group) => {
-                const complete = isGroupComplete(group.id)
-                return (
-                  <Option 
-                    key={group.id} 
-                    value={group.id} 
-                    text={group.name}
-                    disabled={!complete}
-                  >
-                    {group.name}{!complete ? ' (文件缺失)' : ''}
-                  </Option>
-                )
-              })}
+              {modelGroups.filter(group => isGroupComplete(group.id)).map((group) => (
+                <Option 
+                  key={group.id} 
+                  value={group.id} 
+                  text={group.name}
+                >
+                  {group.name}
+                </Option>
+              ))}
             </Dropdown>
           </Field>
           <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-            {modelGroups.length === 0
-              ? '暂无可用模型组，请先在"模型权重管理"页面创建模型组'
+            {modelGroups.filter(g => isGroupComplete(g.id)).length === 0
+              ? '暂无可用模型组，请先在"模型权重管理"页面创建模型组并下载所需文件'
               : selectedGroup
               ? `已选择: ${selectedGroup.name}${getModelInfo(selectedGroup) ? ` (${getModelInfo(selectedGroup)})` : ''}`
-              : modelGroups.some(g => !isGroupComplete(g.id))
-              ? '部分模型组文件缺失，请先在"模型权重管理"页面下载缺失文件'
               : '请选择模型组'}
           </Body1>
 
@@ -559,18 +554,22 @@ export const ImageUpscalePage = () => {
                   </div>
                 ) : (
                   <Dropdown
-                    value={getDeviceLabel(deviceType)}
-                    selectedOptions={[deviceType]}
+                    value={getDeviceLabel(deviceType, cpuVariant)}
+                    selectedOptions={[getEngineValue({ deviceType, cpuVariant } as AvailableEngine)]}
                     onOptionSelect={(_, data) => {
                       if (data.optionValue) {
-                        handleDeviceTypeChange(data.optionValue as DeviceType);
+                        const engine = availableEngines.find(e => getEngineValue(e) === data.optionValue);
+                        if (engine) {
+                          handleDeviceTypeChange(engine);
+                        }
                       }
                     }}
                   >
-                    <Option disabled={!availableEngines.includes('cpu')} value="cpu">CPU</Option>
-                    <Option disabled={!availableEngines.includes('vulkan')} value="vulkan">Vulkan</Option>
-                    <Option disabled={!availableEngines.includes('cuda')} value="cuda">CUDA</Option>
-                    <Option disabled={!availableEngines.includes('rocm')} value="rocm">ROCm</Option>
+                    {availableEngines.map(engine => (
+                      <Option key={getEngineValue(engine)} value={getEngineValue(engine)}>
+                        {engine.label}
+                      </Option>
+                    ))}
                   </Dropdown>
                 )}
               </Field>
@@ -605,7 +604,7 @@ export const ImageUpscalePage = () => {
                 <div className={styles.modelDeviceItemRight}>
                   <Dropdown
                     className={styles.modelDeviceSelector}
-                    value={controlNetCpu ? 'CPU' : getDeviceLabel(deviceType)}
+                    value={controlNetCpu ? 'CPU' : getDeviceLabel(deviceType, cpuVariant)}
                     selectedOptions={[controlNetCpu ? 'force-cpu' : 'main-device']}
                     onOptionSelect={(_, data) => {
                       if (data.optionValue) {
@@ -614,7 +613,7 @@ export const ImageUpscalePage = () => {
                     }}
                   >
                     <Option value="force-cpu">CPU</Option>
-                    <Option value="main-device">{getDeviceLabel(deviceType)}</Option>
+                    <Option value="main-device">{getDeviceLabel(deviceType, cpuVariant)}</Option>
                   </Dropdown>
                 </div>
               </div>
@@ -644,7 +643,7 @@ export const ImageUpscalePage = () => {
                 <div className={styles.modelDeviceItemRight}>
                   <Dropdown
                     className={styles.modelDeviceSelector}
-                    value={clipOnCpu ? 'CPU' : getDeviceLabel(deviceType)}
+                    value={clipOnCpu ? 'CPU' : getDeviceLabel(deviceType, cpuVariant)}
                     selectedOptions={[clipOnCpu ? 'force-cpu' : 'main-device']}
                     onOptionSelect={(_, data) => {
                       if (data.optionValue) {
@@ -653,7 +652,7 @@ export const ImageUpscalePage = () => {
                     }}
                   >
                     <Option value="force-cpu">CPU</Option>
-                    <Option value="main-device">{getDeviceLabel(deviceType)}</Option>
+                    <Option value="main-device">{getDeviceLabel(deviceType, cpuVariant)}</Option>
                   </Dropdown>
                 </div>
               </div>
@@ -683,7 +682,7 @@ export const ImageUpscalePage = () => {
                 <div className={styles.modelDeviceItemRight}>
                   <Dropdown
                     className={styles.modelDeviceSelector}
-                    value={vaeOnCpu ? 'CPU' : getDeviceLabel(deviceType)}
+                    value={vaeOnCpu ? 'CPU' : getDeviceLabel(deviceType, cpuVariant)}
                     selectedOptions={[vaeOnCpu ? 'force-cpu' : 'main-device']}
                     onOptionSelect={(_, data) => {
                       if (data.optionValue) {
@@ -692,7 +691,7 @@ export const ImageUpscalePage = () => {
                     }}
                   >
                     <Option value="force-cpu">CPU</Option>
-                    <Option value="main-device">{getDeviceLabel(deviceType)}</Option>
+                    <Option value="main-device">{getDeviceLabel(deviceType, cpuVariant)}</Option>
                   </Dropdown>
                 </div>
               </div>

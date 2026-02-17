@@ -28,15 +28,16 @@ import {
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../hooks/useAppStore';
+import { useTaskbarProgress } from '../hooks/useTaskbarProgress';
 import { ipcInvoke, ipcListen } from '../lib/tauriIpc';
 import { useSharedStyles } from '@/styles/sharedStyles';
 import { useCliOutput } from '@/hooks/useCliOutput';
 import { useModelGroups, useDeviceType } from '@/hooks/useModelGroups';
 import { CliOutputPanel } from '@/components/CliOutputPanel';
 import { MessageDialog, useMessageDialog } from '@/components/MessageDialog';
-import { getDeviceLabel, getModelInfo } from '@/utils/modelUtils';
+import { getDeviceLabel, getEngineValue, getModelInfo } from '@/utils/modelUtils';
 import { toMediaUrl } from '@/utils/tauriPath';
-import type { DeviceType } from '../../shared/types';
+import type { AvailableEngine } from '../../shared/types';
 
 const useLocalStyles = makeStyles({
   previewVideo: {
@@ -179,6 +180,7 @@ export const VideoGeneratePage = () => {
   const device = useDeviceType();
   const cli = useCliOutput('generate-video:cli-output');
   const msgDialog = useMessageDialog();
+  const { setIndeterminate, clearProgress } = useTaskbarProgress();
   const [generationMode, setGenerationMode] = useState<'text2video' | 'image2video'>('text2video');
   const [initImage, setInitImage] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<string>('');
@@ -274,6 +276,7 @@ export const VideoGeneratePage = () => {
       setSelectedFrameIndex(0);
       setGenerationProgress('');
       cli.clearOutput();
+      setIndeterminate();
 
       // 监听进度更新
       const unlisten = await ipcListen('generate-video:progress', (data) => {
@@ -297,7 +300,7 @@ export const VideoGeneratePage = () => {
       try {
         const result = await ipcInvoke('generate-video:start', {
           groupId: models.selectedGroupId,
-          deviceType: device.deviceType,
+          deviceType: device.cpuVariant ? `cpu-${device.cpuVariant}` : device.deviceType,
           mode: generationMode,
           initImage: generationMode === 'image2video' ? (initImage || undefined) : undefined,
           prompt,
@@ -349,6 +352,7 @@ export const VideoGeneratePage = () => {
       } finally {
         unlisten();
         setGenerating(false);
+        clearProgress();
       }
     } catch (error) {
       console.error('Failed to generate video:', error);
@@ -358,6 +362,7 @@ export const VideoGeneratePage = () => {
       }
       setGenerationProgress('');
       setGenerating(false);
+      clearProgress();
     }
   };
 
@@ -365,6 +370,7 @@ export const VideoGeneratePage = () => {
     try {
       await ipcInvoke('generate-video:cancel');
       setGenerationProgress('正在取消...');
+      clearProgress();
     } catch (error) {
       console.error('Failed to cancel generation:', error);
     }
@@ -428,6 +434,7 @@ export const VideoGeneratePage = () => {
           onToggleExpanded={cli.toggleExpanded}
           onCopy={cli.handleCopyOutput}
           onExport={cli.handleExportOutput}
+          onClear={cli.clearOutput}
           emptyMessage="暂无输出，开始生成后将显示 SD.cpp 的 CLI 输出"
           variant="floating"
         />
@@ -569,28 +576,22 @@ export const VideoGeneratePage = () => {
                 }
               }}
             >
-              {models.modelGroups.map((group) => {
-                const complete = models.isGroupComplete(group.id)
-                return (
-                  <Option 
-                    key={group.id} 
-                    value={group.id} 
-                    text={group.name}
-                    disabled={!complete}
-                  >
-                    {group.name}{!complete ? ' (文件缺失)' : ''}
-                  </Option>
-                )
-              })}
+              {models.modelGroups.filter(group => models.isGroupComplete(group.id)).map((group) => (
+                <Option 
+                  key={group.id} 
+                  value={group.id} 
+                  text={group.name}
+                >
+                  {group.name}
+                </Option>
+              ))}
             </Dropdown>
           </Field>
           <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-            {models.modelGroups.length === 0
-              ? '暂无可用模型组，请先在"模型权重管理"页面创建支持视频生成的模型组'
+            {models.modelGroups.filter(g => models.isGroupComplete(g.id)).length === 0
+              ? '暂无可用模型组，请先在"模型权重管理"页面创建支持视频生成的模型组并下载所需文件'
               : models.selectedGroup
               ? `已选择: ${models.selectedGroup.name}${getModelInfo(models.selectedGroup) ? ` (${getModelInfo(models.selectedGroup)})` : ''}`
-              : models.modelGroups.some(g => !models.isGroupComplete(g.id))
-              ? '部分模型组文件缺失，请先在"模型权重管理"页面下载缺失文件'
               : '请选择模型组'}
           </Body1>
 
@@ -724,18 +725,22 @@ export const VideoGeneratePage = () => {
                   </div>
                 ) : (
                   <Dropdown
-                    value={getDeviceLabel(device.deviceType)}
-                    selectedOptions={[device.deviceType]}
+                    value={getDeviceLabel(device.deviceType, device.cpuVariant)}
+                    selectedOptions={[getEngineValue({ deviceType: device.deviceType, cpuVariant: device.cpuVariant } as AvailableEngine)]}
                     onOptionSelect={(_, data) => {
                       if (data.optionValue) {
-                        device.handleDeviceTypeChange(data.optionValue as DeviceType);
+                        const engine = device.availableEngines.find(e => getEngineValue(e) === data.optionValue);
+                        if (engine) {
+                          device.handleDeviceTypeChange(engine);
+                        }
                       }
                     }}
                   >
-                    <Option disabled={!device.availableEngines.includes('cpu')} value="cpu">CPU</Option>
-                    <Option disabled={!device.availableEngines.includes('vulkan')} value="vulkan">Vulkan</Option>
-                    <Option disabled={!device.availableEngines.includes('cuda')} value="cuda">CUDA</Option>
-                    <Option disabled={!device.availableEngines.includes('rocm')} value="rocm">ROCm</Option>
+                    {device.availableEngines.map(engine => (
+                      <Option key={getEngineValue(engine)} value={getEngineValue(engine)}>
+                        {engine.label}
+                      </Option>
+                    ))}
                   </Dropdown>
                 )}
               </Field>
@@ -756,7 +761,7 @@ export const VideoGeneratePage = () => {
                 <div className={styles.modelDeviceItemRight}>
                   <Dropdown
                     className={styles.modelDeviceSelector}
-                    value={controlNetCpu ? 'CPU' : getDeviceLabel(device.deviceType)}
+                    value={controlNetCpu ? 'CPU' : getDeviceLabel(device.deviceType, device.cpuVariant)}
                     selectedOptions={[controlNetCpu ? 'force-cpu' : 'main-device']}
                     onOptionSelect={(_, data) => {
                       if (data.optionValue) {
@@ -765,7 +770,7 @@ export const VideoGeneratePage = () => {
                     }}
                   >
                     <Option value="force-cpu">CPU</Option>
-                    <Option value="main-device">{getDeviceLabel(device.deviceType)}</Option>
+                    <Option value="main-device">{getDeviceLabel(device.deviceType, device.cpuVariant)}</Option>
                   </Dropdown>
                 </div>
               </div>
@@ -781,7 +786,7 @@ export const VideoGeneratePage = () => {
                 <div className={styles.modelDeviceItemRight}>
                   <Dropdown
                     className={styles.modelDeviceSelector}
-                    value={clipOnCpu ? 'CPU' : getDeviceLabel(device.deviceType)}
+                    value={clipOnCpu ? 'CPU' : getDeviceLabel(device.deviceType, device.cpuVariant)}
                     selectedOptions={[clipOnCpu ? 'force-cpu' : 'main-device']}
                     onOptionSelect={(_, data) => {
                       if (data.optionValue) {
@@ -790,7 +795,7 @@ export const VideoGeneratePage = () => {
                     }}
                   >
                     <Option value="force-cpu">CPU</Option>
-                    <Option value="main-device">{getDeviceLabel(device.deviceType)}</Option>
+                    <Option value="main-device">{getDeviceLabel(device.deviceType, device.cpuVariant)}</Option>
                   </Dropdown>
                 </div>
               </div>
@@ -806,7 +811,7 @@ export const VideoGeneratePage = () => {
                 <div className={styles.modelDeviceItemRight}>
                   <Dropdown
                     className={styles.modelDeviceSelector}
-                    value={vaeOnCpu ? 'CPU' : getDeviceLabel(device.deviceType)}
+                    value={vaeOnCpu ? 'CPU' : getDeviceLabel(device.deviceType, device.cpuVariant)}
                     selectedOptions={[vaeOnCpu ? 'force-cpu' : 'main-device']}
                     onOptionSelect={(_, data) => {
                       if (data.optionValue) {
@@ -815,7 +820,7 @@ export const VideoGeneratePage = () => {
                     }}
                   >
                     <Option value="force-cpu">CPU</Option>
-                    <Option value="main-device">{getDeviceLabel(device.deviceType)}</Option>
+                    <Option value="main-device">{getDeviceLabel(device.deviceType, device.cpuVariant)}</Option>
                   </Dropdown>
                 </div>
               </div>

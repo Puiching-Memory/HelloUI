@@ -11,6 +11,7 @@ import {
   ChevronUpRegular,
   CopyRegular,
   DocumentArrowDownRegular,
+  DeleteRegular,
 } from '@fluentui/react-icons'
 import { useSharedStyles } from '../styles/sharedStyles'
 import type { CliOutputLine } from '../hooks/useCliOutput'
@@ -24,6 +25,7 @@ interface CliOutputPanelProps {
   onToggleExpanded: () => void
   onCopy: () => void
   onExport: () => void
+  onClear: () => void
   emptyMessage?: string
   variant?: 'card' | 'floating'
 }
@@ -37,6 +39,7 @@ export function CliOutputPanel({
   onToggleExpanded,
   onCopy,
   onExport,
+  onClear,
   emptyMessage = '暂无输出，开始生成后将显示 SD.cpp 的 CLI 输出',
   variant = 'card',
 }: CliOutputPanelProps) {
@@ -87,6 +90,18 @@ export function CliOutputPanel({
               appearance="subtle"
             >
               导出
+            </Button>
+            <Button
+              size="small"
+              icon={<DeleteRegular />}
+              onClick={(e) => {
+                e.stopPropagation()
+                onClear()
+              }}
+              disabled={cliOutput.length === 0}
+              appearance="subtle"
+            >
+              清空
             </Button>
             {cliOutputExpanded ? <ChevronUpRegular /> : <ChevronDownRegular />}
           </div>
@@ -166,6 +181,18 @@ export function CliOutputPanel({
             appearance="subtle"
           >
             导出
+          </Button>
+          <Button
+            size="small"
+            icon={<DeleteRegular />}
+            onClick={(e) => {
+              e.stopPropagation()
+              onClear()
+            }}
+            disabled={cliOutput.length === 0}
+            appearance="subtle"
+          >
+            清空
           </Button>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import type { DeviceType, ModelGroup, WeightFile, GenerateImageParams, GeneratedImageInfo, MirrorSource, SDCppRelease, SDCppDownloadProgress, MirrorTestResult, SDCppReleaseAsset, HfMirrorId, ModelDownloadProgress } from './types.js'
+import type { DeviceType, AvailableEngine, ModelGroup, WeightFile, GenerateImageParams, GeneratedImageInfo, MirrorSource, SDCppRelease, SDCppDownloadProgress, MirrorTestResult, SDCppReleaseAsset, HfMirrorId, ModelDownloadProgress } from './types.js'
 
 // IPC channel allowlists
 export const IPC_INVOKE_CHANNELS = [
@@ -29,9 +29,12 @@ export const IPC_INVOKE_CHANNELS = [
   'model-groups:update',
   'models:cancel-download',
   'models:check-files',
+  'models:delete-file',
+  'models:clear-verified',
   'models:download-group-files',
   'models:get-hf-mirror',
   'models:set-hf-mirror',
+  'models:verify-file',
   'perfect-pixel:read-image',
   'perfect-pixel:save',
   'perfect-pixel:select-image',
@@ -91,8 +94,8 @@ export interface IPCRequestMap {
   'sdcpp:get-folder': { request: void; response: string | null }
   'sdcpp:check-folder': { request: string; response: boolean }
   'sdcpp:set-folder': { request: string; response: boolean }
-  'sdcpp:set-device': { request: DeviceType; response: boolean }
-  'sdcpp:get-device': { request: void; response: DeviceType }
+  'sdcpp:set-device': { request: string; response: boolean }
+  'sdcpp:get-device': { request: void; response: string }
   'sdcpp:list-files': { request: [string, DeviceType]; response: { files: WeightFile[]; version: string | null } }
   'sdcpp:download-file': { request: string; response: boolean }
   'sdcpp:delete-file': { request: string; response: boolean }
@@ -109,7 +112,10 @@ export interface IPCRequestMap {
   'models:set-hf-mirror': { request: HfMirrorId; response: boolean }
   'models:download-group-files': { request: { groupId: string; mirrorId?: HfMirrorId }; response: { success: boolean; error?: string } }
   'models:cancel-download': { request: void; response: boolean }
-  'models:check-files': { request: { groupId: string }; response: Array<{ file: string; exists: boolean; size?: number }> }
+  'models:check-files': { request: { groupId: string }; response: Array<{ file: string; savePath?: string; exists: boolean; size?: number; verified: boolean; expectedSize?: number }> }
+  'models:verify-file': { request: { groupId: string; filePath: string }; response: { success: boolean; expectedSize: number; actualSize: number } }
+  'models:delete-file': { request: { groupId: string; filePath: string }; response: boolean }
+  'models:clear-verified': { request: { groupId: string }; response: boolean }
 
   'model-groups:list': { request: void; response: ModelGroup[] }
   'model-groups:create': { request: Omit<ModelGroup, 'id' | 'createdAt' | 'updatedAt'>; response: ModelGroup }
@@ -139,7 +145,7 @@ export interface IPCRequestMap {
 
   'devtools:toggle': { request: void; response: { success: boolean; isOpen?: boolean; error?: string } }
   'app:get-version': { request: void; response: string }
-  'system:get-available-engines': { request: void; response: string[] }
+  'system:get-available-engines': { request: void; response: AvailableEngine[] }
 
   'aliyun-api:call': { request: { method: string; url: string; headers?: Record<string, string>; body?: unknown }; response: { status: number; statusText: string; data?: unknown; error?: string } }
 

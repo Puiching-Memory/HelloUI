@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use tauri::{AppHandle, Manager, State};
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, State};
+#[cfg(debug_assertions)]
+use tauri::Manager;
 
 use crate::state::{get_default_sdcpp_folder, AppState};
 
@@ -10,10 +13,40 @@ pub fn app_get_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
-/// Get available inference engines (CUDA, Vulkan, CPU)
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AvailableEngine {
+    pub device_type: String,
+    pub cpu_variant: Option<String>,
+    pub label: String,
+}
+
+fn check_engine_exists(folder: &PathBuf, executables: &[&str]) -> bool {
+    if !folder.exists() {
+        return false;
+    }
+    for exe in executables {
+        if folder.join(exe).exists() {
+            return true;
+        }
+    }
+    false
+}
+
+fn get_cpu_variant_label(variant: &str) -> String {
+    match variant {
+        "avx2" => "CPU (AVX2)".to_string(),
+        "avx512" => "CPU (AVX-512)".to_string(),
+        "avx" => "CPU (AVX)".to_string(),
+        "noavx" => "CPU (无AVX)".to_string(),
+        _ => "CPU".to_string(),
+    }
+}
+
+/// Get available inference engines (CUDA, Vulkan, CPU variants)
 #[tauri::command]
-pub async fn get_available_engines(state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    let mut available: Vec<String> = Vec::new();
+pub async fn system_get_available_engines(state: State<'_, AppState>) -> Result<Vec<AvailableEngine>, String> {
+    let mut available: Vec<AvailableEngine> = Vec::new();
 
     let sdcpp_folder = {
         let mut folder = state.sdcpp_folder.lock().unwrap();
@@ -27,30 +60,55 @@ pub async fn get_available_engines(state: State<'_, AppState>) -> Result<Vec<Str
         folder.clone().map(PathBuf::from).unwrap_or_else(get_default_sdcpp_folder)
     };
 
-    let candidates = ["cpu", "cuda", "vulkan", "rocm"];
+    let executables = if cfg!(target_os = "windows") {
+        &["sd-cli.exe", "sd.exe", "sd_server.exe", "sd-server.exe"][..]
+    } else {
+        &["sd-cli", "sd", "sd_server", "sd-server"][..]
+    };
 
-    for device in candidates.iter() {
-        let device_folder = sdcpp_folder.join(device);
-        if device_folder.exists() {
-            let executables = if cfg!(target_os = "windows") {
-                &["sd.exe", "sd-cli.exe", "sd_server.exe", "sd-server.exe"][..]
-            } else {
-                &["sd", "sd-cli", "sd_server", "sd-server"][..]
+    let cpu_variant_folders = [
+        ("cpu-avx2", Some("avx2")),
+        ("cpu-avx512", Some("avx512")),
+        ("cpu-avx", Some("avx")),
+        ("cpu-noavx", Some("noavx")),
+        ("cpu", None),
+    ];
+
+    for (folder_name, variant) in cpu_variant_folders.iter() {
+        let variant_folder = sdcpp_folder.join(folder_name);
+        if check_engine_exists(&variant_folder, executables) {
+            let label = match variant {
+                Some(v) => get_cpu_variant_label(v),
+                None => "CPU".to_string(),
             };
+            available.push(AvailableEngine {
+                device_type: "cpu".to_string(),
+                cpu_variant: variant.map(|s| s.to_string()),
+                label,
+            });
+        }
+    }
 
-            for exe in executables {
-                if device_folder.join(exe).exists() {
-                    available.push(device.to_string());
-                    break;
-                }
-            }
+    let other_devices = [
+        ("cuda", "CUDA"),
+        ("vulkan", "Vulkan"),
+        ("rocm", "ROCm"),
+    ];
+    for (device, label) in other_devices.iter() {
+        let device_folder = sdcpp_folder.join(device);
+        if check_engine_exists(&device_folder, executables) {
+            available.push(AvailableEngine {
+                device_type: device.to_string(),
+                cpu_variant: None,
+                label: label.to_string(),
+            });
         }
     }
 
     Ok(available)
 }
 
-/// Toggle DevTools (development only)
+/// Toggle DevTools
 #[tauri::command]
 pub fn devtools_toggle(_app: AppHandle) -> Result<serde_json::Value, String> {
     #[cfg(debug_assertions)]

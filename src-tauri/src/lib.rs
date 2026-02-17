@@ -2,6 +2,7 @@ mod commands;
 mod state;
 
 use state::AppState;
+use tauri::Manager;
 
 pub fn run() {
     tauri::Builder::default()
@@ -14,7 +15,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // system
             commands::system::app_get_version,
-            commands::system::get_available_engines,
+            commands::system::system_get_available_engines,
             commands::system::devtools_toggle,
             commands::system::aliyun_api_call,
             // dialog
@@ -63,6 +64,9 @@ pub fn run() {
             commands::model_download::models_download_group_files,
             commands::model_download::models_cancel_download,
             commands::model_download::models_check_files,
+            commands::model_download::models_verify_file,
+            commands::model_download::models_delete_file,
+            commands::model_download::models_clear_verified,
             // generate
             commands::generate::generate_start,
             commands::generate::generate_cancel,
@@ -133,13 +137,22 @@ pub fn run() {
             });
         })
         .setup(|app| {
-            // Initialize default folders on startup
-            let app_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = commands::weights::init_default_folders(&app_handle).await {
-                    eprintln!("Failed to init default folders: {}", e);
+            // Initialize default folders on startup (synchronously)
+            let state = app.state::<AppState>();
+            let models_folder = crate::state::get_default_models_folder();
+            let sdcpp_folder = crate::state::get_default_sdcpp_folder();
+            let outputs_folder = crate::state::get_default_outputs_folder();
+
+            for folder in [&models_folder, &outputs_folder] {
+                if !folder.exists() {
+                    let _ = std::fs::create_dir_all(folder);
                 }
-            });
+            }
+
+            *state.weights_folder.lock().unwrap() = Some(models_folder.to_string_lossy().to_string());
+            *state.sdcpp_folder.lock().unwrap() = Some(sdcpp_folder.to_string_lossy().to_string());
+            *state.outputs_folder.lock().unwrap() = Some(outputs_folder.to_string_lossy().to_string());
+
             Ok(())
         })
         .run(tauri::generate_context!())

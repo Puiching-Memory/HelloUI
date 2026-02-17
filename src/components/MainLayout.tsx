@@ -173,6 +173,7 @@ export const MainLayout = ({ children }: { children: ReactNode }) => {
       {/* 主内容区 */}
       <div className={styles.content}>
         <div className={styles.mainContent}>
+          {/* TODO: 控制栏和页面切换动画冲突 - transform 会创建新的包含块，导致 position: fixed 失效 */}
           {children}
         </div>
       </div>

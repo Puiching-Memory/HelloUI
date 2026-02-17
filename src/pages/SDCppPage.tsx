@@ -41,6 +41,7 @@ import {
 } from '@fluentui/react-icons';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
+import { useTaskbarProgress } from '../hooks/useTaskbarProgress';
 import { ipcInvoke } from '../lib/tauriIpc';
 import type { DeviceType, MirrorSource, SDCppRelease, SDCppReleaseAsset, SDCppDownloadProgress, MirrorTestResult } from '../../shared/types';
 import { formatFileSize } from '@/utils/format';
@@ -224,6 +225,7 @@ interface EngineSummary {
 // ─── 辅助函数 ─────────────────────────────────────────────────────
 
 function getAssetLabel(asset: SDCppReleaseAsset): string {
+  if (asset.deviceType === 'cuda-runtime') return 'CUDA Runtime';
   if (asset.deviceType === 'cuda') return 'CUDA 12';
   if (asset.deviceType === 'vulkan') return 'Vulkan';
   if (asset.deviceType === 'rocm') return 'ROCm';
@@ -235,7 +237,7 @@ function getAssetLabel(asset: SDCppReleaseAsset): string {
 }
 
 function getAssetBadgeColor(asset: SDCppReleaseAsset): 'brand' | 'success' | 'warning' | 'informative' {
-  if (asset.deviceType === 'cuda') return 'success';
+  if (asset.deviceType === 'cuda-runtime' || asset.deviceType === 'cuda') return 'success';
   if (asset.deviceType === 'vulkan') return 'brand';
   if (asset.deviceType === 'rocm') return 'warning';
   return 'informative';
@@ -285,6 +287,9 @@ export const SDCppPage = () => {
   const [messageDialogOpen, setMessageDialogOpen] = useState(false);
   const [messageDialogContent, setMessageDialogContent] = useState<{ title: string; message: string } | null>(null);
 
+  // 任务栏进度条
+  const { setProgress, clearProgress, setIndeterminate } = useTaskbarProgress();
+
   const loadFilesRef = useRef<() => Promise<void>>(undefined);
 
   // ─── 初始化 ────────────────────────────────────────────────────
@@ -314,14 +319,24 @@ export const SDCppPage = () => {
     'sdcpp:download-progress',
     (data) => {
       setDownloadProgress(data);
-      if (data.stage === 'done') {
+      
+      // 更新任务栏进度条
+      if (data.stage === 'downloading' || data.stage === 'extracting') {
+        if (data.totalBytes > 0) {
+          const progress = (data.downloadedBytes / data.totalBytes) * 100;
+          setProgress(progress);
+        } else {
+          setIndeterminate();
+        }
+      } else if (data.stage === 'done') {
+        clearProgress();
         // 下载完成后自动重新扫描引擎版本号
         setTimeout(() => {
           loadFilesRef.current?.();
           setDownloadProgress(null);
         }, 1500);
-      }
-      if (data.stage === 'error') {
+      } else if (data.stage === 'error') {
+        clearProgress();
         setDownloadError(data.error || '下载失败');
       }
     },

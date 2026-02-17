@@ -10,6 +10,20 @@
 export type DeviceType = 'cpu' | 'vulkan' | 'cuda' | 'rocm'
 
 /**
+ * CPU 变体类型
+ */
+export type CpuVariant = 'avx' | 'avx2' | 'avx512' | 'noavx'
+
+/**
+ * 可用引擎信息
+ */
+export interface AvailableEngine {
+  deviceType: DeviceType
+  cpuVariant?: CpuVariant
+  label: string
+}
+
+/**
  * 任务类型
  */
 export type TaskType = 'generate' | 'edit' | 'video' | 'upscale'
@@ -89,7 +103,7 @@ export interface GenerateImageParams {
   llmModel?: string
   clipLModel?: string
   t5xxlModel?: string
-  deviceType: DeviceType
+  deviceType: DeviceType | string // 支持标准设备类型或 CPU 变体（如 'cpu-avx2'）
   prompt: string
   negativePrompt?: string
   steps?: number // 采样步数，默认 20
@@ -224,7 +238,7 @@ export interface SDCppReleaseAsset {
   size: number
   downloadUrl: string
   /** 资产对应的设备类型 */
-  deviceType: DeviceType | 'unknown'
+  deviceType: DeviceType | 'cuda-runtime' | 'unknown'
   /** CPU 子变体 */
   cpuVariant?: 'avx' | 'avx2' | 'avx512' | 'noavx'
 }

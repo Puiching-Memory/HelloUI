@@ -14,6 +14,9 @@ importers:
       '@fluentui/react-icons':
         specifier: ^2.0.318
         version: 2.0.318(react@19.2.4)
+      '@fluentui/react-motion-components-preview':
+        specifier: ^0.15.0
+        version: 0.15.0(@types/react-dom@19.2.3(@types/react@19.2.13))(@types/react@19.2.13)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@tauri-apps/api':
         specifier: ^2.10.1
         version: 2.10.1

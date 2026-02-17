@@ -33,11 +33,13 @@ import {
   ZoomInRegular,
   GlobeRegular,
   CheckmarkCircleFilled,
+  WarningFilled,
   DismissCircleRegular,
   DismissRegular,
 } from '@fluentui/react-icons';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
+import { useTaskbarProgress } from '../hooks/useTaskbarProgress';
 import { ipcInvoke } from '../lib/tauriIpc';
 import { formatFileSize } from '@/utils/format';
 import { getPathBaseName } from '@/utils/tauriPath';
@@ -251,22 +253,35 @@ export const ModelWeightsPage = () => {
   const [hfMirrorId, setHfMirrorId] = useState<HfMirrorId>('hf-mirror');
   const [modelDownloadProgress, setModelDownloadProgress] = useState<ModelDownloadProgress | null>(null);
   const [downloadingGroupId, setDownloadingGroupId] = useState<string | null>(null);
-  const [fileStatusMap, setFileStatusMap] = useState<Record<string, Array<{ file: string; exists: boolean; size?: number }>>>({});
+  const [fileStatusMap, setFileStatusMap] = useState<Record<string, Array<{ file: string; savePath?: string; exists: boolean; size?: number; verified: boolean; expectedSize?: number }>>>({});
+
+  // 任务栏进度条
+  const { setProgress, clearProgress, setIndeterminate } = useTaskbarProgress();
 
   // 监听模型下载进度
   const loadModelGroupsRef = useRef<() => Promise<void>>(undefined);
 
   useIpcListener('models:download-progress', (data) => {
     setModelDownloadProgress(data);
-    if (data.stage === 'done') {
+    
+    // 更新任务栏进度条
+    if (data.stage === 'downloading') {
+      if (data.totalBytes > 0) {
+        const progress = (data.downloadedBytes / data.totalBytes) * 100;
+        setProgress(progress);
+      } else {
+        setIndeterminate();
+      }
+    } else if (data.stage === 'done') {
+      clearProgress();
       setTimeout(() => {
         setModelDownloadProgress(null);
         setDownloadingGroupId(null);
         // 刷新模型组文件状态
         loadModelGroupsRef.current?.();
       }, 1500);
-    }
-    if (data.stage === 'error') {
+    } else if (data.stage === 'error') {
+      clearProgress();
       setModelDownloadProgress(null);
       setDownloadingGroupId(null);
     }
@@ -297,6 +312,8 @@ export const ModelWeightsPage = () => {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [messageDialogOpen, setMessageDialogOpen] = useState(false);
   const [messageDialogContent, setMessageDialogContent] = useState<{ title: string; message: string } | null>(null);
+  const [verifyFailedDialogOpen, setVerifyFailedDialogOpen] = useState(false);
+  const [verifyFailedInfo, setVerifyFailedInfo] = useState<{ groupId: string; fileName: string; errorMessage: string } | null>(null);
   const [groupDeleteConfirmOpen, setGroupDeleteConfirmOpen] = useState(false);
   const [groupToDelete, setGroupToDelete] = useState<ModelGroup | null>(null);
 
@@ -368,7 +385,7 @@ export const ModelWeightsPage = () => {
   };
 
   const checkAllGroupFiles = async () => {
-    const statusMap: Record<string, Array<{ file: string; exists: boolean; size?: number }>> = {};
+    const statusMap: Record<string, Array<{ file: string; savePath?: string; exists: boolean; size?: number; verified: boolean; expectedSize?: number }>> = {};
     for (const group of modelGroups) {
       if (group.hfFiles && group.hfFiles.length > 0) {
         try {
@@ -442,6 +459,74 @@ export const ModelWeightsPage = () => {
       setDownloadingGroupId(null);
     }
   }, [hfMirrorId]);
+
+  const handleVerifyGroupFiles = useCallback(async (groupId: string) => {
+    const status = fileStatusMap[groupId];
+    if (!status) return;
+
+    const unverifiedFiles = status.filter(f => f.exists && !f.verified);
+    if (unverifiedFiles.length === 0) return;
+
+    setDownloadingGroupId(groupId);
+    setModelDownloadProgress({
+      stage: 'downloading',
+      downloadedBytes: 0,
+      totalBytes: -1,
+      speed: 0,
+      fileName: '验证中...',
+      totalFiles: unverifiedFiles.length,
+      currentFileIndex: 0,
+    });
+
+    let verifiedCount = 0;
+    for (const file of unverifiedFiles) {
+      try {
+        setModelDownloadProgress(prev => prev ? {
+          ...prev,
+          fileName: `验证: ${file.file}`,
+          currentFileIndex: verifiedCount + 1,
+        } : null);
+
+        await ipcInvoke('models:verify-file', { groupId, filePath: file.file });
+        verifiedCount++;
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        setModelDownloadProgress(null);
+        setDownloadingGroupId(null);
+        setVerifyFailedInfo({ groupId, fileName: file.file, errorMessage });
+        setVerifyFailedDialogOpen(true);
+        return;
+      }
+    }
+
+    setModelDownloadProgress(null);
+    setDownloadingGroupId(null);
+    await checkAllGroupFiles();
+  }, [fileStatusMap, checkAllGroupFiles]);
+
+  const handleReverifyGroupFiles = useCallback(async (groupId: string) => {
+    try {
+      await ipcInvoke('models:clear-verified', { groupId });
+      await checkAllGroupFiles();
+      await handleVerifyGroupFiles(groupId);
+    } catch (error) {
+      console.error('Failed to reverify files:', error);
+    }
+  }, [checkAllGroupFiles, handleVerifyGroupFiles]);
+
+  const handleDownloadOrVerifyGroupFiles = useCallback(async (groupId: string) => {
+    const status = fileStatusMap[groupId];
+    if (!status) return;
+
+    const missingFiles = status.filter(f => !f.exists);
+    const unverifiedFiles = status.filter(f => f.exists && !f.verified);
+
+    if (missingFiles.length > 0) {
+      await handleDownloadGroupFiles(groupId);
+    } else if (unverifiedFiles.length > 0) {
+      await handleVerifyGroupFiles(groupId);
+    }
+  }, [fileStatusMap, handleDownloadGroupFiles, handleVerifyGroupFiles]);
 
   const handleCancelModelDownload = useCallback(async () => {
     try {
@@ -832,6 +917,14 @@ export const ModelWeightsPage = () => {
                 setExpandedGroups(newExpanded);
               };
 
+              const groupFileStatus = fileStatusMap[group.id];
+              const isGroupComplete = groupFileStatus && groupFileStatus.length > 0 
+                ? groupFileStatus.every(f => f.exists && f.verified) 
+                : false;
+              const hasMissingFiles = groupFileStatus && groupFileStatus.length > 0
+                ? groupFileStatus.some(f => !f.exists)
+                : false;
+
               return (
                 <Card key={group.id} className={styles.modelGroupCard}>
                   <div className={styles.modelGroupHeader}>
@@ -853,6 +946,50 @@ export const ModelWeightsPage = () => {
                           {getTaskTypeIcon(group.taskType)}
                           {getTaskTypeLabel(group.taskType)}
                         </span>
+                        {groupFileStatus && groupFileStatus.length > 0 && (
+                          <Tooltip 
+                            content={
+                              isGroupComplete 
+                                ? '所有文件已下载并验证' 
+                                : hasMissingFiles 
+                                  ? '存在缺失文件' 
+                                  : '存在未验证文件'
+                            } 
+                            relationship="label"
+                          >
+                            <span 
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: tokens.spacingHorizontalXXS,
+                                padding: `${tokens.spacingVerticalXXS} ${tokens.spacingHorizontalS}`,
+                                borderRadius: tokens.borderRadiusSmall,
+                                fontSize: tokens.fontSizeBase200,
+                                fontWeight: tokens.fontWeightSemibold,
+                                backgroundColor: isGroupComplete 
+                                  ? tokens.colorPaletteGreenBackground2 
+                                  : tokens.colorPaletteRedBackground2,
+                                color: isGroupComplete 
+                                  ? tokens.colorPaletteGreenForeground2 
+                                  : tokens.colorPaletteRedForeground2,
+                                flexShrink: 0,
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {isGroupComplete ? (
+                                <>
+                                  <CheckmarkCircleFilled fontSize={12} />
+                                  可用
+                                </>
+                              ) : (
+                                <>
+                                  <WarningFilled fontSize={12} />
+                                  {hasMissingFiles ? '文件缺失' : '需验证'}
+                                </>
+                              )}
+                            </span>
+                          </Tooltip>
+                        )}
                       </div>
                     </div>
                     <div className={styles.modelGroupActions}>
@@ -1066,27 +1203,43 @@ export const ModelWeightsPage = () => {
                           >
                             取消下载
                           </Button>
+                        ) : fileStatusMap[group.id]?.every(f => f.exists && f.verified) ? (
+                          <Button
+                            icon={<CheckmarkCircleFilled />}
+                            size="small"
+                            appearance="subtle"
+                            onClick={() => handleReverifyGroupFiles(group.id)}
+                            disabled={!!downloadingGroupId || loading}
+                          >
+                            重新验证
+                          </Button>
                         ) : (
                           <Button
                             icon={<ArrowDownloadRegular />}
                             size="small"
                             appearance="primary"
-                            onClick={() => handleDownloadGroupFiles(group.id)}
+                            onClick={() => handleDownloadOrVerifyGroupFiles(group.id)}
                             disabled={!!downloadingGroupId || loading}
                           >
-                            {fileStatusMap[group.id]?.every(f => f.exists) ? '全部已下载' : '下载缺失文件'}
+                            {fileStatusMap[group.id]?.every(f => f.exists) 
+                              ? '验证文件' 
+                              : '下载缺失文件'}
                           </Button>
                         )}
                       </div>
                       <div className={styles.fileStatusList}>
                         {group.hfFiles.map((hfFile) => {
                           const status = fileStatusMap[group.id]?.find(
-                            s => s.file === (hfFile.savePath || hfFile.file)
+                            s => s.file === hfFile.file || s.savePath === (hfFile.savePath || hfFile.file)
                           );
                           return (
                             <div key={hfFile.file} className={styles.fileStatusItem}>
                               {status?.exists ? (
-                                <CheckmarkCircleFilled style={{ color: tokens.colorPaletteGreenForeground1, fontSize: '14px' }} />
+                                status.verified ? (
+                                  <CheckmarkCircleFilled style={{ color: tokens.colorPaletteGreenForeground1, fontSize: '14px' }} />
+                                ) : (
+                                  <WarningFilled style={{ color: tokens.colorPaletteYellowForeground1, fontSize: '14px' }} />
+                                )
                               ) : (
                                 <DismissCircleRegular style={{ color: tokens.colorNeutralForeground3, fontSize: '14px' }} />
                               )}
@@ -1102,6 +1255,7 @@ export const ModelWeightsPage = () => {
                               {status?.exists && status.size !== undefined && (
                                 <span style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }}>
                                   {formatFileSize(status.size)}
+                                  {!status.verified && ' (未验证)'}
                                 </span>
                               )}
                             </div>
@@ -1460,6 +1614,43 @@ export const ModelWeightsPage = () => {
               onClick={() => setMessageDialogOpen(false)}
             >
               确定
+            </Button>
+          </DialogActions>
+        </DialogSurface>
+      </Dialog>
+
+      <Dialog open={verifyFailedDialogOpen} onOpenChange={(_, data) => setVerifyFailedDialogOpen(data.open)}>
+        <DialogSurface>
+          <DialogTitle>验证失败</DialogTitle>
+          <DialogBody>
+            <DialogContent>
+              <Body1 style={{ whiteSpace: 'pre-line' }}>
+                {verifyFailedInfo?.fileName}: {verifyFailedInfo?.errorMessage}
+              </Body1>
+            </DialogContent>
+          </DialogBody>
+          <DialogActions>
+            <Button appearance="secondary" onClick={() => setVerifyFailedDialogOpen(false)}>
+              取消
+            </Button>
+            <Button
+              appearance="primary"
+              onClick={async () => {
+                setVerifyFailedDialogOpen(false);
+                if (verifyFailedInfo) {
+                  try {
+                    await ipcInvoke('models:delete-file', {
+                      groupId: verifyFailedInfo.groupId,
+                      filePath: verifyFailedInfo.fileName,
+                    });
+                  } catch (error) {
+                    console.error('Failed to delete file:', error);
+                  }
+                  await handleDownloadGroupFiles(verifyFailedInfo.groupId);
+                }
+              }}
+            >
+              重新下载
             </Button>
           </DialogActions>
         </DialogSurface>

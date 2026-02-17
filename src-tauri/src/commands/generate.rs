@@ -24,15 +24,18 @@ pub struct CliOutput {
 
 fn resolve_sdcpp_executable(device_folder: &Path) -> Option<std::path::PathBuf> {
     let candidates: &[&str] = if cfg!(target_os = "windows") {
-        &["sd.exe", "sd-cli.exe", "sd_server.exe", "sd-server.exe"]
+        &["sd-cli.exe", "sd.exe", "sd_server.exe", "sd-server.exe"]
     } else {
-        &["sd", "sd-cli", "sd_server", "sd-server"]
+        &["sd-cli", "sd", "sd_server", "sd-server"]
     };
 
-    candidates
-        .iter()
-        .map(|name| device_folder.join(name))
-        .find(|path| path.exists())
+    for candidate in candidates {
+        let exe_path = device_folder.join(candidate);
+        if exe_path.exists() {
+            return Some(exe_path);
+        }
+    }
+    None
 }
 
 fn resolve_model_path_with_fallback(model_path: &str, primary_base_folder: &str) -> String {
@@ -69,6 +72,29 @@ fn resolve_model_path_with_fallback(model_path: &str, primary_base_folder: &str)
     }
 
     state::resolve_model_path(model_path, primary_base_folder)
+}
+
+fn resolve_generate_model_path(
+    model_path: &str,
+    weights_folder: &str,
+    group_folder: Option<&str>,
+) -> String {
+    if model_path.trim().is_empty() {
+        return String::new();
+    }
+
+    let path = Path::new(model_path);
+    if path.is_absolute() {
+        return model_path.to_string();
+    }
+
+    if let Some(folder) = group_folder {
+        if !folder.trim().is_empty() {
+            return state::resolve_model_path_in_group(model_path, weights_folder, folder);
+        }
+    }
+
+    resolve_model_path_with_fallback(model_path, weights_folder)
 }
 
 /// Start image generation
@@ -115,6 +141,28 @@ pub async fn generate_start(
 
     // Build CLI arguments
     let args = build_generate_args(&value, &state, &output_path)?;
+
+    let command_line = format!(
+        "{} {}",
+        exe_path.display(),
+        args.iter()
+            .map(|arg| {
+                if arg.contains(' ') {
+                    format!("\"{}\"", arg)
+                } else {
+                    arg.clone()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    let _ = app.emit(
+        "generate:cli-output",
+        CliOutput {
+            output_type: "info".to_string(),
+            text: format!("[command] {}", command_line),
+        },
+    );
 
     // Set up cancellation
     let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
@@ -390,49 +438,100 @@ fn build_generate_args(
         .clone()
         .unwrap_or_default();
 
+    let group_folder_from_params = if let Some(group_id) = params["groupId"].as_str() {
+        if !group_id.trim().is_empty() {
+            let groups_path = state::get_model_groups_path(Some(&weights_folder));
+            if groups_path.exists() {
+                let data = std::fs::read_to_string(&groups_path).map_err(|e| e.to_string())?;
+                let groups: Vec<serde_json::Value> =
+                    serde_json::from_str(&data).map_err(|e| e.to_string())?;
+                groups
+                    .iter()
+                    .find(|g| g["id"].as_str() == Some(group_id))
+                    .and_then(|g| g["folder"].as_str())
+                    .map(|s| s.to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let mut resolved_diffusion_model: Option<String> = None;
+    let mut resolved_sd_model: Option<String> = None;
+
     let mut model_paths_injected = false;
     // 独立扩散模型（如 Z-Image），使用 --diffusion-model
     if let Some(diff_model) = params["diffusionModel"].as_str() {
-        if !diff_model.is_empty() {
-            let resolved = resolve_model_path_with_fallback(diff_model, &weights_folder);
+        if !diff_model.trim().is_empty() {
+            let resolved = resolve_generate_model_path(
+                diff_model,
+                &weights_folder,
+                group_folder_from_params.as_deref(),
+            );
             args.push("--diffusion-model".to_string());
-            args.push(resolved);
+            args.push(resolved.clone());
+            resolved_diffusion_model = Some(resolved);
             model_paths_injected = true;
         }
     }
     // 完整 SD 模型，使用 -m
     if let Some(sd_model) = params["sdModel"].as_str() {
-        if !sd_model.is_empty() {
-            let resolved = resolve_model_path_with_fallback(sd_model, &weights_folder);
+        if !sd_model.trim().is_empty() {
+            let resolved = resolve_generate_model_path(
+                sd_model,
+                &weights_folder,
+                group_folder_from_params.as_deref(),
+            );
             args.push("-m".to_string());
-            args.push(resolved);
+            args.push(resolved.clone());
+            resolved_sd_model = Some(resolved);
             model_paths_injected = true;
         }
     }
     if let Some(vae) = params["vaeModel"].as_str() {
         if !vae.is_empty() {
-            let resolved = resolve_model_path_with_fallback(vae, &weights_folder);
+            let resolved = resolve_generate_model_path(
+                vae,
+                &weights_folder,
+                group_folder_from_params.as_deref(),
+            );
             args.push("--vae".to_string());
             args.push(resolved);
         }
     }
     if let Some(llm) = params["llmModel"].as_str() {
         if !llm.is_empty() {
-            let resolved = resolve_model_path_with_fallback(llm, &weights_folder);
+            let resolved = resolve_generate_model_path(
+                llm,
+                &weights_folder,
+                group_folder_from_params.as_deref(),
+            );
             args.push("--llm".to_string());
             args.push(resolved);
         }
     }
     if let Some(clip_l) = params["clipLModel"].as_str() {
         if !clip_l.is_empty() {
-            let resolved = resolve_model_path_with_fallback(clip_l, &weights_folder);
+            let resolved = resolve_generate_model_path(
+                clip_l,
+                &weights_folder,
+                group_folder_from_params.as_deref(),
+            );
             args.push("--clip_l".to_string());
             args.push(resolved);
         }
     }
     if let Some(t5xxl) = params["t5xxlModel"].as_str() {
         if !t5xxl.is_empty() {
-            let resolved = resolve_model_path_with_fallback(t5xxl, &weights_folder);
+            let resolved = resolve_generate_model_path(
+                t5xxl,
+                &weights_folder,
+                group_folder_from_params.as_deref(),
+            );
             args.push("--t5xxl".to_string());
             args.push(resolved);
         }
@@ -459,15 +558,19 @@ fn build_generate_args(
                     }
                 };
                 if let Some(diff_model) = group["diffusionModel"].as_str() {
-                    if !diff_model.is_empty() {
+                    if !diff_model.trim().is_empty() {
+                        let resolved = resolve_path(diff_model);
                         args.push("--diffusion-model".to_string());
-                        args.push(resolve_path(diff_model));
+                        args.push(resolved.clone());
+                        resolved_diffusion_model = Some(resolved);
                     }
                 }
                 if let Some(sd_model) = group["sdModel"].as_str() {
-                    if !sd_model.is_empty() {
+                    if !sd_model.trim().is_empty() {
+                        let resolved = resolve_path(sd_model);
                         args.push("-m".to_string());
-                        args.push(resolve_path(sd_model));
+                        args.push(resolved.clone());
+                        resolved_sd_model = Some(resolved);
                     }
                 }
                 if let Some(vae) = group["vaeModel"].as_str() {
@@ -502,6 +605,25 @@ fn build_generate_args(
                 }
             }
         }
+    }
+
+    if resolved_sd_model.is_none() {
+        if let Some(diff_model) = resolved_diffusion_model.clone() {
+            args.push("-m".to_string());
+            args.push(diff_model.clone());
+            resolved_sd_model = Some(diff_model);
+        }
+    }
+
+    let has_diffusion_model = resolved_diffusion_model
+        .as_ref()
+        .is_some_and(|p| !p.trim().is_empty() && Path::new(p).exists());
+    let has_sd_model = resolved_sd_model
+        .as_ref()
+        .is_some_and(|p| !p.trim().is_empty() && Path::new(p).exists());
+
+    if !has_diffusion_model && !has_sd_model {
+        return Err("未找到可用模型文件：请检查模型组中的 diffusionModel/sdModel 是否已配置且文件存在".to_string());
     }
     }
 

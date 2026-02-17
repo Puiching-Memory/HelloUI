@@ -6,9 +6,9 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 fn resolve_sdcpp_executable(device_folder: &Path) -> Option<std::path::PathBuf> {
     let candidates: &[&str] = if cfg!(target_os = "windows") {
-        &["sd.exe", "sd-cli.exe", "sd_server.exe", "sd-server.exe"]
+        &["sd-cli.exe", "sd.exe", "sd_server.exe", "sd-server.exe"]
     } else {
-        &["sd", "sd-cli", "sd_server", "sd-server"]
+        &["sd-cli", "sd", "sd_server", "sd-server"]
     };
 
     candidates

@@ -15,9 +15,22 @@ interface MessageDialogProps {
   title?: string
   message: string
   onClose: () => void
+  onConfirm?: () => void
+  confirmLabel?: string
+  cancelLabel?: string
 }
 
-export function MessageDialog({ open, title = '提示', message, onClose }: MessageDialogProps) {
+export function MessageDialog({ 
+  open, 
+  title = '提示', 
+  message, 
+  onClose,
+  onConfirm,
+  confirmLabel = '确定',
+  cancelLabel = '取消'
+}: MessageDialogProps) {
+  const hasConfirm = !!onConfirm
+
   return (
     <Dialog open={open} onOpenChange={(_, data) => !data.open && onClose()}>
       <DialogSurface>
@@ -28,8 +41,16 @@ export function MessageDialog({ open, title = '提示', message, onClose }: Mess
           </DialogContent>
         </DialogBody>
         <DialogActions>
-          <Button appearance="primary" onClick={onClose}>
-            确定
+          {hasConfirm && (
+            <Button appearance="secondary" onClick={onClose}>
+              {cancelLabel}
+            </Button>
+          )}
+          <Button 
+            appearance="primary" 
+            onClick={hasConfirm ? () => { onClose(); onConfirm(); } : onClose}
+          >
+            {confirmLabel}
           </Button>
         </DialogActions>
       </DialogSurface>
@@ -37,15 +58,14 @@ export function MessageDialog({ open, title = '提示', message, onClose }: Mess
   )
 }
 
-/**
- * 管理消息对话框状态的自定义 hook
- */
 export function useMessageDialog() {
   const [open, setOpen] = useState(false)
   const [content, setContent] = useState<{ title: string; message: string }>({ title: '提示', message: '' })
+  const [confirmAction, setConfirmAction] = useState<(() => void) | undefined>(undefined)
 
-  const showMessage = useCallback((title: string, message: string) => {
+  const showMessage = useCallback((title: string, message: string, onConfirm?: () => void) => {
     setContent({ title, message })
+    setConfirmAction(() => onConfirm)
     setOpen(true)
   }, [])
 
@@ -57,5 +77,6 @@ export function useMessageDialog() {
     message: content.message,
     showMessage,
     close,
+    confirmAction,
   }
 }

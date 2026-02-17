@@ -194,9 +194,9 @@ pub async fn sdcpp_list_files(
 
 async fn get_sdcpp_version(device_folder: &Path) -> Option<String> {
     let candidates: &[&str] = if cfg!(target_os = "windows") {
-        &["sd.exe", "sd-cli.exe", "sd_server.exe", "sd-server.exe"]
+        &["sd-cli.exe", "sd.exe", "sd_server.exe", "sd-server.exe"]
     } else {
-        &["sd", "sd-cli", "sd_server", "sd-server"]
+        &["sd-cli", "sd", "sd_server", "sd-server"]
     };
 
     for candidate in candidates {
@@ -449,7 +449,9 @@ fn is_cpu_variant_supported(cpu_variant: Option<&str>) -> bool {
 
 fn classify_asset_device(name: &str) -> String {
     let lower = name.to_lowercase();
-    if lower.contains("cuda") || lower.contains("cudart") {
+    if lower.contains("cudart") || lower.contains("cublas") || lower.contains("cufft") {
+        "cuda-runtime".to_string()
+    } else if lower.contains("cuda") {
         "cuda".to_string()
     } else if lower.contains("vulkan") {
         "vulkan".to_string()
@@ -510,8 +512,8 @@ pub async fn sdcpp_download_engine(
 
     let download_url = asset.download_url.clone();
     let zip_path = device_folder.join(&asset.name);
+    let expected_size = asset.size;
 
-    // Download the file
     let client = reqwest::Client::new();
     let response = client
         .get(&download_url)
@@ -520,7 +522,7 @@ pub async fn sdcpp_download_engine(
         .await
         .map_err(|e| e.to_string())?;
 
-    let total_bytes = response.content_length().unwrap_or(0);
+    let total_bytes = response.content_length().unwrap_or(expected_size);
     let mut downloaded_bytes: u64 = 0;
 
     let mut file = std::fs::File::create(&zip_path).map_err(|e| e.to_string())?;
@@ -557,7 +559,17 @@ pub async fn sdcpp_download_engine(
 
     drop(file);
 
-    // Extract the ZIP
+    let actual_size = std::fs::metadata(&zip_path)
+        .map_err(|e| e.to_string())?
+        .len();
+    if expected_size > 0 && actual_size != expected_size {
+        let _ = std::fs::remove_file(&zip_path);
+        return Err(format!(
+            "文件大小不匹配: 期望 {} 字节, 实际 {} 字节。下载可能不完整，请重试。",
+            expected_size, actual_size
+        ));
+    }
+
     let _ = app.emit(
         "sdcpp:download-progress",
         SDCppDownloadProgress {
@@ -570,10 +582,22 @@ pub async fn sdcpp_download_engine(
         },
     );
 
-    extract_zip(&zip_path, &device_folder)?;
+    let extracted_files = extract_zip(&zip_path, &device_folder)?;
 
-    // Clean up the zip file
     let _ = std::fs::remove_file(&zip_path);
+
+    let mut missing_files: Vec<String> = Vec::new();
+    for extracted_file in &extracted_files {
+        if !extracted_file.exists() {
+            missing_files.push(extracted_file.to_string_lossy().to_string());
+        }
+    }
+    if !missing_files.is_empty() {
+        return Err(format!(
+            "解压后文件完整性检查失败，以下文件不存在: {}",
+            missing_files.join(", ")
+        ));
+    }
 
     let _ = app.emit(
         "sdcpp:download-progress",
@@ -587,12 +611,13 @@ pub async fn sdcpp_download_engine(
         },
     );
 
-    Ok(serde_json::json!({ "success": true }))
+    Ok(serde_json::json!({ "success": true, "extractedFiles": extracted_files.len() }))
 }
 
-fn extract_zip(zip_path: &Path, dest: &Path) -> Result<(), String> {
+fn extract_zip(zip_path: &Path, dest: &Path) -> Result<Vec<PathBuf>, String> {
     let file = std::fs::File::open(zip_path).map_err(|e| e.to_string())?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+    let mut extracted_files: Vec<PathBuf> = Vec::new();
 
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
@@ -606,10 +631,11 @@ fn extract_zip(zip_path: &Path, dest: &Path) -> Result<(), String> {
             }
             let mut outfile = std::fs::File::create(&out_path).map_err(|e| e.to_string())?;
             std::io::copy(&mut entry, &mut outfile).map_err(|e| e.to_string())?;
+            extracted_files.push(out_path);
         }
     }
 
-    Ok(())
+    Ok(extracted_files)
 }
 
 /// Cancel engine download

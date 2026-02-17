@@ -1,7 +1,7 @@
 use crate::state::{self, AppState};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use tauri::{Manager, State};
+use tauri::State;
 use tauri_plugin_dialog::DialogExt;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -13,26 +13,6 @@ pub struct WeightFile {
     pub modified: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cpu_variant: Option<String>,
-}
-
-/// Initialize default folders on app startup
-pub async fn init_default_folders(app: &tauri::AppHandle) -> Result<(), String> {
-    let models_folder = state::get_default_models_folder();
-    let sdcpp_folder = state::get_default_sdcpp_folder();
-    let outputs_folder = state::get_default_outputs_folder();
-
-    for folder in [&models_folder, &outputs_folder] {
-        if !folder.exists() {
-            std::fs::create_dir_all(folder).map_err(|e| e.to_string())?;
-        }
-    }
-
-    let state = app.state::<AppState>();
-    *state.weights_folder.lock().unwrap() = Some(models_folder.to_string_lossy().to_string());
-    *state.sdcpp_folder.lock().unwrap() = Some(sdcpp_folder.to_string_lossy().to_string());
-    *state.outputs_folder.lock().unwrap() = Some(outputs_folder.to_string_lossy().to_string());
-
-    Ok(())
 }
 
 /// Initialize the default models folder

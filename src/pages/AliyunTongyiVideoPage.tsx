@@ -105,6 +105,11 @@ const useStyles = makeStyles({
   field: {
     flex: '1 1 200px',
   },
+  shotTypeField: {
+    '& label': {
+      minWidth: '70px',
+    },
+  },
   floatingControlPanel: {
     position: 'fixed',
     bottom: tokens.spacingVerticalL,
@@ -416,7 +421,7 @@ export const AliyunTongyiVideoPage = () => {
               onChange={(_, data) => setPromptExtend(!!data.checked)}
             />
             {model === 'wan2.6-t2v' && (
-              <Field label="镜头类型" orientation="horizontal">
+              <Field label="镜头类型" orientation="horizontal" className={styles.shotTypeField}>
                 <TabList
                   selectedValue={shotType}
                   onTabSelect={(_, data) => setShotType(data.value as 'single' | 'multi')}

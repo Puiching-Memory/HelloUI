@@ -1,10 +1,24 @@
-import type { DeviceType, ModelGroup } from '../../shared/types'
+import type { DeviceType, CpuVariant, ModelGroup, AvailableEngine } from '../../shared/types'
 import { getPathBaseName } from './tauriPath'
 
 /**
  * 获取设备类型的显示标签
  */
-export function getDeviceLabel(device: DeviceType): string {
+export function getDeviceLabel(device: DeviceType, cpuVariant?: CpuVariant): string {
+  if (device === 'cpu' && cpuVariant) {
+    switch (cpuVariant) {
+      case 'avx2':
+        return 'CPU (AVX2)'
+      case 'avx512':
+        return 'CPU (AVX-512)'
+      case 'avx':
+        return 'CPU (AVX)'
+      case 'noavx':
+        return 'CPU (无AVX)'
+      default:
+        return 'CPU'
+    }
+  }
   switch (device) {
     case 'cpu':
       return 'CPU'
@@ -17,6 +31,16 @@ export function getDeviceLabel(device: DeviceType): string {
     default:
       return device
   }
+}
+
+/**
+ * 获取引擎的唯一标识符（用于下拉菜单选项值）
+ */
+export function getEngineValue(engine: AvailableEngine): string {
+  if (engine.deviceType === 'cpu' && engine.cpuVariant) {
+    return `cpu-${engine.cpuVariant}`
+  }
+  return engine.deviceType
 }
 
 /**
