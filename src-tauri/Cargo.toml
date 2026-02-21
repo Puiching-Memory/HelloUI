@@ -1,6 +1,6 @@
 [package]
 name = "helloui"
-version = "2.0.4"
+version = "2.0.5"
 edition = "2024"
 description = "HelloUI - AI Image & Video Generation"
 rust-version = "1.93.0"

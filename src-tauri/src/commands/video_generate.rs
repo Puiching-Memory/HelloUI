@@ -4,6 +4,18 @@ use std::process::Stdio;
 use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+#[cfg(target_os = "windows")]
+fn configure_command(cmd: &mut tokio::process::Command) {
+    use std::os::windows::process::CommandExt;
+    cmd.as_std_mut().creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(target_os = "windows"))]
+fn configure_command(_cmd: &mut tokio::process::Command) {}
+
 fn resolve_sdcpp_executable(device_folder: &Path) -> Option<std::path::PathBuf> {
     let candidates: &[&str] = if cfg!(target_os = "windows") {
         &["sd-cli.exe", "sd.exe", "sd_server.exe", "sd-server.exe"]
@@ -75,11 +87,13 @@ pub async fn generate_video_start(
     *state.video_generate_cancel.lock().unwrap() = Some(cancel_tx);
 
     // Spawn process
-    let mut child = tokio::process::Command::new(&exe_path)
-        .args(&args)
+    let mut cmd = tokio::process::Command::new(&exe_path);
+    cmd.args(&args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
+        .kill_on_drop(true);
+    configure_command(&mut cmd);
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to start process: {}", e))?;
 
@@ -138,10 +152,10 @@ pub async fn generate_video_start(
             let _ = child.kill().await;
             if cfg!(target_os = "windows") {
                 if let Some(pid) = pid {
-                    let _ = tokio::process::Command::new("taskkill")
-                        .args(&["/F", "/T", "/PID", &pid.to_string()])
-                        .output()
-                        .await;
+                    let mut kill_cmd = tokio::process::Command::new("taskkill");
+                    kill_cmd.args(&["/F", "/T", "/PID", &pid.to_string()]);
+                    configure_command(&mut kill_cmd);
+                    let _ = kill_cmd.output().await;
                 }
             }
             return Ok(serde_json::json!({ "success": false, "error": "cancelled" }));
@@ -163,21 +177,21 @@ pub async fn generate_video_start(
     let mut final_video_path = output_avi_path.clone();
 
     if output_avi_path.exists() && ffmpeg_path.exists() {
-        let ffmpeg_result = tokio::process::Command::new(&ffmpeg_path)
-            .args(&[
-                "-i",
-                &output_avi_path.to_string_lossy(),
-                "-c:v",
-                "libx264",
-                "-preset",
-                "fast",
-                "-crf",
-                "23",
-                "-y",
-                &output_mp4_path.to_string_lossy(),
-            ])
-            .output()
-            .await;
+        let mut ffmpeg_cmd = tokio::process::Command::new(&ffmpeg_path);
+        ffmpeg_cmd.args(&[
+            "-i",
+            &output_avi_path.to_string_lossy(),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "fast",
+            "-crf",
+            "23",
+            "-y",
+            &output_mp4_path.to_string_lossy(),
+        ]);
+        configure_command(&mut ffmpeg_cmd);
+        let ffmpeg_result = ffmpeg_cmd.output().await;
 
         if let Ok(output) = ffmpeg_result {
             if output.status.success() && output_mp4_path.exists() {

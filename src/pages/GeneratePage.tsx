@@ -73,6 +73,7 @@ export const GeneratePage = () => {
   const [diffusionConvDirect, setDiffusionConvDirect] = useState<boolean>(false);
   const [vaeConvDirect, setVaeConvDirect] = useState<boolean>(false);
   const [vaeTiling, setVaeTiling] = useState<boolean>(true);
+  const [flowShift, setFlowShift] = useState<number>(0); // 0 表示不传（使用模型默认值）
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
 
   // 监听预览图片更新
@@ -103,6 +104,14 @@ export const GeneratePage = () => {
         if (group.defaultHeight) {
           setHeight(group.defaultHeight);
         }
+        if (typeof group.defaultSamplingMethod === 'string') {
+          setSamplingMethod(group.defaultSamplingMethod);
+        }
+        if (typeof group.defaultScheduler === 'string') {
+          setScheduler(group.defaultScheduler);
+        }
+        // Flow Shift：有明确值（非零）时设置，否则重置为 0
+        setFlowShift(typeof group.defaultFlowShift === 'number' && group.defaultFlowShift > 0 ? group.defaultFlowShift : 0);
       }
     }
   }, [selectedGroupId, modelGroups]);
@@ -177,6 +186,7 @@ export const GeneratePage = () => {
           diffusionConvDirect,
           vaeConvDirect,
           vaeTiling,
+          flowShift: flowShift > 0 ? flowShift : undefined,
         });
 
         if (result.success && result.image) {
@@ -379,6 +389,11 @@ export const GeneratePage = () => {
                     }
                     if (typeof selectedGroup.defaultScheduler === 'string') {
                       setScheduler(selectedGroup.defaultScheduler);
+                    }
+                    if (typeof selectedGroup.defaultFlowShift === 'number') {
+                      setFlowShift(selectedGroup.defaultFlowShift > 0 ? selectedGroup.defaultFlowShift : 0);
+                    } else {
+                      setFlowShift(0);
                     }
                     if (typeof selectedGroup.defaultSeed === 'number') {
                       if (selectedGroup.defaultSeed >= 0) {
@@ -644,6 +659,15 @@ export const GeneratePage = () => {
                 onChange={(_, data) => setCfgScale(data.value ?? 7.0)}
                 min={0.1}
                 max={30}
+                step={0.1}
+              />
+            </Field>
+            <Field label="Flow Shift" hint="Flow 模型（Z-Image/Wan 等）使用，0 表示不传（使用模型内置默认值）">
+              <SpinButton
+                value={flowShift}
+                onChange={(_, data) => setFlowShift(data.value ?? 0)}
+                min={0}
+                max={20}
                 step={0.1}
               />
             </Field>

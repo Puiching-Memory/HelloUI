@@ -785,21 +785,6 @@ export const ModelWeightsPage = () => {
         </Body1>
       </Card>
 
-      {/* 模型组管理 */}
-      <Card className={styles.section}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalM }}>
-          <Title2>模型组管理</Title2>
-          <Button
-            icon={<AddRegular />}
-            onClick={handleCreateGroup}
-            disabled={loading || !weightsFolder}
-            appearance="primary"
-          >
-            创建模型组
-          </Button>
-        </div>
-      </Card>
-
       {/* HF 下载源切换 */}
       <Card className={styles.section}>
         <Title2>模型下载源</Title2>
@@ -864,8 +849,19 @@ export const ModelWeightsPage = () => {
         )}
       </Card>
 
-      {/* 模型组列表 */}
+      {/* 模型组管理 */}
       <Card className={styles.section}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalM }}>
+          <Title2>模型组管理</Title2>
+          <Button
+            icon={<AddRegular />}
+            onClick={handleCreateGroup}
+            disabled={loading || !weightsFolder}
+            appearance="primary"
+          >
+            创建模型组
+          </Button>
+        </div>
         {modelGroups.length === 0 ? (
           <div className={styles.emptyState}>
             <Body1>暂无模型组</Body1>
@@ -1430,8 +1426,8 @@ export const ModelWeightsPage = () => {
                       step={0.1}
                     />
                   </Field>
-                  {(groupTaskType === 'video' || groupTaskType === 'edit') && (
-                    <Field label="Flow Shift" hint={groupTaskType === 'video' ? "Wan2.2 默认: 3.0" : "Qwen 2511 默认: 3.0"}>
+                  {(groupTaskType === 'video' || groupTaskType === 'edit' || groupTaskType === 'generate') && (
+                    <Field label="Flow Shift" hint={groupTaskType === 'video' ? "Wan2.2 默认: 3.0" : groupTaskType === 'generate' ? "Flow 模型默认: 3.0，普通 SD 模型留 0 不传" : "Qwen 2511 默认: 3.0"}>
                       <SpinButton
                         value={groupDefaultFlowShift}
                         onChange={(_, data) => setGroupDefaultFlowShift(data.value ?? 3.0)}

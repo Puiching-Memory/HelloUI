@@ -61,6 +61,8 @@ pub fn run() {
             // model download
             commands::model_download::models_get_hf_mirror,
             commands::model_download::models_set_hf_mirror,
+            commands::model_download::models_get_download_config,
+            commands::model_download::models_set_download_config,
             commands::model_download::models_download_group_files,
             commands::model_download::models_cancel_download,
             commands::model_download::models_check_files,

@@ -8,10 +8,14 @@ import {
   tokens,
   RadioGroup,
   Radio,
+  Dropdown,
+  Option,
+  Spinner,
 } from '@fluentui/react-components';
 import { CodeRegular, CheckmarkCircleFilled } from '@fluentui/react-icons';
 import { useState, useEffect } from 'react';
 import { useAppStore, type ThemeMode } from '../hooks/useAppStore';
+import { useDownloadConfig } from '../hooks/useDownloadConfig';
 import { ipcInvoke } from '../lib/tauriIpc';
 
 const useStyles = makeStyles({
@@ -84,10 +88,12 @@ const useStyles = makeStyles({
 export const SettingsPage = () => {
   const styles = useStyles();
   const { themeMode, setThemeMode, colorScheme, setColorScheme } = useAppStore();
+  const { config: downloadConfig, isLoading: configLoading, loadConfig, setConfig } = useDownloadConfig();
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [appVersion, setAppVersion] = useState<string>('');
+  const [chunkSizeMb, setChunkSizeMb] = useState(10);
+  const [maxConcurrentChunks, setMaxConcurrentChunks] = useState(4);
 
-  // 加载应用版本号
   useEffect(() => {
     const loadVersion = async () => {
       try {
@@ -100,6 +106,28 @@ export const SettingsPage = () => {
     };
     loadVersion();
   }, []);
+
+  useEffect(() => {
+    loadConfig();
+  }, [loadConfig]);
+
+  useEffect(() => {
+    if (downloadConfig) {
+      setChunkSizeMb(downloadConfig.chunkSizeMb);
+      setMaxConcurrentChunks(downloadConfig.maxConcurrentChunks);
+    }
+  }, [downloadConfig]);
+
+  const handleSaveDownloadConfig = async () => {
+    try {
+      await setConfig({
+        chunkSizeMb,
+        maxConcurrentChunks,
+      });
+    } catch (error) {
+      console.error('Failed to save download config:', error);
+    }
+  };
 
   return (
     <div className={styles.container}>
@@ -188,6 +216,69 @@ export const SettingsPage = () => {
             </RadioGroup>
           </div>
         </div>
+      </Card>
+
+      <Card className={styles.section}>
+        <Title2>下载设置</Title2>
+        <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginBottom: tokens.spacingVerticalM }}>
+          调整模型下载时的参数配置
+        </Body1>
+        
+        {configLoading && !downloadConfig && (
+          <Spinner size="small" label="加载配置中..." />
+        )}
+        
+        {downloadConfig && (
+          <div className={styles.section}>
+            <div>
+              <Body1 style={{ marginBottom: tokens.spacingVerticalXS }}>分块大小</Body1>
+              <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginBottom: tokens.spacingVerticalS }}>
+                下载大文件时的分块大小，较大的值可减少请求次数
+              </Body1>
+              <Dropdown
+                value={String(chunkSizeMb)}
+                selectedOptions={[String(chunkSizeMb)]}
+                onOptionSelect={(_, data) => setChunkSizeMb(Number(data.optionValue))}
+                style={{ maxWidth: '200px' }}
+              >
+                <Option value="5">5 MB</Option>
+                <Option value="10">10 MB</Option>
+                <Option value="20">20 MB</Option>
+                <Option value="50">50 MB</Option>
+                <Option value="100">100 MB</Option>
+              </Dropdown>
+            </div>
+            
+            <div>
+              <Body1 style={{ marginBottom: tokens.spacingVerticalXS }}>最大并发分块数</Body1>
+              <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginBottom: tokens.spacingVerticalS }}>
+                同时下载的分块数量，较大的值可提高下载速度
+              </Body1>
+              <Dropdown
+                value={String(maxConcurrentChunks)}
+                selectedOptions={[String(maxConcurrentChunks)]}
+                onOptionSelect={(_, data) => setMaxConcurrentChunks(Number(data.optionValue))}
+                style={{ maxWidth: '200px' }}
+              >
+                <Option value="1">1</Option>
+                <Option value="2">2</Option>
+                <Option value="4">4</Option>
+                <Option value="8">8</Option>
+                <Option value="16">16</Option>
+              </Dropdown>
+            </div>
+            
+            <div style={{ marginTop: tokens.spacingVerticalM }}>
+              <Button
+                appearance="primary"
+                onClick={handleSaveDownloadConfig}
+                disabled={configLoading}
+              >
+                {configLoading ? '保存中...' : '保存设置'}
+              </Button>
+            </div>
+          </div>
+        )}
       </Card>
 
       <Card className={styles.section}>

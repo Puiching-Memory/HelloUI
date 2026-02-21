@@ -7,6 +7,9 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateProgress {
@@ -21,6 +24,15 @@ pub struct CliOutput {
     pub output_type: String,
     pub text: String,
 }
+
+#[cfg(target_os = "windows")]
+fn configure_command(cmd: &mut tokio::process::Command) {
+    use std::os::windows::process::CommandExt;
+    cmd.as_std_mut().creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(target_os = "windows"))]
+fn configure_command(_cmd: &mut tokio::process::Command) {}
 
 fn resolve_sdcpp_executable(device_folder: &Path) -> Option<std::path::PathBuf> {
     let candidates: &[&str] = if cfg!(target_os = "windows") {
@@ -172,11 +184,15 @@ pub async fn generate_start(
     let preview_path = output_path.with_extension("preview.png");
 
     // Spawn process
-    let mut child = tokio::process::Command::new(&exe_path)
-        .args(&args)
+    let outputs_folder_path = Path::new(&outputs_folder);
+    let mut cmd = tokio::process::Command::new(&exe_path);
+    cmd.args(&args)
+        .current_dir(outputs_folder_path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
+        .kill_on_drop(true);
+    configure_command(&mut cmd);
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to start process: {}", e))?;
 
@@ -290,13 +306,14 @@ pub async fn generate_start(
             let _ = child.kill().await;
             if cfg!(target_os = "windows") {
                 if let Some(pid) = pid {
-                    let _ = tokio::process::Command::new("taskkill")
-                        .args(&["/F", "/T", "/PID", &pid.to_string()])
-                        .output()
-                        .await;
+                    let mut kill_cmd = tokio::process::Command::new("taskkill");
+                    kill_cmd.args(&["/F", "/T", "/PID", &pid.to_string()]);
+                    configure_command(&mut kill_cmd);
+                    let _ = kill_cmd.output().await;
                 }
             }
             preview_task.abort();
+            let _ = tokio::fs::remove_file(&preview_path).await;
             return Ok(serde_json::json!({
                 "success": false,
                 "error": "cancelled"
@@ -607,14 +624,8 @@ fn build_generate_args(
         }
     }
 
-    if resolved_sd_model.is_none() {
-        if let Some(diff_model) = resolved_diffusion_model.clone() {
-            args.push("-m".to_string());
-            args.push(diff_model.clone());
-            resolved_sd_model = Some(diff_model);
-        }
-    }
-
+    // 注意：Z-Image 等模型使用 --diffusion-model + --llm 组合，
+    // 不能再额外追加 -m，否则会导致 sd.cpp 将 diffusion 权重当作完整 SD 模型加载，输出乱码。
     let has_diffusion_model = resolved_diffusion_model
         .as_ref()
         .is_some_and(|p| !p.trim().is_empty() && Path::new(p).exists());
@@ -731,6 +742,14 @@ fn build_generate_args(
     }
     if params["vaeTiling"].as_bool() == Some(true) {
         args.push("--vae-tiling".to_string());
+    }
+
+    // Flow shift (for flow-based models like Z-Image, Wan, etc.)
+    if let Some(flow_shift) = params["flowShift"].as_f64() {
+        if flow_shift > 0.0 {
+            args.push("--flow-shift".to_string());
+            args.push(flow_shift.to_string());
+        }
     }
 
     // Preview

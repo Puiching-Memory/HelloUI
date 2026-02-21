@@ -5,6 +5,18 @@ use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 use tokio::time::{timeout, Duration};
 
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+#[cfg(target_os = "windows")]
+fn configure_command(cmd: &mut tokio::process::Command) {
+    use std::os::windows::process::CommandExt;
+    cmd.as_std_mut().creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(target_os = "windows"))]
+fn configure_command(_cmd: &mut tokio::process::Command) {}
+
 use super::weights::WeightFile;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -205,9 +217,13 @@ async fn get_sdcpp_version(device_folder: &Path) -> Option<String> {
             continue;
         }
 
+        let mut cmd = tokio::process::Command::new(&exe_path);
+        cmd.arg("--version");
+        configure_command(&mut cmd);
+        
         let output = timeout(
             Duration::from_secs(5),
-            tokio::process::Command::new(&exe_path).arg("--version").output(),
+            cmd.output(),
         )
         .await
         .ok()?
@@ -499,16 +515,23 @@ pub async fn sdcpp_download_engine(
         .clone()
         .ok_or("SD.cpp folder not set")?;
 
+    // CUDA Runtime DLLs must be in the same folder as the CUDA engine executable
     let device_folder = if asset.device_type == "cpu" {
         if let Some(ref variant) = asset.cpu_variant {
             Path::new(&sdcpp_folder).join(format!("cpu-{}", variant))
         } else {
             Path::new(&sdcpp_folder).join("cpu")
         }
+    } else if asset.device_type == "cuda-runtime" {
+        Path::new(&sdcpp_folder).join("cuda")
     } else {
         Path::new(&sdcpp_folder).join(&asset.device_type)
     };
     std::fs::create_dir_all(&device_folder).map_err(|e| e.to_string())?;
+
+    // Set up cancellation
+    let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+    *state.download_cancel.lock().unwrap() = Some(cancel_tx);
 
     let download_url = asset.download_url.clone();
     let zip_path = device_folder.join(&asset.name);
@@ -525,38 +548,67 @@ pub async fn sdcpp_download_engine(
     let total_bytes = response.content_length().unwrap_or(expected_size);
     let mut downloaded_bytes: u64 = 0;
 
-    let mut file = std::fs::File::create(&zip_path).map_err(|e| e.to_string())?;
+    let mut file = tokio::fs::File::create(&zip_path).await.map_err(|e| e.to_string())?;
 
     use futures::StreamExt;
-    use std::io::Write;
+    use tokio::io::AsyncWriteExt;
     let mut stream = response.bytes_stream();
     let start_time = std::time::Instant::now();
+    let mut last_emit = std::time::Instant::now();
+    let mut cancel_rx = cancel_rx;
 
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| e.to_string())?;
-        file.write_all(&chunk).map_err(|e| e.to_string())?;
-        downloaded_bytes += chunk.len() as u64;
+    loop {
+        tokio::select! {
+            chunk = stream.next() => {
+                match chunk {
+                    Some(Ok(data)) => {
+                        file.write_all(&data).await.map_err(|e| e.to_string())?;
+                        downloaded_bytes += data.len() as u64;
 
-        let elapsed = start_time.elapsed().as_secs_f64();
-        let speed = if elapsed > 0.0 {
-            downloaded_bytes as f64 / elapsed
-        } else {
-            0.0
-        };
+                        // Throttle progress events to avoid overwhelming the WebView message queue
+                        // (prevents Windows error 0x80070718: PostMessage queue full)
+                        let now = std::time::Instant::now();
+                        if now.duration_since(last_emit) >= std::time::Duration::from_millis(200)
+                            || downloaded_bytes >= total_bytes
+                        {
+                            let elapsed = start_time.elapsed().as_secs_f64();
+                            let speed = if elapsed > 0.0 {
+                                downloaded_bytes as f64 / elapsed
+                            } else {
+                                0.0
+                            };
 
-        let _ = app.emit(
-            "sdcpp:download-progress",
-            SDCppDownloadProgress {
-                stage: "downloading".to_string(),
-                downloaded_bytes,
-                total_bytes,
-                speed,
-                file_name: asset.name.clone(),
-                error: None,
-            },
-        );
+                            let _ = app.emit(
+                                "sdcpp:download-progress",
+                                SDCppDownloadProgress {
+                                    stage: "downloading".to_string(),
+                                    downloaded_bytes,
+                                    total_bytes,
+                                    speed,
+                                    file_name: asset.name.clone(),
+                                    error: None,
+                                },
+                            );
+                            last_emit = now;
+                        }
+                    }
+                    Some(Err(e)) => {
+                        drop(file);
+                        tokio::fs::remove_file(&zip_path).await.ok();
+                        return Err(e.to_string());
+                    }
+                    None => break,
+                }
+            }
+            _ = cancel_rx.changed() => {
+                drop(file);
+                tokio::fs::remove_file(&zip_path).await.ok();
+                return Ok(serde_json::json!({ "success": false, "error": "cancelled" }));
+            }
+        }
     }
 
+    file.flush().await.map_err(|e| e.to_string())?;
     drop(file);
 
     let actual_size = std::fs::metadata(&zip_path)

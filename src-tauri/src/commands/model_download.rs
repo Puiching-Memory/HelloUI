@@ -1,4 +1,4 @@
-use crate::state::{self, AppState};
+use crate::state::{self, AppState, DownloadConfig};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -8,10 +8,60 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::Semaphore;
 
-const DEFAULT_CHUNK_SIZE: usize = 10 * 1024 * 1024; // 10MB
-const MAX_CONCURRENT_CHUNKS: usize = 4;
-
 const VERIFIED_EXTENSION: &str = "verified";
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadConfigResponse {
+    pub chunk_size_mb: usize,
+    pub max_concurrent_chunks: usize,
+}
+
+impl From<DownloadConfig> for DownloadConfigResponse {
+    fn from(config: DownloadConfig) -> Self {
+        Self {
+            chunk_size_mb: config.chunk_size_mb,
+            max_concurrent_chunks: config.max_concurrent_chunks,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadConfigRequest {
+    pub chunk_size_mb: Option<usize>,
+    pub max_concurrent_chunks: Option<usize>,
+}
+
+#[tauri::command]
+pub async fn models_get_download_config(state: State<'_, AppState>) -> Result<DownloadConfigResponse, String> {
+    let config = state.download_config.lock().unwrap().clone();
+    Ok(DownloadConfigResponse::from(config))
+}
+
+#[tauri::command]
+pub async fn models_set_download_config(
+    state: State<'_, AppState>,
+    config: DownloadConfigRequest,
+) -> Result<DownloadConfigResponse, String> {
+    let mut current = state.download_config.lock().unwrap();
+    
+    if let Some(chunk_size_mb) = config.chunk_size_mb {
+        if chunk_size_mb < 1 || chunk_size_mb > 100 {
+            return Err("chunk_size_mb must be between 1 and 100".to_string());
+        }
+        current.chunk_size_mb = chunk_size_mb;
+    }
+    
+    if let Some(max_concurrent_chunks) = config.max_concurrent_chunks {
+        if max_concurrent_chunks < 1 || max_concurrent_chunks > 16 {
+            return Err("max_concurrent_chunks must be between 1 and 16".to_string());
+        }
+        current.max_concurrent_chunks = max_concurrent_chunks;
+    }
+    
+    Ok(DownloadConfigResponse::from(current.clone()))
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -101,12 +151,17 @@ mod file_lock {
                 !0,
                 !0,
             );
-            res
+            // Normalize to Unix convention: 0 = success, non-zero = failure
+            // Windows LockFile returns TRUE (non-zero) on success, FALSE (0) on failure
+            if res != 0 { 0 } else { -1 }
         }
     }
 
     pub fn unlock_file(file: &File) -> i32 {
-        unsafe { UnlockFile(file.as_raw_handle() as HANDLE, 0, 0, !0, !0) }
+        unsafe {
+            let res = UnlockFile(file.as_raw_handle() as HANDLE, 0, 0, !0, !0);
+            if res != 0 { 0 } else { -1 }
+        }
     }
 }
 
@@ -253,6 +308,7 @@ async fn download_file_parallel(
     total_files: u32,
     current_file_index: u32,
     cancel_rx: tokio::sync::watch::Receiver<bool>,
+    config: &DownloadConfig,
 ) -> Result<(), String> {
     let head_response = client
         .head(url)
@@ -280,8 +336,9 @@ async fn download_file_parallel(
         .unwrap_or(false);
 
     let part_path = dest_path.with_extension("part");
+    let chunk_size_bytes = (config.chunk_size_mb * 1024 * 1024) as u64;
 
-    if !accepts_range || total_bytes < DEFAULT_CHUNK_SIZE as u64 {
+    if !accepts_range || total_bytes < chunk_size_bytes {
         return download_file_sequential(
             app,
             client,
@@ -333,15 +390,14 @@ async fn download_file_parallel(
         start_time: std::time::Instant::now(),
     });
 
-    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_CHUNKS));
+    let semaphore = Arc::new(Semaphore::new(config.max_concurrent_chunks));
     let mut handles = Vec::new();
 
-    let chunk_size = DEFAULT_CHUNK_SIZE as u64;
     let mut current_pos = resume_pos;
 
     while current_pos < total_bytes {
         let start = current_pos;
-        let end = std::cmp::min(start + chunk_size - 1, total_bytes - 1);
+        let end = std::cmp::min(start + chunk_size_bytes - 1, total_bytes - 1);
 
         let permit = semaphore.clone().acquire_owned().await.map_err(|e| e.to_string())?;
         let client = client.clone();
@@ -492,6 +548,7 @@ async fn download_file_sequential(
         .map_err(|e| e.to_string())?;
     let mut stream = response.bytes_stream();
     let start_time = std::time::Instant::now();
+    let mut last_emit = std::time::Instant::now();
     let mut cancel_rx = cancel_rx;
 
     if *cancel_rx.borrow() {
@@ -507,19 +564,26 @@ async fn download_file_sequential(
                         out_file.write_all(&data).await.map_err(|e| e.to_string())?;
                         downloaded_bytes += data.len() as u64;
 
-                        let elapsed = start_time.elapsed().as_secs_f64();
-                        let speed = if elapsed > 0.0 { downloaded_bytes as f64 / elapsed } else { 0.0 };
+                        // Throttle progress events to avoid overwhelming the WebView message queue
+                        let now = std::time::Instant::now();
+                        if now.duration_since(last_emit) >= std::time::Duration::from_millis(200)
+                            || downloaded_bytes >= total_bytes
+                        {
+                            let elapsed = start_time.elapsed().as_secs_f64();
+                            let speed = if elapsed > 0.0 { downloaded_bytes as f64 / elapsed } else { 0.0 };
 
-                        let _ = app.emit("models:download-progress", ModelDownloadProgress {
-                            stage: "downloading".to_string(),
-                            downloaded_bytes,
-                            total_bytes,
-                            speed,
-                            file_name: file_name.to_string(),
-                            total_files,
-                            current_file_index,
-                            error: None,
-                        });
+                            let _ = app.emit("models:download-progress", ModelDownloadProgress {
+                                stage: "downloading".to_string(),
+                                downloaded_bytes,
+                                total_bytes,
+                                speed,
+                                file_name: file_name.to_string(),
+                                total_files,
+                                current_file_index,
+                                error: None,
+                            });
+                            last_emit = now;
+                        }
                     }
                     Some(Err(e)) => {
                         return Err(e.to_string());
@@ -608,6 +672,7 @@ pub async fn models_download_group_files(
 
     let client = reqwest::Client::new();
     let total_files = hf_files.len() as u32;
+    let download_config = state.download_config.lock().unwrap().clone();
 
     for (index, file_ref) in hf_files.iter().enumerate() {
         let repo = file_ref["repo"].as_str().unwrap_or("");
@@ -653,6 +718,7 @@ pub async fn models_download_group_files(
             total_files,
             (index + 1) as u32,
             cancel_rx.clone(),
+            &download_config,
         )
         .await;
 

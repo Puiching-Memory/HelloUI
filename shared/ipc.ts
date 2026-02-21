@@ -1,4 +1,4 @@
-import type { DeviceType, AvailableEngine, ModelGroup, WeightFile, GenerateImageParams, GeneratedImageInfo, MirrorSource, SDCppRelease, SDCppDownloadProgress, MirrorTestResult, SDCppReleaseAsset, HfMirrorId, ModelDownloadProgress } from './types.js'
+import type { DeviceType, AvailableEngine, ModelGroup, WeightFile, GenerateImageParams, GeneratedImageInfo, MirrorSource, SDCppRelease, SDCppDownloadProgress, MirrorTestResult, SDCppReleaseAsset, HfMirrorId, ModelDownloadProgress, DownloadConfig } from './types.js'
 
 // IPC channel allowlists
 export const IPC_INVOKE_CHANNELS = [
@@ -34,6 +34,8 @@ export const IPC_INVOKE_CHANNELS = [
   'models:download-group-files',
   'models:get-hf-mirror',
   'models:set-hf-mirror',
+  'models:get-download-config',
+  'models:set-download-config',
   'models:verify-file',
   'perfect-pixel:read-image',
   'perfect-pixel:save',
@@ -110,6 +112,8 @@ export interface IPCRequestMap {
 
   'models:get-hf-mirror': { request: void; response: HfMirrorId }
   'models:set-hf-mirror': { request: HfMirrorId; response: boolean }
+  'models:get-download-config': { request: void; response: DownloadConfig }
+  'models:set-download-config': { request: Partial<DownloadConfig>; response: DownloadConfig }
   'models:download-group-files': { request: { groupId: string; mirrorId?: HfMirrorId }; response: { success: boolean; error?: string } }
   'models:cancel-download': { request: void; response: boolean }
   'models:check-files': { request: { groupId: string }; response: Array<{ file: string; savePath?: string; exists: boolean; size?: number; verified: boolean; expectedSize?: number }> }

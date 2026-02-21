@@ -2,20 +2,34 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tokio::sync::watch;
 
-/// Shared application state, managed by Tauri
+pub const DEFAULT_CHUNK_SIZE_MB: usize = 10;
+pub const DEFAULT_MAX_CONCURRENT_CHUNKS: usize = 4;
+
+#[derive(Debug, Clone)]
+pub struct DownloadConfig {
+    pub chunk_size_mb: usize,
+    pub max_concurrent_chunks: usize,
+}
+
+impl Default for DownloadConfig {
+    fn default() -> Self {
+        Self {
+            chunk_size_mb: DEFAULT_CHUNK_SIZE_MB,
+            max_concurrent_chunks: DEFAULT_MAX_CONCURRENT_CHUNKS,
+        }
+    }
+}
+
 pub struct AppState {
     pub weights_folder: Mutex<Option<String>>,
     pub sdcpp_folder: Mutex<Option<String>>,
     pub sdcpp_device_type: Mutex<String>,
     pub outputs_folder: Mutex<Option<String>>,
-    /// Cancel signal for generate process
     pub generate_cancel: Mutex<Option<watch::Sender<bool>>>,
-    /// Cancel signal for video generate process
     pub video_generate_cancel: Mutex<Option<watch::Sender<bool>>>,
-    /// Cancel signal for download operations
     pub download_cancel: Mutex<Option<watch::Sender<bool>>>,
-    /// HuggingFace mirror ID
     pub hf_mirror_id: Mutex<String>,
+    pub download_config: Mutex<DownloadConfig>,
 }
 
 impl AppState {
@@ -29,6 +43,7 @@ impl AppState {
             video_generate_cancel: Mutex::new(None),
             download_cancel: Mutex::new(None),
             hf_mirror_id: Mutex::new("huggingface".to_string()),
+            download_config: Mutex::new(DownloadConfig::default()),
         }
     }
 }

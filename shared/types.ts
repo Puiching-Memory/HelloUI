@@ -330,3 +330,13 @@ export interface ModelDownloadProgress {
   /** 错误信息 */
   error?: string
 }
+
+/**
+ * 下载配置
+ */
+export interface DownloadConfig {
+  /** 分块大小（MB），范围 1-100，默认 10 */
+  chunkSizeMb: number
+  /** 最大并发分块数，范围 1-16，默认 4 */
+  maxConcurrentChunks: number
+}
