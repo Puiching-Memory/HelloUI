@@ -233,37 +233,26 @@ async fn get_sdcpp_version(device_folder: &Path) -> Option<String> {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let combined = format!("{}\n{}", stdout, stderr);
 
-        if let Some(line) = extract_version_line(&combined) {
-            return Some(line);
-        }
-    }
-
-    for text_name in ["stable-diffusion.cpp.txt", "ggml.txt"] {
-        let text_path = device_folder.join(text_name);
-        if !text_path.exists() {
-            continue;
-        }
-        if let Ok(content) = std::fs::read_to_string(text_path) {
-            if let Some(line) = extract_version_line(&content) {
-                return Some(line);
-            }
+        if let Some(commit) = extract_commit_hash(&combined) {
+            return Some(commit);
         }
     }
 
     None
 }
 
-fn extract_version_line(content: &str) -> Option<String> {
-    content
-        .lines()
-        .map(str::trim)
-        .find(|line| {
-            !line.is_empty()
-                && (line.to_ascii_lowercase().contains("version")
-                    || line.to_ascii_lowercase().contains("stable-diffusion.cpp")
-                    || line.starts_with('v'))
-        })
-        .map(|line| line.to_string())
+fn extract_commit_hash(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.len() >= 7 && trimmed.len() <= 40 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Some(if trimmed.len() > 7 {
+                trimmed[..7].to_string()
+            } else {
+                trimmed.to_string()
+            });
+        }
+    }
+    None
 }
 
 /// Export an engine file via save dialog

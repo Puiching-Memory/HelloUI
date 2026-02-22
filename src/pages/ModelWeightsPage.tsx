@@ -19,6 +19,14 @@ import {
   Tooltip,
   Dropdown,
   Option,
+  Table,
+  TableHeader,
+  TableRow,
+  TableHeaderCell,
+  TableBody,
+  TableCell,
+  TableCellLayout,
+  Badge,
 } from '@fluentui/react-components';
 import {
   ArrowDownloadRegular,
@@ -37,11 +45,11 @@ import {
   DismissCircleRegular,
   DismissRegular,
 } from '@fluentui/react-icons';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
 import { useTaskbarProgress } from '../hooks/useTaskbarProgress';
 import { ipcInvoke } from '../lib/tauriIpc';
-import { formatFileSize } from '@/utils/format';
+import { formatFileSize, formatSpeed, calculateEta, formatEta, calculatePercent } from '@/utils/format';
 import { getPathBaseName } from '@/utils/tauriPath';
 import type { TaskType, ModelGroup, HfMirrorId, ModelDownloadProgress } from '../../shared/types'
 
@@ -77,24 +85,53 @@ const useStyles = makeStyles({
     padding: tokens.spacingVerticalXXL,
     color: tokens.colorNeutralForeground3,
   },
-  modelGroupGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))',
-    gap: tokens.spacingVerticalL,
+  tableContainer: {
+    overflowX: 'auto',
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
   },
-  modelGroupCard: {
+  table: {
+    minWidth: '870px',
+    tableLayout: 'fixed',
+  },
+  colName: {
+    minWidth: '200px',
+  },
+  colType: {
+    width: '120px',
+  },
+  colStatus: {
+    width: '120px',
+  },
+  colFiles: {
+    width: '100px',
+  },
+  colActions: {
+    width: '280px',
+  },
+  colExpand: {
+    width: '40px',
+    position: 'sticky',
+    right: 0,
+    backgroundColor: tokens.colorNeutralBackground1,
+    zIndex: 1,
+  },
+  expandedRow: {
+    backgroundColor: tokens.colorNeutralBackground2,
+    padding: tokens.spacingVerticalM,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  expandedContent: {
+    display: 'flex',
+    gap: tokens.spacingHorizontalXL,
+    padding: tokens.spacingVerticalM,
+  },
+  expandedSection: {
+    flex: 1,
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-    padding: tokens.spacingVerticalL,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    borderRadius: tokens.borderRadiusLarge,
-    backgroundColor: tokens.colorNeutralBackground1,
-    transition: 'all 0.2s ease',
-    ':hover': {
-      border: `1px solid ${tokens.colorBrandStroke1}`,
-      boxShadow: tokens.shadow4,
-    },
+    gap: tokens.spacingVerticalS,
   },
   modelGroupHeader: {
     display: 'flex',
@@ -428,7 +465,11 @@ export const ModelWeightsPage = () => {
     }
   }, []);
 
+  const downloadingRef = useRef(false);
+
   const handleDownloadGroupFiles = useCallback(async (groupId: string) => {
+    if (downloadingRef.current) return;
+    downloadingRef.current = true;
     setDownloadingGroupId(groupId);
     setModelDownloadProgress({
       stage: 'downloading',
@@ -457,6 +498,8 @@ export const ModelWeightsPage = () => {
       setMessageDialogOpen(true);
       setModelDownloadProgress(null);
       setDownloadingGroupId(null);
+    } finally {
+      downloadingRef.current = false;
     }
   }, [hfMirrorId]);
 
@@ -813,6 +856,7 @@ export const ModelWeightsPage = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>
                 正在下载 ({modelDownloadProgress.currentFileIndex}/{modelDownloadProgress.totalFiles}): {modelDownloadProgress.fileName}
+                {modelDownloadProgress.totalBytes > 0 && ` — ${calculatePercent(modelDownloadProgress.downloadedBytes, modelDownloadProgress.totalBytes)}`}
               </Body1>
               <Button
                 appearance="subtle"
@@ -834,7 +878,14 @@ export const ModelWeightsPage = () => {
                   : formatFileSize(modelDownloadProgress.downloadedBytes)}
               </Body1>
               <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-                {modelDownloadProgress.speed > 0 ? `${formatFileSize(modelDownloadProgress.speed)}/s` : ''}
+                {(() => {
+                  const parts: string[] = [];
+                  if (modelDownloadProgress.speed > 0) parts.push(formatSpeed(modelDownloadProgress.speed));
+                  const eta = calculateEta(modelDownloadProgress.downloadedBytes, modelDownloadProgress.totalBytes, modelDownloadProgress.speed);
+                  const etaStr = formatEta(eta);
+                  if (etaStr) parts.push(etaStr);
+                  return parts.join(' · ');
+                })()}
               </Body1>
             </div>
           </div>
@@ -870,399 +921,357 @@ export const ModelWeightsPage = () => {
             </Body1>
           </div>
         ) : (
-          <div className={styles.modelGroupGrid}>
-            {modelGroups.map((group) => {
-              const getTaskTypeLabel = (taskType?: TaskType) => {
-                switch (taskType) {
-                  case 'generate':
-                    return '图片生成';
-                  case 'edit':
-                    return '图片编辑';
-                  case 'video':
-                    return '视频生成';
-                  case 'upscale':
-                    return '图像超分辨率';
-                  default:
-                    return '未指定';
-                }
-              };
+          <div className={styles.tableContainer}>
+            <Table className={styles.table}>
+              <TableHeader>
+                <TableRow>
+                  <TableHeaderCell className={styles.colName}>名称</TableHeaderCell>
+                  <TableHeaderCell className={styles.colType}>任务类型</TableHeaderCell>
+                  <TableHeaderCell className={styles.colStatus}>状态</TableHeaderCell>
+                  <TableHeaderCell className={styles.colFiles}>模型文件</TableHeaderCell>
+                  <TableHeaderCell className={styles.colActions}>操作</TableHeaderCell>
+                  <TableHeaderCell className={styles.colExpand}></TableHeaderCell>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {modelGroups.map((group) => {
+                  const getTaskTypeLabel = (taskType?: TaskType) => {
+                    switch (taskType) {
+                      case 'generate': return '图片生成';
+                      case 'edit': return '图片编辑';
+                      case 'video': return '视频生成';
+                      case 'upscale': return '图像超分辨率';
+                      default: return '未指定';
+                    }
+                  };
 
-              const getTaskTypeIcon = (taskType?: TaskType) => {
-                switch (taskType) {
-                  case 'generate':
-                    return <ImageAddRegular fontSize={16} />;
-                  case 'edit':
-                    return <EditIcon fontSize={16} />;
-                  case 'video':
-                    return <VideoClipRegular fontSize={16} />;
-                  case 'upscale':
-                    return <ZoomInRegular fontSize={16} />;
-                  default:
-                    return null;
-                }
-              };
+                  const getTaskTypeIcon = (taskType?: TaskType) => {
+                    switch (taskType) {
+                      case 'generate': return <ImageAddRegular fontSize={16} />;
+                      case 'edit': return <EditIcon fontSize={16} />;
+                      case 'video': return <VideoClipRegular fontSize={16} />;
+                      case 'upscale': return <ZoomInRegular fontSize={16} />;
+                      default: return null;
+                    }
+                  };
 
-              const isExpanded = expandedGroups.has(group.id);
-              const toggleExpand = () => {
-                const newExpanded = new Set(expandedGroups);
-                if (isExpanded) {
-                  newExpanded.delete(group.id);
-                } else {
-                  newExpanded.add(group.id);
-                }
-                setExpandedGroups(newExpanded);
-              };
+                  const isExpanded = expandedGroups.has(group.id);
+                  const toggleExpand = () => {
+                    const newExpanded = new Set(expandedGroups);
+                    if (isExpanded) {
+                      newExpanded.delete(group.id);
+                    } else {
+                      newExpanded.add(group.id);
+                    }
+                    setExpandedGroups(newExpanded);
+                  };
 
-              const groupFileStatus = fileStatusMap[group.id];
-              const isGroupComplete = groupFileStatus && groupFileStatus.length > 0 
-                ? groupFileStatus.every(f => f.exists && f.verified) 
-                : false;
-              const hasMissingFiles = groupFileStatus && groupFileStatus.length > 0
-                ? groupFileStatus.some(f => !f.exists)
-                : false;
+                  const groupFileStatus = fileStatusMap[group.id];
+                  const isGroupComplete = groupFileStatus && groupFileStatus.length > 0 
+                    ? groupFileStatus.every(f => f.exists && f.verified) 
+                    : false;
+                  const hasMissingFiles = groupFileStatus && groupFileStatus.length > 0
+                    ? groupFileStatus.some(f => !f.exists)
+                    : false;
 
-              return (
-                <Card key={group.id} className={styles.modelGroupCard}>
-                  <div className={styles.modelGroupHeader}>
-                    <div className={styles.modelGroupTitle}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, minWidth: 0 }}>
-                        <Tooltip content={group.name} relationship="label">
-                          <Title2 style={{ 
-                            fontSize: tokens.fontSizeBase500, 
-                            margin: 0,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            flexShrink: 1
-                          }}>
-                            {group.name}
-                          </Title2>
-                        </Tooltip>
-                        <span className={styles.taskTypeBadge}>
-                          {getTaskTypeIcon(group.taskType)}
-                          {getTaskTypeLabel(group.taskType)}
-                        </span>
-                        {groupFileStatus && groupFileStatus.length > 0 && (
-                          <Tooltip 
-                            content={
-                              isGroupComplete 
-                                ? '所有文件已下载并验证' 
-                                : hasMissingFiles 
-                                  ? '存在缺失文件' 
-                                  : '存在未验证文件'
-                            } 
-                            relationship="label"
-                          >
-                            <span 
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: tokens.spacingHorizontalXXS,
-                                padding: `${tokens.spacingVerticalXXS} ${tokens.spacingHorizontalS}`,
-                                borderRadius: tokens.borderRadiusSmall,
-                                fontSize: tokens.fontSizeBase200,
-                                fontWeight: tokens.fontWeightSemibold,
-                                backgroundColor: isGroupComplete 
-                                  ? tokens.colorPaletteGreenBackground2 
-                                  : tokens.colorPaletteRedBackground2,
-                                color: isGroupComplete 
-                                  ? tokens.colorPaletteGreenForeground2 
-                                  : tokens.colorPaletteRedForeground2,
-                                flexShrink: 0,
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {isGroupComplete ? (
-                                <>
-                                  <CheckmarkCircleFilled fontSize={12} />
-                                  可用
-                                </>
-                              ) : (
-                                <>
-                                  <WarningFilled fontSize={12} />
-                                  {hasMissingFiles ? '文件缺失' : '需验证'}
-                                </>
-                              )}
-                            </span>
-                          </Tooltip>
-                        )}
-                      </div>
-                    </div>
-                    <div className={styles.modelGroupActions}>
-                      <Button
-                        icon={<EditRegular />}
-                        size="small"
-                        onClick={() => handleEditGroup(group)}
-                        disabled={loading}
-                      >
-                        编辑
-                      </Button>
-                      <Button
-                        icon={<DeleteRegular />}
-                        size="small"
-                        appearance="secondary"
-                        onClick={() => handleDeleteGroup(group)}
-                        disabled={loading}
-                      >
-                        删除
-                      </Button>
-                    </div>
-                  </div>
+                  const modelCount = [
+                    group.sdModel, group.diffusionModel, group.highNoiseSdModel, 
+                    group.vaeModel, group.llmModel, group.clipVisionModel
+                  ].filter(Boolean).length;
 
-                  <div className={styles.modelList}>
-                    {group.sdModel && (
-                      <div className={styles.modelItem}>
-                        <span className={styles.modelLabel}>SD模型</span>
-                        <Tooltip content={getModelFileName(group.sdModel)} relationship="label">
-                          <span className={styles.modelValue} title={getModelFileName(group.sdModel)}>
-                            {getModelFileName(group.sdModel)}
-                          </span>
-                        </Tooltip>
-                      </div>
-                    )}
-                    {group.diffusionModel && (
-                      <div className={styles.modelItem}>
-                        <span className={styles.modelLabel}>扩散模型</span>
-                        <Tooltip content={getModelFileName(group.diffusionModel)} relationship="label">
-                          <span className={styles.modelValue} title={getModelFileName(group.diffusionModel)}>
-                            {getModelFileName(group.diffusionModel)}
-                          </span>
-                        </Tooltip>
-                      </div>
-                    )}
-                    {group.highNoiseSdModel && (
-                      <div className={styles.modelItem}>
-                        <span className={styles.modelLabel}>高噪声模型</span>
-                        <Tooltip content={getModelFileName(group.highNoiseSdModel)} relationship="label">
-                          <span className={styles.modelValue} title={getModelFileName(group.highNoiseSdModel)}>
-                            {getModelFileName(group.highNoiseSdModel)}
-                          </span>
-                        </Tooltip>
-                      </div>
-                    )}
-                    {group.vaeModel && (
-                      <div className={styles.modelItem}>
-                        <span className={styles.modelLabel}>VAE模型</span>
-                        <Tooltip content={getModelFileName(group.vaeModel)} relationship="label">
-                          <span className={styles.modelValue} title={getModelFileName(group.vaeModel)}>
-                            {getModelFileName(group.vaeModel)}
-                          </span>
-                        </Tooltip>
-                      </div>
-                    )}
-                    {group.taskType === 'edit' ? (
-                      group.llmModel && (
-                        <div className={styles.modelItem}>
-                          <span className={styles.modelLabel}>LLM模型</span>
-                          <Tooltip content={getModelFileName(group.llmModel)} relationship="label">
-                            <span className={styles.modelValue} title={getModelFileName(group.llmModel)}>
-                              {getModelFileName(group.llmModel)}
-                            </span>
-                          </Tooltip>
-                        </div>
-                      )
-                    ) : (
-                      group.llmModel && (
-                        <div className={styles.modelItem}>
-                          <span className={styles.modelLabel}>
-                            {group.taskType === 'video' ? 'T5/文本编码器' : 'LLM/CLIP'}
-                          </span>
-                          <Tooltip content={getModelFileName(group.llmModel)} relationship="label">
-                            <span className={styles.modelValue} title={getModelFileName(group.llmModel)}>
-                              {getModelFileName(group.llmModel)}
-                            </span>
-                          </Tooltip>
-                        </div>
-                      )
-                    )}
-                    {group.taskType === 'video' && group.clipVisionModel && (
-                      <div className={styles.modelItem}>
-                        <span className={styles.modelLabel}>CLIP Vision</span>
-                        <Tooltip content={getModelFileName(group.clipVisionModel)} relationship="label">
-                          <span className={styles.modelValue} title={getModelFileName(group.clipVisionModel)}>
-                            {getModelFileName(group.clipVisionModel)}
-                          </span>
-                        </Tooltip>
-                      </div>
-                    )}
-                  </div>
-
-                  {(group.defaultSteps || group.defaultCfgScale || group.defaultWidth || group.defaultHeight || 
-                    group.defaultSamplingMethod || group.defaultScheduler || group.defaultSeed ||
-                    group.defaultHighNoiseSteps || group.defaultHighNoiseCfgScale || group.defaultHighNoiseSamplingMethod) && (
-                    <div className={styles.expandableSection}>
-                      <div className={styles.expandableHeader} onClick={toggleExpand}>
-                        <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>
-                          默认参数设置
-                        </Body1>
-                        {isExpanded ? <ChevronUpRegular /> : <ChevronDownRegular />}
-                      </div>
-                      {isExpanded && (
-                        <div className={styles.expandableContent}>
-                          <div className={styles.paramGrid}>
-                            {group.defaultSteps && (
-                              <div className={styles.paramItem}>
-                                <span className={styles.paramLabel}>
-                                  {group.taskType === 'video' ? '采样步数 (主)' : '采样步数'}
-                                </span>
-                                <span className={styles.paramValue}>{group.defaultSteps}</span>
-                              </div>
+                  return (
+                    <Fragment key={group.id}>
+                      <TableRow>
+                        <TableCell className={styles.colName}>
+                          <TableCellLayout truncate>
+                            <Tooltip content={group.name} relationship="label">
+                              <span style={{ fontWeight: tokens.fontWeightSemibold }}>{group.name}</span>
+                            </Tooltip>
+                          </TableCellLayout>
+                        </TableCell>
+                        <TableCell className={styles.colType}>
+                          <TableCellLayout media={getTaskTypeIcon(group.taskType)}>
+                            {getTaskTypeLabel(group.taskType)}
+                          </TableCellLayout>
+                        </TableCell>
+                        <TableCell className={styles.colStatus}>
+                          <TableCellLayout>
+                            {groupFileStatus && groupFileStatus.length > 0 ? (
+                              <Badge
+                                color={isGroupComplete ? 'success' : 'danger'}
+                                icon={isGroupComplete ? <CheckmarkCircleFilled /> : <WarningFilled />}
+                                appearance="filled"
+                              >
+                                {isGroupComplete ? '可用' : (hasMissingFiles ? '文件缺失' : '需验证')}
+                              </Badge>
+                            ) : (
+                              <Badge color="informative" appearance="tint">未检查</Badge>
                             )}
-                            {group.defaultCfgScale && (
-                              <div className={styles.paramItem}>
-                                <span className={styles.paramLabel}>
-                                  {group.taskType === 'video' ? 'CFG Scale (主)' : 'CFG Scale'}
-                                </span>
-                                <span className={styles.paramValue}>{group.defaultCfgScale}</span>
-                              </div>
-                            )}
-                            {group.taskType === 'video' && group.defaultHighNoiseSteps && (
-                              <div className={styles.paramItem}>
-                                <span className={styles.paramLabel}>采样步数 (高噪)</span>
-                                <span className={styles.paramValue}>{group.defaultHighNoiseSteps}</span>
-                              </div>
-                            )}
-                            {group.taskType === 'video' && group.defaultHighNoiseCfgScale && (
-                              <div className={styles.paramItem}>
-                                <span className={styles.paramLabel}>CFG Scale (高噪)</span>
-                                <span className={styles.paramValue}>{group.defaultHighNoiseCfgScale}</span>
-                              </div>
-                            )}
-                            {group.taskType === 'video' && group.defaultHighNoiseSamplingMethod && (
-                              <div className={styles.paramItem}>
-                                <span className={styles.paramLabel}>采样方法 (高噪)</span>
-                                <span className={styles.paramValue}>{group.defaultHighNoiseSamplingMethod}</span>
-                              </div>
-                            )}
-                            {group.defaultWidth && (
-                              <div className={styles.paramItem}>
-                                <span className={styles.paramLabel}>
-                                  {group.taskType === 'video' ? '视频宽度' : '图片宽度'}
-                                </span>
-                                <span className={styles.paramValue}>{group.defaultWidth}px</span>
-                              </div>
-                            )}
-                            {group.defaultHeight && (
-                              <div className={styles.paramItem}>
-                                <span className={styles.paramLabel}>
-                                  {group.taskType === 'video' ? '视频高度' : '图片高度'}
-                                </span>
-                                <span className={styles.paramValue}>{group.defaultHeight}px</span>
-                              </div>
-                            )}
-                            {group.defaultSamplingMethod && (
-                              <div className={styles.paramItem}>
-                                <span className={styles.paramLabel}>
-                                  {group.taskType === 'video' ? '采样方法 (主)' : '采样方法'}
-                                </span>
-                                <span className={styles.paramValue}>{group.defaultSamplingMethod}</span>
-                              </div>
-                            )}
-                            {group.defaultScheduler && (
-                              <div className={styles.paramItem}>
-                                <span className={styles.paramLabel}>调度器</span>
-                                <span className={styles.paramValue}>{group.defaultScheduler}</span>
-                              </div>
-                            )}
-                            {group.defaultSeed !== undefined && group.defaultSeed !== null && group.defaultSeed !== -1 && (
-                              <div className={styles.paramItem}>
-                                <span className={styles.paramLabel}>种子</span>
-                                <span className={styles.paramValue}>{group.defaultSeed}</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* HF 文件下载区域 */}
-                  {group.hfFiles && group.hfFiles.length > 0 && (
-                    <div style={{ 
-                      marginTop: tokens.spacingVerticalS,
-                      paddingTop: tokens.spacingVerticalS,
-                      borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: tokens.spacingVerticalXS,
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Body1 style={{ fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase200 }}>
-                          模型文件 ({group.hfFiles.length} 个)
-                        </Body1>
-                        {downloadingGroupId === group.id ? (
-                          <Button
-                            icon={<DismissRegular />}
-                            size="small"
-                            appearance="secondary"
-                            onClick={handleCancelModelDownload}
-                          >
-                            取消下载
-                          </Button>
-                        ) : fileStatusMap[group.id]?.every(f => f.exists && f.verified) ? (
-                          <Button
-                            icon={<CheckmarkCircleFilled />}
-                            size="small"
-                            appearance="subtle"
-                            onClick={() => handleReverifyGroupFiles(group.id)}
-                            disabled={!!downloadingGroupId || loading}
-                          >
-                            重新验证
-                          </Button>
-                        ) : (
-                          <Button
-                            icon={<ArrowDownloadRegular />}
-                            size="small"
-                            appearance="primary"
-                            onClick={() => handleDownloadOrVerifyGroupFiles(group.id)}
-                            disabled={!!downloadingGroupId || loading}
-                          >
-                            {fileStatusMap[group.id]?.every(f => f.exists) 
-                              ? '验证文件' 
-                              : '下载缺失文件'}
-                          </Button>
-                        )}
-                      </div>
-                      <div className={styles.fileStatusList}>
-                        {group.hfFiles.map((hfFile) => {
-                          const status = fileStatusMap[group.id]?.find(
-                            s => s.file === hfFile.file || s.savePath === (hfFile.savePath || hfFile.file)
-                          );
-                          return (
-                            <div key={hfFile.file} className={styles.fileStatusItem}>
-                              {status?.exists ? (
-                                status.verified ? (
-                                  <CheckmarkCircleFilled style={{ color: tokens.colorPaletteGreenForeground1, fontSize: '14px' }} />
+                          </TableCellLayout>
+                        </TableCell>
+                        <TableCell className={styles.colFiles}>
+                          <TableCellLayout>
+                            {modelCount} 个模型
+                          </TableCellLayout>
+                        </TableCell>
+                        <TableCell className={styles.colActions}>
+                          <TableCellLayout>
+                            <div style={{ display: 'flex', gap: tokens.spacingHorizontalXS, flexWrap: 'nowrap' }}>
+                              {group.hfFiles && group.hfFiles.length > 0 && (
+                                downloadingGroupId === group.id ? (
+                                  <Button
+                                    icon={<DismissRegular />}
+                                    size="small"
+                                    appearance="secondary"
+                                    onClick={handleCancelModelDownload}
+                                  >
+                                    取消
+                                  </Button>
                                 ) : (
-                                  <WarningFilled style={{ color: tokens.colorPaletteYellowForeground1, fontSize: '14px' }} />
+                                  <Button
+                                    icon={fileStatusMap[group.id]?.every(f => f.exists && f.verified) ? <CheckmarkCircleFilled /> : <ArrowDownloadRegular />}
+                                    size="small"
+                                    appearance={fileStatusMap[group.id]?.every(f => f.exists && f.verified) ? "subtle" : "primary"}
+                                    onClick={() => {
+                                      if (fileStatusMap[group.id]?.every(f => f.exists && f.verified)) {
+                                        handleReverifyGroupFiles(group.id);
+                                      } else {
+                                        handleDownloadOrVerifyGroupFiles(group.id);
+                                      }
+                                    }}
+                                    disabled={!!downloadingGroupId || loading}
+                                  >
+                                    {fileStatusMap[group.id]?.every(f => f.exists && f.verified) 
+                                      ? '重新验证' 
+                                      : fileStatusMap[group.id]?.every(f => f.exists) 
+                                        ? '验证' 
+                                        : '下载'}
+                                  </Button>
                                 )
-                              ) : (
-                                <DismissCircleRegular style={{ color: tokens.colorNeutralForeground3, fontSize: '14px' }} />
                               )}
-                              <span style={{ 
-                                color: status?.exists ? tokens.colorNeutralForeground1 : tokens.colorNeutralForeground3,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                                flex: 1,
-                              }}>
-                                {hfFile.savePath || hfFile.file}
-                              </span>
-                              {status?.exists && status.size !== undefined && (
-                                <span style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }}>
-                                  {formatFileSize(status.size)}
-                                  {!status.verified && ' (未验证)'}
-                                </span>
+                              <Button
+                                icon={<EditRegular />}
+                                size="small"
+                                onClick={() => handleEditGroup(group)}
+                                disabled={loading}
+                              >
+                                编辑
+                              </Button>
+                              <Button
+                                icon={<DeleteRegular />}
+                                size="small"
+                                appearance="subtle"
+                                onClick={() => handleDeleteGroup(group)}
+                                disabled={loading}
+                              />
+                            </div>
+                          </TableCellLayout>
+                        </TableCell>
+                        <TableCell className={styles.colExpand}>
+                          <TableCellLayout>
+                            <Button
+                              icon={isExpanded ? <ChevronUpRegular /> : <ChevronDownRegular />}
+                              size="small"
+                              appearance="subtle"
+                              onClick={toggleExpand}
+                            />
+                          </TableCellLayout>
+                        </TableCell>
+                      </TableRow>
+                      
+                      {isExpanded && (
+                        <TableRow className={styles.expandedRow}>
+                          <TableCell colSpan={6}>
+                            <div className={styles.expandedContent}>
+                              {/* 模型列表 */}
+                              <div className={styles.expandedSection}>
+                                <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>模型列表</Body1>
+                                <div className={styles.modelList}>
+                                  {group.sdModel && (
+                                    <div className={styles.modelItem}>
+                                      <span className={styles.modelLabel}>SD模型</span>
+                                      <span className={styles.modelValue} title={getModelFileName(group.sdModel)}>
+                                        {getModelFileName(group.sdModel)}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {group.diffusionModel && (
+                                    <div className={styles.modelItem}>
+                                      <span className={styles.modelLabel}>扩散模型</span>
+                                      <span className={styles.modelValue} title={getModelFileName(group.diffusionModel)}>
+                                        {getModelFileName(group.diffusionModel)}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {group.highNoiseSdModel && (
+                                    <div className={styles.modelItem}>
+                                      <span className={styles.modelLabel}>高噪声模型</span>
+                                      <span className={styles.modelValue} title={getModelFileName(group.highNoiseSdModel)}>
+                                        {getModelFileName(group.highNoiseSdModel)}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {group.vaeModel && (
+                                    <div className={styles.modelItem}>
+                                      <span className={styles.modelLabel}>VAE模型</span>
+                                      <span className={styles.modelValue} title={getModelFileName(group.vaeModel)}>
+                                        {getModelFileName(group.vaeModel)}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {group.taskType === 'edit' ? (
+                                    group.llmModel && (
+                                      <div className={styles.modelItem}>
+                                        <span className={styles.modelLabel}>LLM模型</span>
+                                        <span className={styles.modelValue} title={getModelFileName(group.llmModel)}>
+                                          {getModelFileName(group.llmModel)}
+                                        </span>
+                                      </div>
+                                    )
+                                  ) : (
+                                    group.llmModel && (
+                                      <div className={styles.modelItem}>
+                                        <span className={styles.modelLabel}>
+                                          {group.taskType === 'video' ? 'T5/文本编码器' : 'LLM/CLIP'}
+                                        </span>
+                                        <span className={styles.modelValue} title={getModelFileName(group.llmModel)}>
+                                          {getModelFileName(group.llmModel)}
+                                        </span>
+                                      </div>
+                                    )
+                                  )}
+                                  {group.taskType === 'video' && group.clipVisionModel && (
+                                    <div className={styles.modelItem}>
+                                      <span className={styles.modelLabel}>CLIP Vision</span>
+                                      <span className={styles.modelValue} title={getModelFileName(group.clipVisionModel)}>
+                                        {getModelFileName(group.clipVisionModel)}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* 默认参数 */}
+                              {(group.defaultSteps || group.defaultCfgScale || group.defaultWidth || group.defaultHeight || 
+                                group.defaultSamplingMethod || group.defaultScheduler || group.defaultSeed ||
+                                group.defaultHighNoiseSteps || group.defaultHighNoiseCfgScale || group.defaultHighNoiseSamplingMethod) && (
+                                <div className={styles.expandedSection}>
+                                  <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>默认参数</Body1>
+                                  <div className={styles.paramGrid}>
+                                    {group.defaultSteps && (
+                                      <div className={styles.paramItem}>
+                                        <span className={styles.paramLabel}>{group.taskType === 'video' ? '采样步数 (主)' : '采样步数'}</span>
+                                        <span className={styles.paramValue}>{group.defaultSteps}</span>
+                                      </div>
+                                    )}
+                                    {group.defaultCfgScale && (
+                                      <div className={styles.paramItem}>
+                                        <span className={styles.paramLabel}>{group.taskType === 'video' ? 'CFG Scale (主)' : 'CFG Scale'}</span>
+                                        <span className={styles.paramValue}>{group.defaultCfgScale}</span>
+                                      </div>
+                                    )}
+                                    {group.taskType === 'video' && group.defaultHighNoiseSteps && (
+                                      <div className={styles.paramItem}>
+                                        <span className={styles.paramLabel}>采样步数 (高噪)</span>
+                                        <span className={styles.paramValue}>{group.defaultHighNoiseSteps}</span>
+                                      </div>
+                                    )}
+                                    {group.taskType === 'video' && group.defaultHighNoiseCfgScale && (
+                                      <div className={styles.paramItem}>
+                                        <span className={styles.paramLabel}>CFG Scale (高噪)</span>
+                                        <span className={styles.paramValue}>{group.defaultHighNoiseCfgScale}</span>
+                                      </div>
+                                    )}
+                                    {group.taskType === 'video' && group.defaultHighNoiseSamplingMethod && (
+                                      <div className={styles.paramItem}>
+                                        <span className={styles.paramLabel}>采样方法 (高噪)</span>
+                                        <span className={styles.paramValue}>{group.defaultHighNoiseSamplingMethod}</span>
+                                      </div>
+                                    )}
+                                    {group.defaultWidth && (
+                                      <div className={styles.paramItem}>
+                                        <span className={styles.paramLabel}>{group.taskType === 'video' ? '视频宽度' : '图片宽度'}</span>
+                                        <span className={styles.paramValue}>{group.defaultWidth}px</span>
+                                      </div>
+                                    )}
+                                    {group.defaultHeight && (
+                                      <div className={styles.paramItem}>
+                                        <span className={styles.paramLabel}>{group.taskType === 'video' ? '视频高度' : '图片高度'}</span>
+                                        <span className={styles.paramValue}>{group.defaultHeight}px</span>
+                                      </div>
+                                    )}
+                                    {group.defaultSamplingMethod && (
+                                      <div className={styles.paramItem}>
+                                        <span className={styles.paramLabel}>{group.taskType === 'video' ? '采样方法 (主)' : '采样方法'}</span>
+                                        <span className={styles.paramValue}>{group.defaultSamplingMethod}</span>
+                                      </div>
+                                    )}
+                                    {group.defaultScheduler && (
+                                      <div className={styles.paramItem}>
+                                        <span className={styles.paramLabel}>调度器</span>
+                                        <span className={styles.paramValue}>{group.defaultScheduler}</span>
+                                      </div>
+                                    )}
+                                    {group.defaultSeed !== undefined && group.defaultSeed !== null && group.defaultSeed !== -1 && (
+                                      <div className={styles.paramItem}>
+                                        <span className={styles.paramLabel}>种子</span>
+                                        <span className={styles.paramValue}>{group.defaultSeed}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* HF 文件状态 */}
+                              {group.hfFiles && group.hfFiles.length > 0 && (
+                                <div className={styles.expandedSection}>
+                                  <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>文件状态 ({group.hfFiles.length})</Body1>
+                                  <div className={styles.fileStatusList}>
+                                    {group.hfFiles.map((hfFile) => {
+                                      const status = fileStatusMap[group.id]?.find(
+                                        s => s.file === hfFile.file || s.savePath === (hfFile.savePath || hfFile.file)
+                                      );
+                                      return (
+                                        <div key={hfFile.file} className={styles.fileStatusItem}>
+                                          {status?.exists ? (
+                                            status.verified ? (
+                                              <CheckmarkCircleFilled style={{ color: tokens.colorPaletteGreenForeground1, fontSize: '14px' }} />
+                                            ) : (
+                                              <WarningFilled style={{ color: tokens.colorPaletteYellowForeground1, fontSize: '14px' }} />
+                                            )
+                                          ) : (
+                                            <DismissCircleRegular style={{ color: tokens.colorNeutralForeground3, fontSize: '14px' }} />
+                                          )}
+                                          <span style={{ 
+                                            color: status?.exists ? tokens.colorNeutralForeground1 : tokens.colorNeutralForeground3,
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                            whiteSpace: 'nowrap',
+                                            flex: 1,
+                                          }}>
+                                            {hfFile.savePath || hfFile.file}
+                                          </span>
+                                          {status?.exists && status.size !== undefined && (
+                                            <span style={{ color: tokens.colorNeutralForeground3, flexShrink: 0 }}>
+                                              {formatFileSize(status.size)}
+                                              {!status.verified && ' (未验证)'}
+                                            </span>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
                               )}
                             </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </Card>
-              );
-            })}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </TableBody>
+            </Table>
           </div>
         )}
       </Card>

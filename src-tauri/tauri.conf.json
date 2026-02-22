@@ -34,9 +34,7 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "./models/model-groups.json",
-      "./outputs/",
-      "./engines/"
+      "./models/model-groups.json"
     ],
     "windows": {
       "nsis": {

@@ -181,10 +181,11 @@ pub async fn generate_start(
     *state.generate_cancel.lock().unwrap() = Some(cancel_tx);
 
     // Preview image handling
-    let preview_path = output_path.with_extension("preview.png");
+    // sd-cli writes the preview to a fixed "preview.png" in its current working directory (outputs folder)
+    let outputs_folder_path = Path::new(&outputs_folder);
+    let preview_path = outputs_folder_path.join("preview.png");
 
     // Spawn process
-    let outputs_folder_path = Path::new(&outputs_folder);
     let mut cmd = tokio::process::Command::new(&exe_path);
     cmd.args(&args)
         .current_dir(outputs_folder_path)
@@ -206,15 +207,21 @@ pub async fn generate_start(
     let app_clone = app.clone();
     let preview_task = tokio::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
+        let mut last_modified: Option<std::time::SystemTime> = None;
         loop {
             interval.tick().await;
-            if preview_path_clone.exists() {
-                if let Ok(data) = tokio::fs::read(&preview_path_clone).await {
-                    let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-                    let data_url = format!("data:image/png;base64,{}", b64);
-                    let _ = app_clone.emit("generate:preview-update", serde_json::json!({
-                        "previewImage": data_url
-                    }));
+            if let Ok(meta) = tokio::fs::metadata(&preview_path_clone).await {
+                let modified = meta.modified().ok();
+                // Only read & emit when the file has been updated
+                if modified != last_modified {
+                    last_modified = modified;
+                    if let Ok(data) = tokio::fs::read(&preview_path_clone).await {
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+                        let data_url = format!("data:image/png;base64,{}", b64);
+                        let _ = app_clone.emit("generate:preview-update", serde_json::json!({
+                            "previewImage": data_url
+                        }));
+                    }
                 }
             }
         }

@@ -12,7 +12,7 @@ import type { IpcInvokeChannel, IpcEventChannel, IPCEventMap, IpcInvokeArgs, Ipc
  * Tauri command 不支持冒号(:)和连字符(-)，转换为下划线格式
  */
 function channelToCommand(channel: string): string {
-  return channel.replace(/[:\-]/g, '_')
+  return channel.replace(/[:-]/g, '_')
 }
 
 /**
@@ -30,26 +30,25 @@ export async function ipcInvoke<C extends IpcInvokeChannel>(
   if (args.length === 1) {
     const arg = args[0]
     if (arg !== null && arg !== undefined && typeof arg === 'object' && !Array.isArray(arg)) {
-      payload = {
-        ...(arg as Record<string, unknown>),
-        value: arg,
+      if (channel === 'sdcpp:fetch-releases') {
+        payload = arg as Record<string, unknown>
+      } else {
+        payload = {
+          ...(arg as Record<string, unknown>),
+          value: arg,
+        }
       }
     } else {
       payload = { value: arg }
     }
   } else if (args.length > 1) {
-    payload = { value: args as unknown }
-
     // 为已知的多参数 channel 提供命名参数
     if (channel === 'sdcpp:list-files') {
       payload = { folder: args[0], deviceType: args[1] } as Record<string, unknown>
     } else if (channel === 'generated-images:batch-download') {
       payload = { value: args[0] } as Record<string, unknown>
-    }
-  } else if (args.length === 1 && typeof args[0] === 'object' && args[0] !== null) {
-    // 对于只有一个对象参数的情况，展开该对象作为命名参数
-    if (channel === 'sdcpp:fetch-releases') {
-      payload = args[0] as Record<string, unknown>
+    } else {
+      payload = { value: args as unknown }
     }
   }
 

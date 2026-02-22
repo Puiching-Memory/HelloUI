@@ -13,7 +13,7 @@ import {
   Spinner,
 } from '@fluentui/react-components';
 import { CodeRegular, CheckmarkCircleFilled } from '@fluentui/react-icons';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAppStore, type ThemeMode } from '../hooks/useAppStore';
 import { useDownloadConfig } from '../hooks/useDownloadConfig';
 import { ipcInvoke } from '../lib/tauriIpc';
@@ -91,8 +91,10 @@ export const SettingsPage = () => {
   const { config: downloadConfig, isLoading: configLoading, loadConfig, setConfig } = useDownloadConfig();
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [appVersion, setAppVersion] = useState<string>('');
-  const [chunkSizeMb, setChunkSizeMb] = useState(10);
-  const [maxConcurrentChunks, setMaxConcurrentChunks] = useState(4);
+  const initialChunkSize = useMemo(() => downloadConfig?.chunkSizeMb ?? 10, [downloadConfig]);
+  const initialMaxConcurrent = useMemo(() => downloadConfig?.maxConcurrentChunks ?? 4, [downloadConfig]);
+  const [chunkSizeMb, setChunkSizeMb] = useState(initialChunkSize);
+  const [maxConcurrentChunks, setMaxConcurrentChunks] = useState(initialMaxConcurrent);
 
   useEffect(() => {
     const loadVersion = async () => {
@@ -110,13 +112,6 @@ export const SettingsPage = () => {
   useEffect(() => {
     loadConfig();
   }, [loadConfig]);
-
-  useEffect(() => {
-    if (downloadConfig) {
-      setChunkSizeMb(downloadConfig.chunkSizeMb);
-      setMaxConcurrentChunks(downloadConfig.maxConcurrentChunks);
-    }
-  }, [downloadConfig]);
 
   const handleSaveDownloadConfig = async () => {
     try {

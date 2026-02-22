@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useIpcListener } from './useIpcListener'
-import { stripAnsiCodes } from '../utils/format'
+import { stripAnsiCodes, processRawCliText } from '../utils/format'
 
 export interface CliOutputLine {
   type: 'stdout' | 'stderr'
@@ -40,33 +40,47 @@ export function useCliOutput(cliOutputChannel: string): UseCliOutputReturn {
 
   // 处理 CLI 输出回调
   const handleCliOutput = useCallback((data: { type: 'stdout' | 'stderr'; text: string }) => {
-    const cleanedText = stripAnsiCodes(data.text)
-    if (cleanedText.trim()) {
-      setCliOutput((prev) => {
-        const lastLine = prev[prev.length - 1]
-        if (lastLine && lastLine.text === cleanedText && lastLine.type === data.type) {
-          return prev
+    const lines = processRawCliText(data.text)
+    if (lines.length === 0) return
+    setCliOutput((prev) => {
+      let next = prev
+      for (const rawLine of lines) {
+        const cleaned = stripAnsiCodes(rawLine)
+        if (!cleaned.trim()) continue
+        const lastLine = next[next.length - 1]
+        // 跳过与上一行完全相同的重复行
+        if (lastLine && stripAnsiCodes(lastLine.text) === cleaned && lastLine.type === data.type) {
+          // 用新内容替换最后一行（进度条覆写场景）
+          next = [...next.slice(0, -1), { type: data.type, text: rawLine, timestamp: Date.now() }]
+        } else {
+          next = [...next, { type: data.type, text: rawLine, timestamp: Date.now() }]
         }
-        return [...prev, { ...data, text: cleanedText, timestamp: Date.now() }]
-      })
-    }
+      }
+      return next
+    })
   }, [])
 
   // 监听 CLI 输出
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   useIpcListener(cliOutputChannel as any, handleCliOutput)
 
   // 当有新输出且用户未手动收起时自动展开
   useEffect(() => {
     if (cliOutput.length > 0 && !cliOutputExpanded && !hasUserCollapsed) {
-      setCliOutputExpanded(true)
-      setLastViewedOutputCount(cliOutput.length)
+      const timer = setTimeout(() => {
+        setCliOutputExpanded(true)
+      }, 0)
+      return () => clearTimeout(timer)
     }
   }, [cliOutput.length, cliOutputExpanded, hasUserCollapsed])
 
   // 展开时更新已查看数量
   useEffect(() => {
     if (cliOutputExpanded) {
-      setLastViewedOutputCount(cliOutput.length)
+      const timer = setTimeout(() => {
+        setLastViewedOutputCount(cliOutput.length)
+      }, 0)
+      return () => clearTimeout(timer)
     }
   }, [cliOutputExpanded, cliOutput.length])
 
@@ -85,7 +99,7 @@ export function useCliOutput(cliOutputChannel: string): UseCliOutputReturn {
   }, [])
 
   const handleCopyOutput = useCallback(() => {
-    const text = cliOutput.map((line) => `[${line.type}] ${line.text}`).join('\n')
+    const text = cliOutput.map((line) => `[${line.type}] ${stripAnsiCodes(line.text)}`).join('\n')
     navigator.clipboard.writeText(text).then(() => {
       setCopySuccess(true)
       setTimeout(() => setCopySuccess(false), 2000)
@@ -93,7 +107,7 @@ export function useCliOutput(cliOutputChannel: string): UseCliOutputReturn {
   }, [cliOutput])
 
   const handleExportOutput = useCallback(() => {
-    const text = cliOutput.map((line) => `[${line.type}] ${line.text}`).join('\n')
+    const text = cliOutput.map((line) => `[${line.type}] ${stripAnsiCodes(line.text)}`).join('\n')
     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')

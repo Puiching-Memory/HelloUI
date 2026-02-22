@@ -106,7 +106,7 @@ export const MainLayout = ({ children }: { children: ReactNode }) => {
   const navItems: NavItem[] = [
     { id: 'home', path: '/', label: '主页', icon: <HomeRegular /> },
     { id: 'weights', path: '/weights', label: '模型权重管理', icon: <DatabaseRegular /> },
-    { id: 'sdcpp', path: '/sdcpp', label: 'SD.cpp 推理引擎', icon: <CodeRegular /> },
+    { id: 'sdcpp', path: '/sdcpp', label: '引擎管理', icon: <CodeRegular /> },
     { id: 'generate', path: '/generate', label: '图片生成', icon: <ImageAddRegular /> },
     { id: 'edit-image', path: '/edit-image', label: '图片编辑', icon: <EditRegular /> },
     { id: 'video-generate', path: '/video-generate', label: '视频生成', icon: <VideoClipRegular /> },

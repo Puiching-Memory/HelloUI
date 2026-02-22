@@ -116,7 +116,7 @@ export const EditImagePage = () => {
   const [preview, setPreview] = useState<string>('proj');
   const [previewInterval, setPreviewInterval] = useState<number>(1);
   const [verbose, setVerbose] = useState<boolean>(false);
-  const [color, setColor] = useState<boolean>(false);
+  const [color, setColor] = useState<boolean>(true);
   const [offloadToCpu, setOffloadToCpu] = useState<boolean>(false);
   const [diffusionFa, setDiffusionFa] = useState<boolean>(true); // 默认启用
   const [controlNetCpu, setControlNetCpu] = useState<boolean>(false);

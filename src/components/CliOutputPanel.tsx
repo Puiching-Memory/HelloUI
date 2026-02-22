@@ -15,6 +15,7 @@ import {
 } from '@fluentui/react-icons'
 import { useSharedStyles } from '../styles/sharedStyles'
 import type { CliOutputLine } from '../hooks/useCliOutput'
+import { parseAnsiToSegments, hasAnsiCodes } from '../utils/format'
 
 interface CliOutputPanelProps {
   cliOutput: CliOutputLine[]
@@ -44,6 +45,16 @@ export function CliOutputPanel({
   variant = 'card',
 }: CliOutputPanelProps) {
   const styles = useSharedStyles()
+
+  const renderLineContent = (line: CliOutputLine) => {
+    if (hasAnsiCodes(line.text)) {
+      const segments = parseAnsiToSegments(line.text)
+      return segments.map((seg, i) =>
+        seg.style ? <span key={i} style={seg.style}>{seg.text}</span> : <span key={i}>{seg.text}</span>
+      )
+    }
+    return line.text
+  }
 
   if (variant === 'floating') {
     return (
@@ -106,7 +117,13 @@ export function CliOutputPanel({
             {cliOutputExpanded ? <ChevronUpRegular /> : <ChevronDownRegular />}
           </div>
         </div>
-        {cliOutputExpanded && (
+        <div
+          style={{
+            maxHeight: cliOutputExpanded ? '175px' : '0',
+            overflow: 'hidden',
+            transition: 'max-height 0.25s ease-in-out',
+          }}
+        >
           <div ref={cliOutputRef} className={styles.floatingCliContent}>
             {cliOutput.length === 0 ? (
               <div className={styles.cliOutputEmpty}>{emptyMessage}</div>
@@ -118,12 +135,12 @@ export function CliOutputPanel({
                     line.type === 'stderr' ? styles.cliOutputLineStderr : styles.cliOutputLineStdout
                   }`}
                 >
-                  {line.text}
+                  {renderLineContent(line)}
                 </div>
               ))
             )}
           </div>
-        )}
+        </div>
       </div>
     )
   }
@@ -196,7 +213,13 @@ export function CliOutputPanel({
           </Button>
         </div>
       </div>
-      {cliOutputExpanded && (
+      <div
+        style={{
+          maxHeight: cliOutputExpanded ? '275px' : '0',
+          overflow: 'hidden',
+          transition: 'max-height 0.25s ease-in-out',
+        }}
+      >
         <div ref={cliOutputRef} className={styles.cliOutputContent}>
           {cliOutput.length === 0 ? (
             <div className={styles.cliOutputEmpty}>{emptyMessage}</div>
@@ -208,12 +231,12 @@ export function CliOutputPanel({
                   line.type === 'stderr' ? styles.cliOutputLineStderr : styles.cliOutputLineStdout
                 }`}
               >
-                {line.text}
+                {renderLineContent(line)}
               </div>
             ))
           )}
         </div>
-      )}
+      </div>
     </Card>
   )
 }

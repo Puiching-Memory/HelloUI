@@ -115,7 +115,7 @@ export const ImageUpscalePage = () => {
   const [preview, setPreview] = useState<string>('proj');
   const [previewInterval, setPreviewInterval] = useState<number>(1);
   const [verbose, setVerbose] = useState<boolean>(false);
-  const [color, setColor] = useState<boolean>(false);
+  const [color, setColor] = useState<boolean>(true);
   const [offloadToCpu, setOffloadToCpu] = useState<boolean>(false);
   const [diffusionFa, setDiffusionFa] = useState<boolean>(true);
   const [controlNetCpu, setControlNetCpu] = useState<boolean>(false);

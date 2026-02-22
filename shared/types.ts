@@ -206,7 +206,7 @@ export interface GeneratedImageInfo {
 /**
  * 生成的图片对象（包含元数据和预览图片），用于前端显示
  */
-export interface GeneratedImage extends GeneratedImageInfo {}
+export type GeneratedImage = GeneratedImageInfo
 
 // ─── SD.cpp 引擎下载 ────────────────────────────────────────────────────
 

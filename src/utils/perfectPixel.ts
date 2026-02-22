@@ -383,7 +383,7 @@ function detectGridScale(
 ): [number | null, number | null] {
   const gray = rgbToGray(data, W, H)
 
-  let result = estimateGridFFT(gray, W, H, peakWidth)
+  const result = estimateGridFFT(gray, W, H, peakWidth)
   let gridW: number | null = result ? result[0] : null
   let gridH: number | null = result ? result[1] : null
 
@@ -498,12 +498,12 @@ function sampleMedian(data: Uint8Array, W: number, H: number, xCoords: number[],
   const out = new Uint8Array(nx * ny * 3)
 
   for (let j = 0; j < ny; j++) {
-    let y0 = Math.max(0, Math.min(H, Math.round(yCoords[j])))
+    const y0 = Math.max(0, Math.min(H, Math.round(yCoords[j])))
     let y1 = Math.max(0, Math.min(H, Math.round(yCoords[j + 1])))
     if (y1 <= y0) y1 = Math.min(y0 + 1, H)
 
     for (let i = 0; i < nx; i++) {
-      let x0 = Math.max(0, Math.min(W, Math.round(xCoords[i])))
+      const x0 = Math.max(0, Math.min(W, Math.round(xCoords[i])))
       let x1 = Math.max(0, Math.min(W, Math.round(xCoords[i + 1])))
       if (x1 <= x0) x1 = Math.min(x0 + 1, W)
 
@@ -550,12 +550,12 @@ function sampleMajority(
   }
 
   for (let j = 0; j < ny; j++) {
-    let y0 = Math.max(0, Math.min(H, Math.round(yCoords[j])))
+    const y0 = Math.max(0, Math.min(H, Math.round(yCoords[j])))
     let y1 = Math.max(0, Math.min(H, Math.round(yCoords[j + 1])))
     if (y1 <= y0) y1 = Math.min(y0 + 1, H)
 
     for (let i = 0; i < nx; i++) {
-      let x0 = Math.max(0, Math.min(W, Math.round(xCoords[i])))
+      const x0 = Math.max(0, Math.min(W, Math.round(xCoords[i])))
       let x1 = Math.max(0, Math.min(W, Math.round(xCoords[i + 1])))
       if (x1 <= x0) x1 = Math.min(x0 + 1, W)
 

@@ -88,6 +88,6 @@ export function useTaskbarProgress() {
     clearProgress,
     setError,
     setPaused,
-    currentProgress: currentProgressRef.current,
+    getCurrentProgress: () => currentProgressRef.current,
   };
 }

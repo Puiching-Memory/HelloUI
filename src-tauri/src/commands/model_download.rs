@@ -709,26 +709,72 @@ pub async fn models_download_group_files(
             return Ok(serde_json::json!({ "success": false, "error": "cancelled" }));
         }
 
-        let result = download_file_parallel(
-            &app,
-            &client,
-            &url,
-            &dest_path,
-            file,
-            total_files,
-            (index + 1) as u32,
-            cancel_rx.clone(),
-            &download_config,
-        )
-        .await;
+        let max_retries = 3;
+        let mut last_error = String::new();
+        let mut succeeded = false;
+
+        for attempt in 0..max_retries {
+            if attempt > 0 {
+                // 重试前等待一段时间（指数退避）
+                let delay = std::time::Duration::from_secs(2u64.pow(attempt as u32));
+                let _ = app.emit(
+                    "models:download-progress",
+                    ModelDownloadProgress {
+                        stage: "downloading".to_string(),
+                        downloaded_bytes: 0,
+                        total_bytes: -1i64 as u64,
+                        speed: 0.0,
+                        file_name: format!("{} (重试 {}/{})", file, attempt, max_retries - 1),
+                        total_files,
+                        current_file_index: (index + 1) as u32,
+                        error: None,
+                    },
+                );
+                tokio::time::sleep(delay).await;
+
+                // 删除可能的不完整文件
+                if dest_path.exists() {
+                    std::fs::remove_file(&dest_path).ok();
+                }
+                let part_path = dest_path.with_extension("part");
+                if part_path.exists() {
+                    std::fs::remove_file(&part_path).ok();
+                }
+            }
+
+            let result = download_file_parallel(
+                &app,
+                &client,
+                &url,
+                &dest_path,
+                file,
+                total_files,
+                (index + 1) as u32,
+                cancel_rx.clone(),
+                &download_config,
+            )
+            .await;
+
+            match result {
+                Ok(()) => {
+                    succeeded = true;
+                    break;
+                }
+                Err(e) => {
+                    if e == "cancelled" {
+                        std::fs::remove_file(&lock_path).ok();
+                        return Ok(serde_json::json!({ "success": false, "error": "cancelled" }));
+                    }
+                    last_error = e;
+                    // 继续重试
+                }
+            }
+        }
 
         std::fs::remove_file(&lock_path).ok();
 
-        if let Err(e) = result {
-            if e == "cancelled" {
-                return Ok(serde_json::json!({ "success": false, "error": "cancelled" }));
-            }
-            return Err(e);
+        if !succeeded {
+            return Err(format!("下载失败（已重试 {} 次）: {}", max_retries - 1, last_error));
         }
     }
 
