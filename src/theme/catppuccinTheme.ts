@@ -1,4 +1,4 @@
-import { createLightTheme, createDarkTheme, BrandVariants, Theme } from '@fluentui/react-components';
+import { createLightTheme, createDarkTheme, type BrandVariants, type Theme } from '@/ui/components';
 
 // Catppuccin Frappé 配色方案
 const catppuccinColors = {
@@ -288,4 +288,5 @@ catppuccinLatteDarkTheme.colorBrandBackground = latteDarkColors.blue;
 catppuccinLatteDarkTheme.colorBrandBackground2 = latteDarkColors.surface0;
 catppuccinLatteDarkTheme.colorBrandStroke1 = latteDarkColors.blue;
 catppuccinLatteDarkTheme.colorBrandStroke2 = latteDarkColors.sapphire;
+
 

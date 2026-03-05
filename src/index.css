@@ -1,12 +1,42 @@
+@import './styles/pencil-page.css';
+
 :root {
-  font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+  --background: #fafafa;
+  --foreground: #0a0a0a;
+  --card: #fafafa;
+  --border: #e5e5e5;
+  --muted: #f5f5f5;
+  --muted-foreground: #737373;
+  --primary: #171717;
+  --primary-foreground: #fafafa;
+  --secondary: #f5f5f5;
+  --sidebar: #fafafa;
+  --sidebar-foreground: #09090b;
+  --sidebar-accent: #f4f4f4;
+  --sidebar-border: #e4e4e7;
+  font-family: 'MiSans', 'HarmonyOS Sans SC', 'SF Pro Display', 'Segoe UI', 'PingFang SC', sans-serif;
   line-height: 1.5;
   font-weight: 400;
-
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+[data-theme='dark'] {
+  --background: #0a0a0a;
+  --foreground: #fafafa;
+  --card: #171717;
+  --border: rgba(255, 255, 255, 0.1);
+  --muted: #262626;
+  --muted-foreground: #a3a3a3;
+  --primary: #e5e5e5;
+  --primary-foreground: #171717;
+  --secondary: #262626;
+  --sidebar: #18181b;
+  --sidebar-foreground: #fafafa;
+  --sidebar-accent: #2a2a30;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
 }
 
 * {
@@ -21,6 +51,8 @@ body {
   min-width: 320px;
   min-height: 100vh;
   overflow: hidden;
+  background: var(--background);
+  color: var(--foreground);
 }
 
 #root {
@@ -29,9 +61,6 @@ body {
   overflow: hidden;
 }
 
-/* 自定义滚动条样式 - 符合 Fluent UI 设计风格 */
-
-/* Webkit 浏览器 (Chrome, Edge, Safari) */
 ::-webkit-scrollbar {
   width: 12px;
   height: 12px;
@@ -61,7 +90,6 @@ body {
   background: transparent;
 }
 
-/* 浅色主题滚动条 */
 [data-theme="light"] ::-webkit-scrollbar-thumb,
 :root:not([data-theme="dark"]) ::-webkit-scrollbar-thumb {
   background-color: rgba(0, 0, 0, 0.18);
@@ -90,7 +118,6 @@ body {
   background-color: rgba(255, 255, 255, 0.38);
 }
 
-/* Firefox 滚动条样式 */
 [data-theme="light"] *,
 :root:not([data-theme="dark"]) * {
   scrollbar-width: thin;

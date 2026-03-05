@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { 
   tokens, 
   makeStyles 
-} from '@fluentui/react-components';
+} from '@/ui/components';
 
 interface Particle {
   x: number;
@@ -183,3 +183,4 @@ const ParticleBackground: React.FC = () => {
 };
 
 export default ParticleBackground;
+

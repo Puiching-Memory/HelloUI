@@ -1,5 +1,5 @@
 import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
-import { Title1, Body1, makeStyles, tokens } from '@fluentui/react-components';
+import { Title1, Body1, makeStyles, tokens } from '@/ui/components';
 import { useState, useEffect } from 'react';
 
 const useStyles = makeStyles({
@@ -64,6 +64,8 @@ interface ImageCompareData {
   };
 }
 
+type CompareWindow = Window & { __compareImageData?: ImageCompareData };
+
 export const ImageComparePage = () => {
   const styles = useStyles();
   const [imageData, setImageData] = useState<ImageCompareData | null>(null);
@@ -72,6 +74,7 @@ export const ImageComparePage = () => {
   useEffect(() => {
     // 从 URL 参数或 window 对象获取图片数据
     const getImageData = () => {
+      const compareWindow = window as CompareWindow;
       try {
         // 方法1: 从 URL 参数获取（开发模式）
         const urlParams = new URLSearchParams(window.location.search);
@@ -86,8 +89,8 @@ export const ImageComparePage = () => {
         }
 
         // 方法2: 从 window 对象获取（生产模式，主进程通过 webContents.executeJavaScript 设置）
-        if ((window as any).__compareImageData) {
-          const data = (window as any).__compareImageData;
+        if (compareWindow.__compareImageData) {
+          const data = compareWindow.__compareImageData;
           setImageData(data);
           setLoading(false);
           return;
@@ -103,8 +106,8 @@ export const ImageComparePage = () => {
         window.addEventListener('compare-data-ready', handleCompareDataReady as EventListener);
         
         // 如果数据已经设置，直接使用
-        if ((window as any).__compareImageData) {
-          const data = (window as any).__compareImageData;
+        if (compareWindow.__compareImageData) {
+          const data = compareWindow.__compareImageData;
           setImageData(data);
           setLoading(false);
         }
@@ -137,7 +140,7 @@ export const ImageComparePage = () => {
 
   if (loading) {
     return (
-      <div className={styles.container}>
+      <div className={`${styles.container} pencil-page`}>
         <div style={{ 
           display: 'flex', 
           alignItems: 'center', 
@@ -153,7 +156,7 @@ export const ImageComparePage = () => {
 
   if (!imageData) {
     return (
-      <div className={styles.container}>
+      <div className={`${styles.container} pencil-page`}>
         <div style={{ 
           display: 'flex', 
           alignItems: 'center', 
@@ -171,9 +174,15 @@ export const ImageComparePage = () => {
   const image2Src = `data:${getImageMimeType(imageData.image2.name)};base64,${imageData.image2.previewImage}`;
 
   return (
-    <div className={styles.container}>
-      <div className={styles.header}>
-        <Title1 style={{ margin: 0, textAlign: 'center' }}>图片对比</Title1>
+    <div className={`${styles.container} pencil-page`}>
+      <div className={`${styles.header} pencil-page-header`}>
+        <div className="pencil-page-title-row">
+          <Title1 className="pencil-page-title" style={{ margin: 0, textAlign: 'center' }}>图片对比</Title1>
+          <span className="pencil-page-kicker">COMPARE</span>
+        </div>
+        <Body1 className="pencil-page-description">
+          并排或滑块对比两张图片的细节差异与参数变化，用于质量评估与模型回归验证。
+        </Body1>
         <div className={styles.imageNames}>
           <div className={styles.imageName} title={imageData.image1.name}>
             {imageData.image1.name}
@@ -196,4 +205,5 @@ export const ImageComparePage = () => {
     </div>
   );
 };
+
 

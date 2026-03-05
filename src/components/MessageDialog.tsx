@@ -7,7 +7,7 @@ import {
   DialogContent,
   Body1,
   Button,
-} from '@fluentui/react-components'
+} from '@/ui/components'
 import { useState, useCallback } from 'react'
 
 interface MessageDialogProps {
@@ -80,3 +80,4 @@ export function useMessageDialog() {
     confirmAction,
   }
 }
+

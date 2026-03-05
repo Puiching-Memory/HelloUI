@@ -14,14 +14,14 @@ import {
   Checkbox,
   Text,
   Slider,
-} from '@fluentui/react-components';
+} from '@/ui/components';
 import {
   ImageAddRegular,
   DocumentArrowDownRegular,
   ArrowUploadRegular,
   DismissRegular,
   ImageRegular,
-} from '@fluentui/react-icons';
+} from '@/ui/icons';
 import { PhotoView } from 'react-photo-view';
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useSharedStyles } from '../styles/sharedStyles';
@@ -268,8 +268,9 @@ export const PerfectPixelPage = () => {
         setResultData(result);
         setResultOriginalUrl(resultToDataURL(result, 1));
         setResultScaledUrl(resultToDataURL(result, outputScale));
-      } catch (err: any) {
-        msgDialog.showMessage('错误', err.message || '处理过程中出错');
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        msgDialog.showMessage('错误', message || '处理过程中出错');
       } finally {
         setProcessing(false);
       }
@@ -336,8 +337,16 @@ export const PerfectPixelPage = () => {
     : `原始尺寸 (${resultData?.width ?? 0}×${resultData?.height ?? 0})`;
 
   return (
-    <div className={sharedStyles.container}>
-      <Title1>Perfect Pixel — 像素画精修</Title1>
+    <div className={`${sharedStyles.container} pencil-page`}>
+      <header className="pencil-page-header">
+        <div className="pencil-page-title-row">
+          <Title1 className="pencil-page-title">Perfect Pixel — 像素画精修</Title1>
+          <span className="pencil-page-kicker">PIXEL LAB</span>
+        </div>
+        <Body1 className="pencil-page-description">
+          对像素图进行网格修复、边缘提纯和放大输出，支持参数回调与双结果视图切换。
+        </Body1>
+      </header>
 
       {/* 隐藏的文件选择 */}
       <input
@@ -585,3 +594,4 @@ export const PerfectPixelPage = () => {
     </div>
   );
 };
+

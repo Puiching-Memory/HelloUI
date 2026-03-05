@@ -1,181 +1,261 @@
-import { ReactNode, ReactElement } from 'react';
+import { type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
-  Button,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
-import {
+  ChevronLeftRegular,
+  ChevronRightRegular,
   HomeRegular,
-  AppsRegular,
-  SettingsRegular,
-  DatabaseRegular,
-  CodeRegular,
-  ImageAddRegular,
-  ImageRegular,
-  EditRegular,
-  VideoClipRegular,
-  ZoomInRegular,
+  FolderRegular,
+  PlugConnectedRegular,
+  ShareRegular,
   GridRegular,
-} from '@fluentui/react-icons';
+  StarRegular,
+  SettingsRegular,
+} from '@/ui/icons';
 import { useAppStore } from '../hooks/useAppStore';
-
-const useStyles = makeStyles({
-  container: {
-    display: 'flex',
-    height: '100vh',
-    width: '100vw',
-    overflow: 'hidden',
-  },
-  sidebar: {
-    display: 'flex',
-    flexDirection: 'column',
-    width: '240px',
-    minWidth: '240px',
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderRight: `1px solid ${tokens.colorNeutralStroke2}`,
-    padding: tokens.spacingVerticalM,
-    gap: tokens.spacingVerticalXS,
-    overflowY: 'auto',
-    flexShrink: 0,
-  },
-  sidebarHeader: {
-    padding: tokens.spacingVerticalM,
-    marginBottom: tokens.spacingVerticalS,
-    flexShrink: 0,
-  },
-  navButton: {
-    justifyContent: 'flex-start',
-    width: '100%',
-    height: '40px',
-    minHeight: '40px',
-    flexShrink: 0,
-    paddingLeft: tokens.spacingHorizontalM,
-  },
-  navGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
-    padding: tokens.spacingVerticalS,
-    marginBottom: tokens.spacingVerticalM,
-    backgroundColor: tokens.colorNeutralBackground3,
-    borderRadius: tokens.borderRadiusMedium,
-    border: `1px solid ${tokens.colorNeutralStroke2}`,
-    flexShrink: 0,
-  },
-  navGroupTitle: {
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightSemibold,
-    color: tokens.colorNeutralForeground3,
-    padding: `0 ${tokens.spacingHorizontalS}`,
-    marginBottom: tokens.spacingVerticalXS,
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-    flexShrink: 0,
-  },
-  content: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-    backgroundColor: tokens.colorNeutralBackground1,
-  },
-  mainContent: {
-    flex: 1,
-    overflowY: 'auto',
-    overflowX: 'hidden',
-  },
-});
+import './MainLayout.css';
 
 interface NavItem {
   id: string;
   path: string;
   label: string;
-  icon: ReactElement;
+  icon: ReactNode;
+  group: 'core' | 'workflow' | 'engine' | 'pixel' | 'other';
 }
 
+type SidebarAnimationState = 'idle' | 'collapsing' | 'expanding';
+
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 420;
+const SIDEBAR_COLLAPSED_WIDTH = 72;
+const SIDEBAR_DEFAULT_WIDTH = 256;
+const SIDEBAR_COLLAPSE_ANIMATION_MS = 280;
+const SIDEBAR_EXPAND_ANIMATION_MS = 500;
+
+const clampSidebarWidth = (width: number): number => {
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, width));
+};
+
+const getIsDesktop = () => {
+  if (typeof window === 'undefined') return true;
+  return window.matchMedia('(min-width: 961px)').matches;
+};
+
 export const MainLayout = ({ children }: { children: ReactNode }) => {
-  const styles = useStyles();
   const navigate = useNavigate();
   const location = useLocation();
-  const { isUploading, isGenerating } = useAppStore();
+  const [isDesktop, setIsDesktop] = useState(getIsDesktop);
+  const resizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const sidebarAnimationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isResizing, setIsResizing] = useState(false);
+  const [sidebarAnimationState, setSidebarAnimationState] = useState<SidebarAnimationState>('idle');
+  const {
+    isUploading,
+    isGenerating,
+    sidebarWidth,
+    sidebarCollapsed,
+    setSidebarWidth,
+    setSidebarCollapsed,
+    toggleSidebarCollapsed,
+  } = useAppStore();
 
   const navigationDisabled = isUploading || isGenerating;
   const navigationDisabledReason = isGenerating ? '正在生成图片，请稍候...' : isUploading ? '正在上传文件，请稍候...' : undefined;
+  const effectiveSidebarCollapsed = isDesktop ? sidebarCollapsed : false;
+  const effectiveSidebarWidth = isDesktop
+    ? effectiveSidebarCollapsed
+      ? SIDEBAR_COLLAPSED_WIDTH
+      : clampSidebarWidth(sidebarWidth)
+    : undefined;
 
   const navItems: NavItem[] = [
-    { id: 'home', path: '/', label: '主页', icon: <HomeRegular /> },
-    { id: 'weights', path: '/weights', label: '模型权重管理', icon: <DatabaseRegular /> },
-    { id: 'sdcpp', path: '/sdcpp', label: '引擎管理', icon: <CodeRegular /> },
-    { id: 'generate', path: '/generate', label: '图片生成', icon: <ImageAddRegular /> },
-    { id: 'edit-image', path: '/edit-image', label: '图片编辑', icon: <EditRegular /> },
-    { id: 'video-generate', path: '/video-generate', label: '视频生成', icon: <VideoClipRegular /> },
-    { id: 'image-upscale', path: '/image-upscale', label: '图像超分辨率', icon: <ZoomInRegular /> },
-    { id: 'perfect-pixel', path: '/perfect-pixel', label: '像素画精修', icon: <GridRegular /> },
-    { id: 'aliyun-video', path: '/aliyun-video', label: '文生视频', icon: <VideoClipRegular /> },
-    { id: 'images', path: '/images', label: '生成结果', icon: <ImageRegular /> },
-    { id: 'components', path: '/components', label: '组件展示', icon: <AppsRegular /> },
-    { id: 'settings', path: '/settings', label: '设置', icon: <SettingsRegular /> },
+    { id: 'home', path: '/', label: '主页', icon: <HomeRegular />, group: 'core' },
+    { id: 'studio', path: '/studio', label: '节点工作台', icon: <ShareRegular />, group: 'workflow' },
+    { id: 'weights', path: '/weights', label: '模型权重管理', icon: <FolderRegular />, group: 'engine' },
+    { id: 'sdcpp', path: '/sdcpp', label: '引擎管理', icon: <PlugConnectedRegular />, group: 'engine' },
+    { id: 'images', path: '/images', label: '生成结果', icon: <GridRegular />, group: 'engine' },
+    { id: 'perfect-pixel', path: '/perfect-pixel', label: '像素画精修', icon: <StarRegular />, group: 'pixel' },
+    { id: 'settings', path: '/settings', label: '设置', icon: <SettingsRegular />, group: 'other' },
   ];
+
+  const navGroups: Array<{ id: NavItem['group']; title: string }> = [
+    { id: 'core', title: '总览' },
+    { id: 'workflow', title: '工作流' },
+    { id: 'engine', title: 'SD.cpp 引擎' },
+    { id: 'pixel', title: '像素工具' },
+    { id: 'other', title: '其他' },
+  ];
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const media = window.matchMedia('(min-width: 961px)');
+    const handleMediaChange = (event: MediaQueryListEvent) => setIsDesktop(event.matches);
+    media.addEventListener('change', handleMediaChange);
+    return () => media.removeEventListener('change', handleMediaChange);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (sidebarAnimationTimerRef.current) {
+        clearTimeout(sidebarAnimationTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isResizing) return undefined;
+
+    const handleMove = (event: MouseEvent) => {
+      const state = resizeStateRef.current;
+      if (!state) return;
+      const nextWidth = clampSidebarWidth(state.startWidth + (event.clientX - state.startX));
+      setSidebarWidth(nextWidth);
+    };
+
+    const handleUp = () => {
+      setIsResizing(false);
+      resizeStateRef.current = null;
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, [isResizing, setSidebarWidth]);
+
+  const handleResizeStart = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || !isDesktop || effectiveSidebarCollapsed) return;
+    resizeStateRef.current = { startX: event.clientX, startWidth: clampSidebarWidth(sidebarWidth) };
+    setIsResizing(true);
+    event.preventDefault();
+  };
+
+  const beginSidebarAnimation = (nextCollapsed: boolean) => {
+    if (sidebarAnimationTimerRef.current) {
+      clearTimeout(sidebarAnimationTimerRef.current);
+    }
+    setSidebarAnimationState(nextCollapsed ? 'collapsing' : 'expanding');
+    sidebarAnimationTimerRef.current = setTimeout(() => {
+      setSidebarAnimationState('idle');
+    }, nextCollapsed ? SIDEBAR_COLLAPSE_ANIMATION_MS : SIDEBAR_EXPAND_ANIMATION_MS);
+  };
+
+  const handleSidebarToggle = () => {
+    if (!isDesktop) return;
+    const nextCollapsed = !sidebarCollapsed;
+    beginSidebarAnimation(nextCollapsed);
+    toggleSidebarCollapsed();
+  };
+
+  const handleResizeReset = () => {
+    if (!isDesktop) return;
+    setSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
+    if (effectiveSidebarCollapsed) {
+      beginSidebarAnimation(false);
+      setSidebarCollapsed(false);
+    }
+    setIsResizing(false);
+    resizeStateRef.current = null;
+  };
 
   const renderNavButton = (item: NavItem) => {
     const isActive = location.pathname === item.path;
+    const title = navigationDisabled && !isActive ? (navigationDisabledReason || '操作进行中，请稍候...') : effectiveSidebarCollapsed ? item.label : undefined;
     return (
-      <Button
+      <button
         key={item.id}
-        appearance={isActive ? 'primary' : 'subtle'}
-        icon={item.icon}
-        className={styles.navButton}
+        className={`main-nav-item ${isActive ? 'is-active' : ''} ${effectiveSidebarCollapsed ? 'is-collapsed' : ''}`}
         onClick={() => navigate(item.path)}
         disabled={navigationDisabled && !isActive}
-        title={navigationDisabled && !isActive ? (navigationDisabledReason || '操作进行中，请稍候...') : undefined}
+        title={title}
+        type="button"
       >
-        {item.label}
-      </Button>
+        <span className="main-nav-icon" aria-hidden="true">
+          {item.icon}
+        </span>
+        <span className="main-nav-label">{item.label}</span>
+      </button>
     );
   };
 
+  const sidebarStyle: CSSProperties = isDesktop && effectiveSidebarWidth
+    ? { width: effectiveSidebarWidth, minWidth: effectiveSidebarWidth }
+    : {};
+  const sidebarAnimationClass = sidebarAnimationState === 'idle' ? '' : `is-${sidebarAnimationState}`;
+
   return (
-    <div className={styles.container}>
-      {/* 左侧导航栏 */}
-      <div className={styles.sidebar}>
-        <div className={styles.sidebarHeader}>
-          <h2 style={{ margin: 0, fontSize: tokens.fontSizeBase500, fontWeight: tokens.fontWeightSemibold }}>
-            HelloUI
-          </h2>
-        </div>
-        
-        {/* 主页按钮 */}
-        {navItems.filter(item => item.id === 'home').map(renderNavButton)}
+    <div className="main-shell">
+      <div className={`main-surface ${isResizing ? 'is-resizing' : ''}`}>
+        <div className={`main-sidebar ${effectiveSidebarCollapsed ? 'is-collapsed' : ''} ${sidebarAnimationClass}`} style={sidebarStyle}>
+          <div className={`main-brand-row ${effectiveSidebarCollapsed ? 'is-collapsed' : ''}`}>
+            <button className="main-brand" onClick={() => navigate('/')} type="button">
+              <span className="main-brand-mark" aria-hidden="true">
+                H
+              </span>
+              <span className="main-brand-copy">
+                <span className="main-brand-title">HelloUI</span>
+                <span className="main-brand-subtitle">AI Studio</span>
+              </span>
+            </button>
+            {isDesktop ? (
+              <button
+                className="main-brand-toggle"
+                type="button"
+                onClick={handleSidebarToggle}
+                title={effectiveSidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'}
+                aria-label={effectiveSidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'}
+              >
+                {effectiveSidebarCollapsed ? <ChevronRightRegular /> : <ChevronLeftRegular />}
+              </button>
+            ) : null}
+          </div>
 
-        {/* SD.cpp引擎功能页面组 */}
-        <div className={styles.navGroup}>
-          <div className={styles.navGroupTitle}>SD.cpp引擎</div>
-          {navItems.filter(item => ['weights', 'sdcpp', 'generate', 'edit-image', 'video-generate', 'image-upscale', 'images'].includes(item.id)).map(renderNavButton)}
-        </div>
+          <div className="main-nav-scroll">
+            {navGroups.map((group) => {
+              const groupItems = navItems.filter((item) => item.group === group.id);
+              if (groupItems.length === 0) {
+                return null;
+              }
 
-        {/* 像素画工具页面组 */}
-        <div className={styles.navGroup}>
-          <div className={styles.navGroupTitle}>像素画工具</div>
-          {navItems.filter(item => ['perfect-pixel'].includes(item.id)).map(renderNavButton)}
-        </div>
+              return (
+                <section className="main-nav-group" key={group.id}>
+                  {effectiveSidebarCollapsed ? (
+                    <div className="main-nav-group-divider" aria-hidden="true" />
+                  ) : (
+                    <h3 className="main-nav-group-title">{group.title}</h3>
+                  )}
+                  <div className="main-nav-group-items">{groupItems.map(renderNavButton)}</div>
+                </section>
+              );
+            })}
+          </div>
 
-        {/* 阿里通义API页面组 */}
-        <div className={styles.navGroup}>
-          <div className={styles.navGroupTitle}>阿里通义API</div>
-          {navItems.filter(item => ['aliyun-video'].includes(item.id)).map(renderNavButton)}
+          <div className="main-sidebar-footer">
+            <div className="main-avatar" aria-hidden="true">
+              PJ
+            </div>
+            <div className="main-footer-copy">
+              <p>Control Center</p>
+              <p>hello@local</p>
+            </div>
+          </div>
         </div>
+        {isDesktop ? (
+          <div
+            className={`main-sidebar-resizer ${effectiveSidebarCollapsed ? 'is-disabled' : ''}`}
+            onMouseDown={handleResizeStart}
+            onDoubleClick={handleResizeReset}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="调整侧边栏宽度，双击恢复默认宽度"
+            title="拖拽调整宽度，双击恢复默认宽度"
+          />
+        ) : null}
 
-        {/* 其他页面按钮 */}
-        {navItems.filter(item => !['home', 'weights', 'sdcpp', 'generate', 'edit-image', 'images', 'video-generate', 'image-upscale', 'perfect-pixel', 'aliyun-video'].includes(item.id)).map(renderNavButton)}
-      </div>
-
-      {/* 主内容区 */}
-      <div className={styles.content}>
-        <div className={styles.mainContent}>
-          {/* TODO: 控制栏和页面切换动画冲突 - transform 会创建新的包含块，导致 position: fixed 失效 */}
-          {children}
-        </div>
+        <main className="main-content">
+          <div className="main-content-inner">{children}</div>
+        </main>
       </div>
     </div>
   );

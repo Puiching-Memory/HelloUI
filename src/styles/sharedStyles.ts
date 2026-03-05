@@ -1,7 +1,7 @@
-import { makeStyles, tokens } from '@fluentui/react-components'
+import { makeStyles, tokens } from '@/ui/components'
 
 /**
- * 生成页面共享样式（GeneratePage, EditImagePage, ImageUpscalePage, VideoGeneratePage）
+ * 页面共享样式（当前主要用于 PerfectPixelPage）
  */
 export const useSharedStyles = makeStyles({
   container: {
@@ -326,7 +326,7 @@ export const useSharedStyles = makeStyles({
     paddingTop: tokens.spacingVerticalM,
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  // ========== 图片上传相关样式（EditImagePage） ==========
+  // ========== 图片上传相关样式 ==========
   uploadSection: {
     display: 'flex',
     flexDirection: 'column',
@@ -373,3 +373,4 @@ export const useSharedStyles = makeStyles({
     minWidth: 'auto',
   },
 })
+

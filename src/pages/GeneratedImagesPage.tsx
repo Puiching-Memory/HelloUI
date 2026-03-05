@@ -16,7 +16,7 @@ import {
   Checkbox,
   Badge,
   Text,
-} from '@fluentui/react-components';
+} from '@/ui/components';
 import {
   ArrowDownloadRegular,
   DeleteRegular,
@@ -32,7 +32,7 @@ import {
   ImageAddRegular,
   GridRegular,
   ListRegular,
-} from '@fluentui/react-icons';
+} from '@/ui/icons';
 import { PhotoView } from 'react-photo-view';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { ipcInvoke } from '../lib/tauriIpc';
@@ -380,6 +380,7 @@ export const GeneratedImagesPage = () => {
   // 加载图片列表
   useEffect(() => {
     loadImages().catch(console.error);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 保存视图模式到 localStorage
@@ -440,8 +441,7 @@ export const GeneratedImagesPage = () => {
     try {
       const success = await ipcInvoke('generated-images:download', image.path);
       if (success) {
-        // 可以显示成功提示
-        console.log('图片下载成功');
+        // 预留：下载成功时可在此展示 Toast
       }
     } catch (error) {
       console.error('Failed to download image:', error);
@@ -736,8 +736,16 @@ export const GeneratedImagesPage = () => {
   }, [images, getTypeInfo, getImageMimeType, loadedPreviews]);
 
   return (
-    <div className={styles.container}>
-      <Title1>生成结果管理</Title1>
+    <div className={`${styles.container} pencil-page`}>
+      <header className="pencil-page-header">
+        <div className="pencil-page-title-row">
+          <Title1 className="pencil-page-title">生成结果管理</Title1>
+          <span className="pencil-page-kicker">GALLERY</span>
+        </div>
+        <Body1 className="pencil-page-description">
+          查看历史生成记录，执行批量选择、对比、下载与删除，快速回溯参数变化。
+        </Body1>
+      </header>
 
       <Card className={styles.section}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalM }}>
@@ -1855,4 +1863,5 @@ export const GeneratedImagesPage = () => {
     </div>
   );
 };
+
 

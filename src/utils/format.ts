@@ -2,7 +2,6 @@
  * 清理 ANSI 转义序列（控制字符）
  */
 export function stripAnsiCodes(text: string): string {
-  // eslint-disable-next-line no-control-regex
   return text
     // eslint-disable-next-line no-control-regex
     .replace(/\u001b\[[0-9;]*[a-zA-Z]/g, '')

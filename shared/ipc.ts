@@ -172,7 +172,7 @@ export interface IPCEventMap {
 
 export type IpcInvokeArgs<C extends IpcInvokeChannel> = IPCRequestMap[C]['request'] extends void
   ? []
-  : IPCRequestMap[C]['request'] extends any[]
+  : IPCRequestMap[C]['request'] extends unknown[]
     ? IPCRequestMap[C]['request']
     : [IPCRequestMap[C]['request']]
 

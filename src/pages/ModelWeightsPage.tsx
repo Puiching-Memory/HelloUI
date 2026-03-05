@@ -27,7 +27,7 @@ import {
   TableCell,
   TableCellLayout,
   Badge,
-} from '@fluentui/react-components';
+} from '@/ui/components';
 import {
   ArrowDownloadRegular,
   DeleteRegular,
@@ -44,8 +44,9 @@ import {
   WarningFilled,
   DismissCircleRegular,
   DismissRegular,
-} from '@fluentui/react-icons';
-import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
+  SearchRegular,
+} from '@/ui/icons';
+import { useState, useEffect, useCallback, useRef, Fragment, type KeyboardEvent } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
 import { useTaskbarProgress } from '../hooks/useTaskbarProgress';
 import { ipcInvoke } from '../lib/tauriIpc';
@@ -57,7 +58,7 @@ const useStyles = makeStyles({
   container: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalXL,
+    gap: tokens.spacingVerticalL,
     padding: tokens.spacingVerticalXXL,
     maxWidth: '1400px',
     margin: '0 auto',
@@ -66,24 +67,70 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
+    padding: tokens.spacingVerticalL,
+  },
+  overviewGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+    gap: tokens.spacingHorizontalM,
+    '@media (max-width: 960px)': {
+      gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    },
+    '@media (max-width: 560px)': {
+      gridTemplateColumns: '1fr',
+    },
+  },
+  overviewCard: {
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+    padding: tokens.spacingVerticalM,
+    backgroundColor: tokens.colorNeutralBackground2,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+  },
+  overviewLabel: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+  },
+  overviewValue: {
+    fontSize: tokens.fontSizeBase500,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+    lineHeight: 1.1,
+  },
+  toolbar: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(280px, 1.8fr) minmax(180px, 1fr) auto',
+    gap: tokens.spacingHorizontalM,
+    alignItems: 'end',
+    '@media (max-width: 900px)': {
+      gridTemplateColumns: '1fr',
+    },
+  },
+  configGrid: {
+    display: 'grid',
+    gridTemplateColumns: '1.4fr 1fr',
+    gap: tokens.spacingHorizontalL,
+    '@media (max-width: 1000px)': {
+      gridTemplateColumns: '1fr',
+    },
   },
   folderPath: {
     display: 'flex',
     alignItems: 'flex-end',
     gap: tokens.spacingHorizontalM,
-    padding: tokens.spacingVerticalM,
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderRadius: tokens.borderRadiusMedium,
+    '@media (max-width: 760px)': {
+      flexDirection: 'column',
+      alignItems: 'stretch',
+    },
   },
-  actions: {
+  groupListHeader: {
     display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalM,
     flexWrap: 'wrap',
-  },
-  emptyState: {
-    textAlign: 'center',
-    padding: tokens.spacingVerticalXXL,
-    color: tokens.colorNeutralForeground3,
   },
   tableContainer: {
     overflowX: 'auto',
@@ -133,23 +180,64 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalS,
   },
-  modelGroupHeader: {
+  groupGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+    gap: tokens.spacingHorizontalM,
+  },
+  groupCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+    padding: tokens.spacingVerticalM,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  groupCardHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    gap: tokens.spacingHorizontalM,
+    gap: tokens.spacingHorizontalS,
   },
-  modelGroupTitle: {
+  groupCardTitle: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
-    flex: 1,
     minWidth: 0,
   },
-  modelGroupActions: {
+  groupName: {
+    fontSize: tokens.fontSizeBase400,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  groupMeta: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    flexWrap: 'wrap',
+  },
+  groupQuickStats: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: tokens.spacingVerticalXS,
+  },
+  statPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: `${tokens.spacingVerticalXXS} ${tokens.spacingHorizontalS}`,
+    borderRadius: tokens.borderRadiusLarge,
+    backgroundColor: tokens.colorNeutralBackground2,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+  },
+  groupActions: {
     display: 'flex',
     gap: tokens.spacingHorizontalXS,
-    flexShrink: 0,
+    flexWrap: 'wrap',
   },
   taskTypeBadge: {
     display: 'inline-flex',
@@ -164,10 +252,32 @@ const useStyles = makeStyles({
     flexShrink: 0,
     whiteSpace: 'nowrap',
   },
-  modelList: {
+  advancedToggle: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    cursor: 'pointer',
+    padding: tokens.spacingVerticalS,
+    borderRadius: tokens.borderRadiusSmall,
+    border: `1px dashed ${tokens.colorNeutralStroke2}`,
+    transition: 'background-color 0.2s ease',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground2,
+    },
+  },
+  advancedPanel: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalS,
+    padding: tokens.spacingVerticalS,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusSmall,
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  modelList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
   },
   modelItem: {
     display: 'flex',
@@ -191,29 +301,6 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-  },
-  expandableSection: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-  },
-  expandableHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    cursor: 'pointer',
-    padding: tokens.spacingVerticalS,
-    borderRadius: tokens.borderRadiusSmall,
-    transition: 'background-color 0.2s ease',
-    ':hover': {
-      backgroundColor: tokens.colorNeutralBackground2,
-    },
-  },
-  expandableContent: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
-    paddingLeft: tokens.spacingHorizontalM,
   },
   paramGrid: {
     display: 'grid',
@@ -277,6 +364,13 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalXS,
     fontSize: tokens.fontSizeBase200,
     padding: `${tokens.spacingVerticalXXS} 0`,
+  },
+  emptyState: {
+    textAlign: 'center',
+    padding: tokens.spacingVerticalXXL,
+    color: tokens.colorNeutralForeground3,
+    border: `1px dashed ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
   },
 });
 
@@ -353,6 +447,9 @@ export const ModelWeightsPage = () => {
   const [verifyFailedInfo, setVerifyFailedInfo] = useState<{ groupId: string; fileName: string; errorMessage: string } | null>(null);
   const [groupDeleteConfirmOpen, setGroupDeleteConfirmOpen] = useState(false);
   const [groupToDelete, setGroupToDelete] = useState<ModelGroup | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [taskTypeFilter, setTaskTypeFilter] = useState<'all' | TaskType>('all');
+  const [dialogAdvancedOpen, setDialogAdvancedOpen] = useState(false);
 
   // 加载权重文件夹路径
   useEffect(() => {
@@ -421,7 +518,7 @@ export const ModelWeightsPage = () => {
     setModelGroups(groups || []);
   };
 
-  const checkAllGroupFiles = async () => {
+  const checkAllGroupFiles = useCallback(async () => {
     const statusMap: Record<string, Array<{ file: string; savePath?: string; exists: boolean; size?: number; verified: boolean; expectedSize?: number }>> = {};
     for (const group of modelGroups) {
       if (group.hfFiles && group.hfFiles.length > 0) {
@@ -434,7 +531,7 @@ export const ModelWeightsPage = () => {
       }
     }
     setFileStatusMap(statusMap);
-  };
+  }, [modelGroups]);
 
   // 保持 ref 始终最新
   useEffect(() => {
@@ -451,10 +548,11 @@ export const ModelWeightsPage = () => {
   // 加载模型组时检查文件状态
   useEffect(() => {
     if (modelGroups.length > 0) {
-      checkAllGroupFiles();
+      checkAllGroupFiles().catch(console.error);
+    } else {
+      setFileStatusMap({});
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modelGroups]);
+  }, [modelGroups.length, checkAllGroupFiles]);
 
   const handleHfMirrorChange = useCallback(async (mirrorId: HfMirrorId) => {
     try {
@@ -602,6 +700,7 @@ export const ModelWeightsPage = () => {
     setGroupDefaultSeed(-1);
     setGroupDefaultFlowShift(3.0);
     setGroupTaskType('generate');
+    setDialogAdvancedOpen(false);
     setGroupDialogOpen(true);
   };
 
@@ -635,6 +734,7 @@ export const ModelWeightsPage = () => {
     setGroupDefaultSeed(group.defaultSeed ?? -1);
     setGroupDefaultFlowShift(group.defaultFlowShift ?? 3.0);
     setGroupTaskType(group.taskType || 'generate');
+    setDialogAdvancedOpen(true);
     setGroupDialogOpen(true);
   };
 
@@ -792,61 +892,220 @@ export const ModelWeightsPage = () => {
     return getPathBaseName(path, path);
   };
 
-  return (
-    <div className={styles.container}>
-      <Title1>模型权重管理</Title1>
+  const getTaskTypeLabel = (taskType?: TaskType) => {
+    switch (taskType) {
+      case 'generate':
+        return '图片生成';
+      case 'edit':
+        return '图片编辑';
+      case 'video':
+        return '视频生成';
+      case 'upscale':
+        return '图像超分辨率';
+      default:
+        return '未指定';
+    }
+  };
 
-      {/* 文件夹路径输入区域 */}
+  const getTaskTypeIcon = (taskType?: TaskType) => {
+    switch (taskType) {
+      case 'generate':
+        return <ImageAddRegular fontSize={16} />;
+      case 'edit':
+        return <EditIcon fontSize={16} />;
+      case 'video':
+        return <VideoClipRegular fontSize={16} />;
+      case 'upscale':
+        return <ZoomInRegular fontSize={16} />;
+      default:
+        return null;
+    }
+  };
+
+  const getGroupStatus = (groupId: string) => {
+    const status = fileStatusMap[groupId] || [];
+    const total = status.length;
+    const missing = status.filter((f) => !f.exists).length;
+    const unverified = status.filter((f) => f.exists && !f.verified).length;
+    const verified = status.filter((f) => f.exists && f.verified).length;
+    const isComplete = total > 0 && missing === 0 && unverified === 0;
+
+    return { total, missing, unverified, verified, isComplete };
+  };
+
+  const filteredModelGroups = modelGroups.filter((group) => {
+    if (taskTypeFilter !== 'all' && group.taskType !== taskTypeFilter) return false;
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+
+    const searchable = [
+      group.name,
+      group.hfFiles?.[0]?.repo,
+      group.sdModel,
+      group.diffusionModel,
+      group.highNoiseSdModel,
+      group.vaeModel,
+      group.llmModel,
+      group.clipLModel,
+      group.t5xxlModel,
+      group.clipVisionModel,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    return searchable.includes(q);
+  });
+
+  const availableCount = modelGroups.filter((group) => getGroupStatus(group.id).isComplete).length;
+  const pendingCount = modelGroups.filter((group) => {
+    const status = getGroupStatus(group.id);
+    return status.total === 0 || status.missing > 0 || status.unverified > 0;
+  }).length;
+  const downloadingLabel =
+    modelDownloadProgress?.stage === 'downloading'
+      ? `${modelDownloadProgress.currentFileIndex}/${modelDownloadProgress.totalFiles || '?'}`
+      : '空闲';
+  const isCreateDisabled =
+    loading ||
+    !groupName.trim() ||
+    (!editingGroup &&
+      (!groupHfRepo.trim() ||
+        (!groupSdModel.trim() && !groupDiffusionModel.trim()) ||
+        !groupVaeModel.trim() ||
+        !groupLlmModel.trim()));
+
+  return (
+    <div className={`${styles.container} pencil-page`}>
+      <header className="pencil-page-header">
+        <div className="pencil-page-title-row">
+          <Title1 className="pencil-page-title">模型权重管理</Title1>
+          <span className="pencil-page-kicker">WEIGHTS</span>
+        </div>
+        <Body1 className="pencil-page-description">
+          用更少的操作完成模型入库、下载校验和分组维护，高级参数按需展开。
+        </Body1>
+      </header>
+
       <Card className={styles.section}>
-        <Title2>权重文件夹路径</Title2>
-        <div className={styles.folderPath}>
-          <Field label="权重文件夹路径" style={{ flex: 1 }}>
+        <div className={styles.overviewGrid}>
+          <div className={styles.overviewCard}>
+            <span className={styles.overviewLabel}>模型组总数</span>
+            <span className={styles.overviewValue}>{modelGroups.length}</span>
+          </div>
+          <div className={styles.overviewCard}>
+            <span className={styles.overviewLabel}>可用分组</span>
+            <span className={styles.overviewValue}>{availableCount}</span>
+          </div>
+          <div className={styles.overviewCard}>
+            <span className={styles.overviewLabel}>待处理分组</span>
+            <span className={styles.overviewValue}>{pendingCount}</span>
+          </div>
+          <div className={styles.overviewCard}>
+            <span className={styles.overviewLabel}>当前下载</span>
+            <span className={styles.overviewValue} style={{ fontSize: tokens.fontSizeBase400 }}>
+              {downloadingLabel}
+            </span>
+          </div>
+        </div>
+
+        <div className={styles.toolbar}>
+          <Field
+            label={
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: tokens.spacingHorizontalXS }}>
+                <SearchRegular fontSize={14} />
+                搜索模型组
+              </span>
+            }
+          >
             <Input
-              value={weightsFolderInput}
-              onChange={(_, data) => handleFolderPathChange(data.value)}
-              placeholder="默认使用应用数据目录下的 models 文件夹"
-              style={{ flex: 1 }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  handleSetFolder();
-                }
-              }}
+              value={searchQuery}
+              onChange={(_, data) => setSearchQuery(data.value)}
+              placeholder="按组名 / 仓库 / 模型文件名检索"
             />
           </Field>
+          <Field label="任务类型">
+            <Dropdown
+              value={taskTypeFilter === 'all' ? '全部' : getTaskTypeLabel(taskTypeFilter)}
+              selectedOptions={[taskTypeFilter]}
+              onOptionSelect={(_, data) => {
+                if (data.optionValue) {
+                  setTaskTypeFilter(data.optionValue as 'all' | TaskType);
+                }
+              }}
+            >
+              <Option value="all">全部</Option>
+              <Option value="generate">图片生成</Option>
+              <Option value="edit">图片编辑</Option>
+              <Option value="video">视频生成</Option>
+              <Option value="upscale">图像超分辨率</Option>
+            </Dropdown>
+          </Field>
           <Button
-            onClick={handleSetFolder}
+            icon={<AddRegular />}
+            onClick={handleCreateGroup}
+            disabled={loading || !weightsFolder}
             appearance="primary"
-            disabled={!weightsFolderInput.trim() || loading || weightsFolderInput.trim() === weightsFolder}
           >
-            应用路径
+            创建模型组
           </Button>
         </div>
-        <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, marginTop: tokens.spacingVerticalXS }}>
-          {weightsFolder 
-            ? `使用文件夹: ${weightsFolder}。权重文件将自动扫描并显示在下方，可以导入模型组文件夹到此文件夹。支持格式：bin, safetensors, pt, pth, onnx, ckpt, gguf`
-            : '默认使用应用数据目录下的 models 文件夹，也可以输入自定义路径。支持格式：bin, safetensors, pt, pth, onnx, ckpt, gguf'}
-        </Body1>
       </Card>
 
-      {/* HF 下载源切换 */}
       <Card className={styles.section}>
-        <Title2>模型下载源</Title2>
-        <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-          模型权重托管在 HuggingFace 上，中国大陆用户推荐使用 HF-Mirror 镜像加速下载。
-        </Body1>
-        <div className={styles.hfMirrorToggle}>
-          <GlobeRegular />
-          <div
-            className={`${styles.hfMirrorBtn} ${hfMirrorId === 'huggingface' ? styles.hfMirrorBtnSelected : ''}`}
-            onClick={() => handleHfMirrorChange('huggingface')}
-          >
-            HuggingFace (官方)
+        <div className={styles.configGrid}>
+          <div>
+            <Title2 style={{ fontSize: tokens.fontSizeBase500 }}>权重目录</Title2>
+            <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+              统一存储与扫描模型文件，支持 bin / safetensors / pt / pth / onnx / ckpt / gguf。
+            </Body1>
+            <div className={styles.folderPath}>
+              <Field label="权重文件夹路径" style={{ flex: 1 }}>
+                <Input
+                  value={weightsFolderInput}
+                  onChange={(_, data) => handleFolderPathChange(data.value)}
+                  placeholder="默认使用应用数据目录下的 models 文件夹"
+                  style={{ flex: 1 }}
+                  onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+                    if (e.key === 'Enter') {
+                      handleSetFolder();
+                    }
+                  }}
+                />
+              </Field>
+              <Button
+                onClick={handleSetFolder}
+                appearance="primary"
+                disabled={!weightsFolderInput.trim() || loading || weightsFolderInput.trim() === weightsFolder}
+              >
+                应用路径
+              </Button>
+            </div>
+            <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+              {weightsFolder ? `当前路径: ${weightsFolder}` : '尚未设置路径，将使用默认目录。'}
+            </Body1>
           </div>
-          <div
-            className={`${styles.hfMirrorBtn} ${hfMirrorId === 'hf-mirror' ? styles.hfMirrorBtnSelected : ''}`}
-            onClick={() => handleHfMirrorChange('hf-mirror')}
-          >
-            HF-Mirror (中国镜像)
+
+          <div>
+            <Title2 style={{ fontSize: tokens.fontSizeBase500 }}>模型下载源</Title2>
+            <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
+              模型权重托管在 HuggingFace，中国大陆用户推荐 HF-Mirror。
+            </Body1>
+            <div className={styles.hfMirrorToggle}>
+              <GlobeRegular />
+              <div
+                className={`${styles.hfMirrorBtn} ${hfMirrorId === 'huggingface' ? styles.hfMirrorBtnSelected : ''}`}
+                onClick={() => handleHfMirrorChange('huggingface')}
+              >
+                HuggingFace
+              </div>
+              <div
+                className={`${styles.hfMirrorBtn} ${hfMirrorId === 'hf-mirror' ? styles.hfMirrorBtnSelected : ''}`}
+                onClick={() => handleHfMirrorChange('hf-mirror')}
+              >
+                HF-Mirror
+              </div>
+            </div>
           </div>
         </div>
 
@@ -900,24 +1159,18 @@ export const ModelWeightsPage = () => {
         )}
       </Card>
 
-      {/* 模型组管理 */}
       <Card className={styles.section}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tokens.spacingVerticalM }}>
-          <Title2>模型组管理</Title2>
-          <Button
-            icon={<AddRegular />}
-            onClick={handleCreateGroup}
-            disabled={loading || !weightsFolder}
-            appearance="primary"
-          >
-            创建模型组
-          </Button>
+        <div className={styles.groupListHeader}>
+          <Title2>模型组列表</Title2>
+          <Body1 style={{ color: tokens.colorNeutralForeground3 }}>
+            显示 {filteredModelGroups.length} / {modelGroups.length} 个模型组
+          </Body1>
         </div>
-        {modelGroups.length === 0 ? (
+        {filteredModelGroups.length === 0 ? (
           <div className={styles.emptyState}>
-            <Body1>暂无模型组</Body1>
+            <Body1>{modelGroups.length === 0 ? '暂无模型组' : '没有符合筛选条件的模型组'}</Body1>
             <Body1 style={{ fontSize: tokens.fontSizeBase200, marginTop: tokens.spacingVerticalS }}>
-              点击"创建模型组"按钮创建一个新的模型组
+              {modelGroups.length === 0 ? '点击“创建模型组”按钮开始配置。' : '尝试清空搜索词或切换任务类型。'}
             </Body1>
           </div>
         ) : (
@@ -934,27 +1187,7 @@ export const ModelWeightsPage = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {modelGroups.map((group) => {
-                  const getTaskTypeLabel = (taskType?: TaskType) => {
-                    switch (taskType) {
-                      case 'generate': return '图片生成';
-                      case 'edit': return '图片编辑';
-                      case 'video': return '视频生成';
-                      case 'upscale': return '图像超分辨率';
-                      default: return '未指定';
-                    }
-                  };
-
-                  const getTaskTypeIcon = (taskType?: TaskType) => {
-                    switch (taskType) {
-                      case 'generate': return <ImageAddRegular fontSize={16} />;
-                      case 'edit': return <EditIcon fontSize={16} />;
-                      case 'video': return <VideoClipRegular fontSize={16} />;
-                      case 'upscale': return <ZoomInRegular fontSize={16} />;
-                      default: return null;
-                    }
-                  };
-
+                {filteredModelGroups.map((group) => {
                   const isExpanded = expandedGroups.has(group.id);
                   const toggleExpand = () => {
                     const newExpanded = new Set(expandedGroups);
@@ -1280,6 +1513,7 @@ export const ModelWeightsPage = () => {
       <Dialog open={groupDialogOpen} onOpenChange={(_, data) => {
         setGroupDialogOpen(data.open);
         if (!data.open) {
+          setDialogAdvancedOpen(false);
           setEditingGroup(null);
           setGroupName('');
           setGroupHfRepo('');
@@ -1413,120 +1647,161 @@ export const ModelWeightsPage = () => {
                     />
                   </Field>
                 )}
-                <Title2 style={{ fontSize: tokens.fontSizeBase400, marginTop: tokens.spacingVerticalM }}>
-                  推荐默认设置（可选）
-                </Title2>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: tokens.spacingHorizontalM }}>
-                  <Field label={groupTaskType === 'video' ? '采样步数' : '采样步数'} hint="默认: 20">
-                    <SpinButton
-                      value={groupDefaultSteps}
-                      onChange={(_, data) => setGroupDefaultSteps(data.value ?? 20)}
-                      min={1}
-                      max={100}
-                      step={1}
-                    />
-                  </Field>
-                  <Field label={groupTaskType === 'video' ? 'CFG Scale' : 'CFG Scale'} hint="默认: 7.0">
-                    <SpinButton
-                      value={groupDefaultCfgScale}
-                      onChange={(_, data) => setGroupDefaultCfgScale(data.value ?? 7.0)}
-                      min={0.1}
-                      max={30}
-                      step={0.1}
-                    />
-                  </Field>
-                  {(groupTaskType === 'video' || groupTaskType === 'edit' || groupTaskType === 'generate') && (
-                    <Field label="Flow Shift" hint={groupTaskType === 'video' ? "Wan2.2 默认: 3.0" : groupTaskType === 'generate' ? "Flow 模型默认: 3.0，普通 SD 模型留 0 不传" : "Qwen 2511 默认: 3.0"}>
-                      <SpinButton
-                        value={groupDefaultFlowShift}
-                        onChange={(_, data) => setGroupDefaultFlowShift(data.value ?? 3.0)}
-                        step={0.1}
-                      />
-                    </Field>
-                  )}
-                  <Field label={groupTaskType === 'video' ? '视频宽度' : '图片宽度'} hint="默认: 512，自动对齐到 16 的倍数">
-                    <SpinButton
-                      value={groupDefaultWidth}
-                      onChange={(_, data) => {
-                        const val = data.value ?? 512;
-                        const aligned = Math.round(val / 16) * 16;
-                        const clamped = Math.max(16, Math.min(2048, aligned));
-                        setGroupDefaultWidth(clamped);
-                      }}
-                      min={16}
-                      max={2048}
-                      step={16}
-                    />
-                  </Field>
-                  <Field label={groupTaskType === 'video' ? '视频高度' : '图片高度'} hint="默认: 512，自动对齐到 16 的倍数">
-                    <SpinButton
-                      value={groupDefaultHeight}
-                      onChange={(_, data) => {
-                        const val = data.value ?? 512;
-                        const aligned = Math.round(val / 16) * 16;
-                        const clamped = Math.max(16, Math.min(2048, aligned));
-                        setGroupDefaultHeight(clamped);
-                      }}
-                      min={16}
-                      max={2048}
-                      step={16}
-                    />
-                  </Field>
-                  <Field label="采样方法" hint="默认: euler_a">
-                    <Dropdown
-                      value={groupDefaultSamplingMethod}
-                      selectedOptions={[groupDefaultSamplingMethod]}
-                      onOptionSelect={(_, data) => {
-                        if (data.optionValue) {
-                          setGroupDefaultSamplingMethod(data.optionValue);
-                        }
-                      }}
-                    >
-                      <Option value="euler">Euler</Option>
-                      <Option value="euler_a">Euler A</Option>
-                      <Option value="heun">Heun</Option>
-                      <Option value="dpm2">DPM2</Option>
-                      <Option value="dpm++2s_a">DPM++ 2S A</Option>
-                      <Option value="dpm++2m">DPM++ 2M</Option>
-                      <Option value="dpm++2mv2">DPM++ 2M V2</Option>
-                      <Option value="ipndm">IPNDM</Option>
-                      <Option value="ipndm_v">IPNDM V</Option>
-                      <Option value="lcm">LCM</Option>
-                      <Option value="ddim_trailing">DDIM Trailing</Option>
-                      <Option value="tcd">TCD</Option>
-                    </Dropdown>
-                  </Field>
-                  {groupTaskType !== 'video' && (
-                    <Field label="调度器" hint="默认: discrete">
-                      <Dropdown
-                        value={groupDefaultScheduler}
-                        selectedOptions={[groupDefaultScheduler]}
-                        onOptionSelect={(_, data) => {
-                          if (data.optionValue) {
-                            setGroupDefaultScheduler(data.optionValue);
+                <Button
+                  appearance="subtle"
+                  icon={dialogAdvancedOpen ? <ChevronUpRegular /> : <ChevronDownRegular />}
+                  onClick={() => setDialogAdvancedOpen((prev) => !prev)}
+                  style={{ justifyContent: 'space-between' }}
+                >
+                  {dialogAdvancedOpen ? '收起高级配置' : '展开高级配置'}
+                </Button>
+
+                {dialogAdvancedOpen && (
+                  <>
+                    {groupTaskType === 'edit' && (
+                      <>
+                        <Field label="CLIP-L 模型文件名（可选）" hint="用于编辑任务的文本编码">
+                          <Input
+                            value={groupClipLModel}
+                            onChange={(_, data) => setGroupClipLModel(data.value)}
+                            placeholder="例如 clip_l.safetensors"
+                          />
+                        </Field>
+                        <Field label="T5XXL 模型文件名（可选）" hint="用于编辑任务的高级文本编码">
+                          <Input
+                            value={groupT5xxlModel}
+                            onChange={(_, data) => setGroupT5xxlModel(data.value)}
+                            placeholder="例如 t5xxl_fp16.safetensors"
+                          />
+                        </Field>
+                      </>
+                    )}
+
+                    <Title2 style={{ fontSize: tokens.fontSizeBase400, marginTop: tokens.spacingVerticalXS }}>
+                      推荐默认设置（可选）
+                    </Title2>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: tokens.spacingHorizontalM }}>
+                      <Field label={groupTaskType === 'video' ? '采样步数' : '采样步数'} hint="默认: 20">
+                        <SpinButton
+                          value={groupDefaultSteps}
+                          onChange={(_, data) => setGroupDefaultSteps(data.value ?? 20)}
+                          min={1}
+                          max={100}
+                          step={1}
+                        />
+                      </Field>
+                      <Field label={groupTaskType === 'video' ? 'CFG Scale' : 'CFG Scale'} hint="默认: 7.0">
+                        <SpinButton
+                          value={groupDefaultCfgScale}
+                          onChange={(_, data) => setGroupDefaultCfgScale(data.value ?? 7.0)}
+                          min={0.1}
+                          max={30}
+                          step={0.1}
+                        />
+                      </Field>
+                      {(groupTaskType === 'video' || groupTaskType === 'edit' || groupTaskType === 'generate') && (
+                        <Field
+                          label="Flow Shift"
+                          hint={
+                            groupTaskType === 'video'
+                              ? 'Wan2.2 默认: 3.0'
+                              : groupTaskType === 'generate'
+                                ? 'Flow 模型默认: 3.0，普通 SD 模型留 0 不传'
+                                : 'Qwen 2511 默认: 3.0'
                           }
-                        }}
-                      >
-                        <Option value="discrete">Discrete</Option>
-                        <Option value="karras">Karras</Option>
-                        <Option value="exponential">Exponential</Option>
-                        <Option value="ays">AYS</Option>
-                        <Option value="gits">GITS</Option>
-                        <Option value="smoothstep">Smoothstep</Option>
-                        <Option value="sgm_uniform">SGM Uniform</Option>
-                        <Option value="simple">Simple</Option>
-                        <Option value="lcm">LCM</Option>
-                      </Dropdown>
-                    </Field>
-                  )}
-                  <Field label="种子" hint="-1 表示随机">
-                    <SpinButton
-                      value={groupDefaultSeed}
-                      onChange={(_, data) => setGroupDefaultSeed(data.value ?? -1)}
-                      min={-1}
-                    />
-                  </Field>
-                </div>
+                        >
+                          <SpinButton
+                            value={groupDefaultFlowShift}
+                            onChange={(_, data) => setGroupDefaultFlowShift(data.value ?? 3.0)}
+                            step={0.1}
+                          />
+                        </Field>
+                      )}
+                      <Field label={groupTaskType === 'video' ? '视频宽度' : '图片宽度'} hint="默认: 512，自动对齐到 16 的倍数">
+                        <SpinButton
+                          value={groupDefaultWidth}
+                          onChange={(_, data) => {
+                            const val = data.value ?? 512;
+                            const aligned = Math.round(val / 16) * 16;
+                            const clamped = Math.max(16, Math.min(2048, aligned));
+                            setGroupDefaultWidth(clamped);
+                          }}
+                          min={16}
+                          max={2048}
+                          step={16}
+                        />
+                      </Field>
+                      <Field label={groupTaskType === 'video' ? '视频高度' : '图片高度'} hint="默认: 512，自动对齐到 16 的倍数">
+                        <SpinButton
+                          value={groupDefaultHeight}
+                          onChange={(_, data) => {
+                            const val = data.value ?? 512;
+                            const aligned = Math.round(val / 16) * 16;
+                            const clamped = Math.max(16, Math.min(2048, aligned));
+                            setGroupDefaultHeight(clamped);
+                          }}
+                          min={16}
+                          max={2048}
+                          step={16}
+                        />
+                      </Field>
+                      <Field label="采样方法" hint="默认: euler_a">
+                        <Dropdown
+                          value={groupDefaultSamplingMethod}
+                          selectedOptions={[groupDefaultSamplingMethod]}
+                          onOptionSelect={(_, data) => {
+                            if (data.optionValue) {
+                              setGroupDefaultSamplingMethod(data.optionValue);
+                            }
+                          }}
+                        >
+                          <Option value="euler">Euler</Option>
+                          <Option value="euler_a">Euler A</Option>
+                          <Option value="heun">Heun</Option>
+                          <Option value="dpm2">DPM2</Option>
+                          <Option value="dpm++2s_a">DPM++ 2S A</Option>
+                          <Option value="dpm++2m">DPM++ 2M</Option>
+                          <Option value="dpm++2mv2">DPM++ 2M V2</Option>
+                          <Option value="ipndm">IPNDM</Option>
+                          <Option value="ipndm_v">IPNDM V</Option>
+                          <Option value="lcm">LCM</Option>
+                          <Option value="ddim_trailing">DDIM Trailing</Option>
+                          <Option value="tcd">TCD</Option>
+                        </Dropdown>
+                      </Field>
+                      {groupTaskType !== 'video' && (
+                        <Field label="调度器" hint="默认: discrete">
+                          <Dropdown
+                            value={groupDefaultScheduler}
+                            selectedOptions={[groupDefaultScheduler]}
+                            onOptionSelect={(_, data) => {
+                              if (data.optionValue) {
+                                setGroupDefaultScheduler(data.optionValue);
+                              }
+                            }}
+                          >
+                            <Option value="discrete">Discrete</Option>
+                            <Option value="karras">Karras</Option>
+                            <Option value="exponential">Exponential</Option>
+                            <Option value="ays">AYS</Option>
+                            <Option value="gits">GITS</Option>
+                            <Option value="smoothstep">Smoothstep</Option>
+                            <Option value="sgm_uniform">SGM Uniform</Option>
+                            <Option value="simple">Simple</Option>
+                            <Option value="lcm">LCM</Option>
+                          </Dropdown>
+                        </Field>
+                      )}
+                      <Field label="种子" hint="-1 表示随机">
+                        <SpinButton
+                          value={groupDefaultSeed}
+                          onChange={(_, data) => setGroupDefaultSeed(data.value ?? -1)}
+                          min={-1}
+                        />
+                      </Field>
+                    </div>
+                  </>
+                )}
               </div>
             </DialogContent>
             <DialogActions style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: tokens.spacingHorizontalM, width: '100%', boxSizing: 'border-box' }}>
@@ -1545,16 +1820,7 @@ export const ModelWeightsPage = () => {
               <Button
                 appearance="primary"
                 onClick={handleSaveGroup}
-                disabled={
-                  loading || 
-                  !groupName.trim() || 
-                  (!editingGroup && (
-                    !groupHfRepo || !groupHfRepo.trim() ||
-                    !groupSdModel || !groupSdModel.trim() || 
-                    !groupVaeModel || !groupVaeModel.trim() || 
-                    (!groupLlmModel || !groupLlmModel.trim())
-                  ))
-                }
+                disabled={isCreateDisabled}
               >
                 {editingGroup ? '保存' : '创建'}
               </Button>

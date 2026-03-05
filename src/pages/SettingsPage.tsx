@@ -11,8 +11,8 @@ import {
   Dropdown,
   Option,
   Spinner,
-} from '@fluentui/react-components';
-import { CodeRegular, CheckmarkCircleFilled } from '@fluentui/react-icons';
+} from '@/ui/components';
+import { CodeRegular, CheckmarkCircleFilled } from '@/ui/icons';
 import { useState, useEffect, useMemo } from 'react';
 import { useAppStore, type ThemeMode } from '../hooks/useAppStore';
 import { useDownloadConfig } from '../hooks/useDownloadConfig';
@@ -125,8 +125,16 @@ export const SettingsPage = () => {
   };
 
   return (
-    <div className={styles.container}>
-      <Title1>设置</Title1>
+    <div className={`${styles.container} pencil-page`}>
+      <header className="pencil-page-header">
+        <div className="pencil-page-title-row">
+          <Title1 className="pencil-page-title">设置</Title1>
+          <span className="pencil-page-kicker">SYSTEM</span>
+        </div>
+        <Body1 className="pencil-page-description">
+          配置主题、下载并发、系统行为与开发辅助选项，统一管理应用运行策略。
+        </Body1>
+      </header>
       
       <Card className={styles.section}>
         <Title2>外观设置</Title2>
@@ -316,5 +324,6 @@ export const SettingsPage = () => {
     </div>
   );
 };
+
 
 

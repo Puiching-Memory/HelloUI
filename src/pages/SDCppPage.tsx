@@ -28,7 +28,7 @@ import {
   Divider,
   MessageBar,
   MessageBarBody,
-} from '@fluentui/react-components';
+} from '@/ui/components';
 import {
   ArrowDownloadRegular,
   ArrowSyncRegular,
@@ -38,8 +38,8 @@ import {
   CheckmarkCircleFilled,
   GlobeRegular,
   TopSpeedRegular,
-} from '@fluentui/react-icons';
-import { useState, useEffect, useCallback, useRef } from 'react';
+} from '@/ui/icons';
+import { useState, useEffect, useCallback, useRef, type KeyboardEvent } from 'react';
 import { useIpcListener } from '../hooks/useIpcListener';
 import { useTaskbarProgress } from '../hooks/useTaskbarProgress';
 import { ipcInvoke } from '../lib/tauriIpc';
@@ -307,6 +307,7 @@ export const SDCppPage = () => {
     if (isInitialized && engineFolder) {
       loadFiles();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engineFolder, isInitialized]);
 
   // 保持 loadFilesRef 始终指向最新的 loadFiles
@@ -449,14 +450,14 @@ export const SDCppPage = () => {
       if (result.length > 0 && !selectedRelease) {
         setSelectedRelease(result[0]);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to fetch releases:', error);
-      const errorMsg = error?.message || error?.toString() || '未知错误';
+      const errorMsg = error instanceof Error ? error.message : String(error || '未知错误');
       setDownloadError(`获取版本列表失败: ${errorMsg}`);
     } finally {
       setLoadingReleases(false);
     }
-  }, [selectedMirrorId]);
+  }, [selectedMirrorId, selectedRelease]);
 
   // ─── 下载操作 ──────────────────────────────────────────────────
 
@@ -481,8 +482,8 @@ export const SDCppPage = () => {
         setDownloadError(result.error || '下载失败');
         setDownloadProgress(null);
       }
-    } catch (error: any) {
-      setDownloadError(error?.message || '下载失败');
+    } catch (error: unknown) {
+      setDownloadError(error instanceof Error ? error.message : '下载失败');
       setDownloadProgress(null);
     }
   }, [selectedRelease, selectedMirrorId]);
@@ -622,8 +623,16 @@ export const SDCppPage = () => {
   const isDownloading = downloadProgress !== null && downloadProgress.stage !== 'done' && downloadProgress.stage !== 'error';
 
   return (
-    <div className={styles.container}>
-      <Title1>SD.cpp 推理引擎</Title1>
+    <div className={`${styles.container} pencil-page`}>
+      <header className="pencil-page-header">
+        <div className="pencil-page-title-row">
+          <Title1 className="pencil-page-title">SD.cpp 推理引擎</Title1>
+          <span className="pencil-page-kicker">ENGINE</span>
+        </div>
+        <Body1 className="pencil-page-description">
+          管理 SD.cpp 目录、版本发布、镜像源与下载状态，统一引擎生命周期与设备能力。
+        </Body1>
+      </header>
 
       {/* 引擎文件夹路径输入区域 */}
       <Card className={styles.section}>
@@ -635,7 +644,7 @@ export const SDCppPage = () => {
               onChange={(_, data) => handleFolderPathChange(data.value)}
               placeholder="默认使用应用数据目录下的 engines/sdcpp 文件夹"
               style={{ flex: 1 }}
-              onKeyDown={(e) => {
+              onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
                 if (e.key === 'Enter') {
                   handleSetFolder();
                 }
@@ -982,3 +991,4 @@ export const SDCppPage = () => {
     </div>
   );
 };
+
