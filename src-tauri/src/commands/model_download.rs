@@ -1,12 +1,14 @@
 use crate::state::{self, AppState, DownloadConfig};
-use futures::StreamExt;
+use hf_hub::{
+    api::tokio::{Api as HfApi, ApiBuilder as HfApiBuilder, Progress as HfProgress},
+    Cache as HfCache,
+    Repo,
+};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
-use tokio::io::{AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::Semaphore;
 
 const VERIFIED_EXTENSION: &str = "verified";
 
@@ -121,6 +123,165 @@ pub async fn models_set_hf_mirror(
     Ok(true)
 }
 
+struct HfProgressState {
+    app: AppHandle,
+    file_name: String,
+    total_files: u32,
+    current_file_index: u32,
+    start_time: std::time::Instant,
+    downloaded_bytes: AtomicU64,
+    total_bytes: AtomicU64,
+    last_emit_at: Mutex<std::time::Instant>,
+}
+
+#[derive(Clone)]
+struct HfProgressReporter {
+    inner: Arc<HfProgressState>,
+}
+
+impl HfProgressReporter {
+    fn new(app: AppHandle, file_name: String, total_files: u32, current_file_index: u32) -> Self {
+        Self {
+            inner: Arc::new(HfProgressState {
+                app,
+                file_name,
+                total_files,
+                current_file_index,
+                start_time: std::time::Instant::now(),
+                downloaded_bytes: AtomicU64::new(0),
+                total_bytes: AtomicU64::new(0),
+                last_emit_at: Mutex::new(
+                    std::time::Instant::now() - std::time::Duration::from_millis(250),
+                ),
+            }),
+        }
+    }
+
+    fn emit(&self, downloaded_bytes: u64, total_bytes: u64, force: bool) {
+        let now = std::time::Instant::now();
+        {
+            let mut last_emit_at = self.inner.last_emit_at.lock().unwrap();
+            if !force
+                && now.duration_since(*last_emit_at) < std::time::Duration::from_millis(200)
+                && (total_bytes == 0 || downloaded_bytes < total_bytes)
+            {
+                return;
+            }
+            *last_emit_at = now;
+        }
+
+        let elapsed = self.inner.start_time.elapsed().as_secs_f64();
+        let speed = if elapsed > 0.0 {
+            downloaded_bytes as f64 / elapsed
+        } else {
+            0.0
+        };
+
+        let _ = self.inner.app.emit(
+            "models:download-progress",
+            ModelDownloadProgress {
+                stage: "downloading".to_string(),
+                downloaded_bytes,
+                total_bytes,
+                speed,
+                file_name: self.inner.file_name.clone(),
+                total_files: self.inner.total_files,
+                current_file_index: self.inner.current_file_index,
+                error: None,
+            },
+        );
+    }
+}
+
+impl HfProgress for HfProgressReporter {
+    async fn init(&mut self, size: usize, _filename: &str) {
+        self.inner.total_bytes.store(size as u64, Ordering::SeqCst);
+        self.inner.downloaded_bytes.store(0, Ordering::SeqCst);
+        self.emit(0, size as u64, true);
+    }
+
+    async fn update(&mut self, size: usize) {
+        let downloaded_bytes = self
+            .inner
+            .downloaded_bytes
+            .fetch_add(size as u64, Ordering::SeqCst)
+            + size as u64;
+        let total_bytes = self.inner.total_bytes.load(Ordering::SeqCst);
+        self.emit(downloaded_bytes, total_bytes, false);
+    }
+
+    async fn finish(&mut self) {
+        let total_bytes = self.inner.total_bytes.load(Ordering::SeqCst);
+        self.inner
+            .downloaded_bytes
+            .store(total_bytes, Ordering::SeqCst);
+        self.emit(total_bytes, total_bytes, true);
+    }
+}
+
+fn get_hf_endpoint(mirror_id: &str) -> String {
+    match mirror_id {
+        "hf-mirror" => "https://hf-mirror.com",
+        _ => "https://huggingface.co",
+    }
+    .to_string()
+}
+
+fn get_hf_cache_dir(models_folder: &str) -> PathBuf {
+    Path::new(models_folder).join(".hf-cache")
+}
+
+fn create_hf_api(
+    models_folder: &str,
+    mirror_id: &str,
+    download_config: &DownloadConfig,
+) -> Result<HfApi, String> {
+    let cache_dir = get_hf_cache_dir(models_folder);
+    std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+
+    let chunk_size = download_config.chunk_size_mb.saturating_mul(1024 * 1024);
+
+    HfApiBuilder::new()
+        .with_progress(false)
+        .with_endpoint(get_hf_endpoint(mirror_id))
+        .with_cache_dir(cache_dir)
+        .with_max_files(download_config.max_concurrent_chunks.max(1))
+        .with_chunk_size((chunk_size > 0).then_some(chunk_size))
+        .build()
+        .map_err(|e| format!("Failed to create hf-hub client: {e}"))
+}
+
+fn get_cached_hf_file(models_folder: &str, repo: &str, file: &str) -> Option<PathBuf> {
+    let cache = HfCache::new(get_hf_cache_dir(models_folder));
+    cache.repo(Repo::model(repo.to_string())).get(file)
+}
+
+async fn get_remote_file_size(api: &HfApi, repo: &str, file: &str) -> Result<u64, String> {
+    let api_repo = api.repo(Repo::model(repo.to_string()));
+    let metadata = api
+        .metadata(&api_repo.url(file))
+        .await
+        .map_err(|e| format!("Failed to fetch remote file metadata: {e}"))?;
+    Ok(metadata.size() as u64)
+}
+
+async fn materialize_downloaded_file(source_path: &Path, dest_path: &Path) -> Result<(), String> {
+    if dest_path.exists() {
+        tokio::fs::remove_file(dest_path)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    if std::fs::hard_link(source_path, dest_path).is_ok() {
+        return Ok(());
+    }
+
+    tokio::fs::copy(source_path, dest_path)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg(target_family = "unix")]
 mod file_lock {
     use std::fs::File;
@@ -193,433 +354,6 @@ impl Drop for FileLockGuard {
     }
 }
 
-struct DownloadState {
-    downloaded: AtomicU64,
-    total: u64,
-    start_time: std::time::Instant,
-}
-
-async fn download_chunk(
-    client: &reqwest::Client,
-    url: &str,
-    dest_path: &std::path::Path,
-    start: u64,
-    end: u64,
-    download_state: Arc<DownloadState>,
-    cancel_rx: tokio::sync::watch::Receiver<bool>,
-) -> Result<(), String> {
-    let range = format!("bytes={}-{}", start, end);
-    let response = client
-        .get(url)
-        .header("Range", range)
-        .header("User-Agent", "HelloUI")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if !response.status().is_success() && response.status() != reqwest::StatusCode::PARTIAL_CONTENT
-    {
-        return Err(format!("HTTP {}: chunk download failed", response.status()));
-    }
-
-    let mut stream = response.bytes_stream();
-    let mut file = tokio::fs::OpenOptions::new()
-        .write(true)
-        .open(dest_path)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    file.seek(tokio::io::SeekFrom::Start(start))
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let mut cancel_rx = cancel_rx;
-
-    loop {
-        if *cancel_rx.borrow() {
-            return Err("cancelled".to_string());
-        }
-
-        tokio::select! {
-            chunk = stream.next() => {
-                match chunk {
-                    Some(Ok(data)) => {
-                        file.write_all(&data).await.map_err(|e| e.to_string())?;
-                        download_state.downloaded.fetch_add(data.len() as u64, Ordering::SeqCst);
-                    }
-                    Some(Err(e)) => {
-                        return Err(e.to_string());
-                    }
-                    None => break,
-                }
-            }
-            _ = cancel_rx.changed() => {
-                return Err("cancelled".to_string());
-            }
-        }
-    }
-
-    file.flush().await.map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-fn get_resume_position(part_path: &std::path::Path, total_size: u64) -> u64 {
-    if !part_path.exists() {
-        return 0;
-    }
-
-    if let Ok(metadata) = std::fs::metadata(part_path) {
-        let size = metadata.len();
-        if size > 8 && size == total_size + 8 {
-            if let Ok(mut file) = std::fs::File::open(part_path) {
-                use std::io::{Read, Seek, SeekFrom};
-                if file.seek(SeekFrom::Start(total_size)).is_ok() {
-                    let mut buf = [0u8; 8];
-                    if file.read_exact(&mut buf).is_ok() {
-                        return u64::from_le_bytes(buf);
-                    }
-                }
-            }
-        }
-    }
-    0
-}
-
-fn save_resume_position(part_path: &std::path::Path, position: u64, total_size: u64) -> Result<(), String> {
-    use std::io::{Seek, SeekFrom, Write};
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .open(part_path)
-        .map_err(|e| e.to_string())?;
-    file.seek(SeekFrom::Start(total_size))
-        .map_err(|e| e.to_string())?;
-    file.write_all(&position.to_le_bytes())
-        .map_err(|e| e.to_string())?;
-    file.flush().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-async fn download_file_parallel(
-    app: &AppHandle,
-    client: &reqwest::Client,
-    url: &str,
-    dest_path: &std::path::Path,
-    file_name: &str,
-    total_files: u32,
-    current_file_index: u32,
-    cancel_rx: tokio::sync::watch::Receiver<bool>,
-    config: &DownloadConfig,
-) -> Result<(), String> {
-    let head_response = client
-        .head(url)
-        .header("User-Agent", "HelloUI")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if !head_response.status().is_success() {
-        return Err(format!(
-            "HTTP {}: HEAD request failed for {}",
-            head_response.status(),
-            url
-        ));
-    }
-
-    let total_bytes = head_response
-        .content_length()
-        .ok_or("Cannot determine file size")?;
-
-    let accepts_range = head_response
-        .headers()
-        .get("accept-ranges")
-        .map(|v| v.to_str().unwrap_or("") == "bytes")
-        .unwrap_or(false);
-
-    let part_path = dest_path.with_extension("part");
-    let chunk_size_bytes = (config.chunk_size_mb * 1024 * 1024) as u64;
-
-    if !accepts_range || total_bytes < chunk_size_bytes {
-        return download_file_sequential(
-            app,
-            client,
-            url,
-            dest_path,
-            file_name,
-            total_files,
-            current_file_index,
-            cancel_rx,
-        )
-        .await;
-    }
-
-    let resume_pos = get_resume_position(&part_path, total_bytes);
-    if resume_pos > 0 {
-        let _ = app.emit(
-            "models:download-progress",
-            ModelDownloadProgress {
-                stage: "resuming".to_string(),
-                downloaded_bytes: resume_pos,
-                total_bytes,
-                speed: 0.0,
-                file_name: file_name.to_string(),
-                total_files,
-                current_file_index,
-                error: None,
-            },
-        );
-    }
-
-    if resume_pos >= total_bytes {
-        std::fs::rename(&part_path, dest_path).map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    if resume_pos == 0 && part_path.exists() {
-        std::fs::remove_file(&part_path).ok();
-    }
-
-    if !part_path.exists() {
-        let file = std::fs::File::create(&part_path).map_err(|e| e.to_string())?;
-        file.set_len(total_bytes + 8)
-            .map_err(|e| e.to_string())?;
-    }
-
-    let download_state = Arc::new(DownloadState {
-        downloaded: AtomicU64::new(resume_pos),
-        total: total_bytes,
-        start_time: std::time::Instant::now(),
-    });
-
-    let semaphore = Arc::new(Semaphore::new(config.max_concurrent_chunks));
-    let mut handles = Vec::new();
-
-    let mut current_pos = resume_pos;
-
-    while current_pos < total_bytes {
-        let start = current_pos;
-        let end = std::cmp::min(start + chunk_size_bytes - 1, total_bytes - 1);
-
-        let permit = semaphore.clone().acquire_owned().await.map_err(|e| e.to_string())?;
-        let client = client.clone();
-        let url = url.to_string();
-        let dest_path = dest_path.to_path_buf();
-        let state = download_state.clone();
-        let cancel = cancel_rx.clone();
-
-        let handle = tokio::spawn(async move {
-            let result =
-                download_chunk(&client, &url, &dest_path, start, end, state, cancel).await;
-            drop(permit);
-            result
-        });
-
-        handles.push(handle);
-        current_pos = end + 1;
-    }
-
-    let progress_handle = {
-        let app = app.clone();
-        let state = download_state.clone();
-        let file_name = file_name.to_string();
-        let cancel = cancel_rx.clone();
-
-        tokio::spawn(async move {
-            let mut last_downloaded = resume_pos;
-            loop {
-                if *cancel.borrow() {
-                    break;
-                }
-
-                let downloaded = state.downloaded.load(Ordering::SeqCst);
-                if downloaded != last_downloaded {
-                    let elapsed = state.start_time.elapsed().as_secs_f64();
-                    let speed = if elapsed > 0.0 {
-                        downloaded as f64 / elapsed
-                    } else {
-                        0.0
-                    };
-
-                    let _ = app.emit(
-                        "models:download-progress",
-                        ModelDownloadProgress {
-                            stage: "downloading".to_string(),
-                            downloaded_bytes: downloaded,
-                            total_bytes: state.total,
-                            speed,
-                            file_name: file_name.clone(),
-                            total_files,
-                            current_file_index,
-                            error: None,
-                        },
-                    );
-
-                    last_downloaded = downloaded;
-                }
-
-                if downloaded >= state.total {
-                    break;
-                }
-
-                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            }
-        })
-    };
-
-    let mut last_committed = resume_pos;
-
-    for handle in handles {
-        match handle.await {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => {
-                if e == "cancelled" {
-                    let downloaded = download_state.downloaded.load(Ordering::SeqCst);
-                    save_resume_position(&part_path, downloaded, total_bytes).ok();
-                    return Err("cancelled".to_string());
-                }
-                return Err(e);
-            }
-            Err(e) => return Err(e.to_string()),
-        }
-
-        let downloaded = download_state.downloaded.load(Ordering::SeqCst);
-        if downloaded > last_committed {
-            save_resume_position(&part_path, downloaded, total_bytes).ok();
-            last_committed = downloaded;
-        }
-    }
-
-    progress_handle.abort();
-
-    let mut file = tokio::fs::OpenOptions::new()
-        .write(true)
-        .open(&part_path)
-        .await
-        .map_err(|e| e.to_string())?;
-    file.set_len(total_bytes).await.map_err(|e| e.to_string())?;
-    file.flush().await.map_err(|e| e.to_string())?;
-    drop(file);
-
-    tokio::fs::rename(&part_path, dest_path)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let actual_size = tokio::fs::metadata(dest_path)
-        .await
-        .map_err(|e| e.to_string())?
-        .len();
-    if actual_size != total_bytes {
-        tokio::fs::remove_file(dest_path).await.ok();
-        return Err(format!(
-            "文件大小不匹配: 期望 {} 字节, 实际 {} 字节。下载可能不完整，请重试。",
-            total_bytes, actual_size
-        ));
-    }
-
-    mark_file_verified(dest_path, total_bytes)?;
-
-    Ok(())
-}
-
-async fn download_file_sequential(
-    app: &AppHandle,
-    client: &reqwest::Client,
-    url: &str,
-    dest_path: &std::path::Path,
-    file_name: &str,
-    total_files: u32,
-    current_file_index: u32,
-    cancel_rx: tokio::sync::watch::Receiver<bool>,
-) -> Result<(), String> {
-    let response = client
-        .get(url)
-        .header("User-Agent", "HelloUI")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if !response.status().is_success() {
-        return Err(format!("HTTP {}: download failed\nURL: {}", response.status(), url));
-    }
-
-    let total_bytes = response.content_length().unwrap_or(0);
-    let mut downloaded_bytes: u64 = 0;
-    let mut out_file = tokio::fs::File::create(dest_path)
-        .await
-        .map_err(|e| e.to_string())?;
-    let mut stream = response.bytes_stream();
-    let start_time = std::time::Instant::now();
-    let mut last_emit = std::time::Instant::now();
-    let mut cancel_rx = cancel_rx;
-
-    if *cancel_rx.borrow() {
-        tokio::fs::remove_file(dest_path).await.ok();
-        return Err("cancelled".to_string());
-    }
-
-    loop {
-        tokio::select! {
-            chunk = stream.next() => {
-                match chunk {
-                    Some(Ok(data)) => {
-                        out_file.write_all(&data).await.map_err(|e| e.to_string())?;
-                        downloaded_bytes += data.len() as u64;
-
-                        // Throttle progress events to avoid overwhelming the WebView message queue
-                        let now = std::time::Instant::now();
-                        if now.duration_since(last_emit) >= std::time::Duration::from_millis(200)
-                            || downloaded_bytes >= total_bytes
-                        {
-                            let elapsed = start_time.elapsed().as_secs_f64();
-                            let speed = if elapsed > 0.0 { downloaded_bytes as f64 / elapsed } else { 0.0 };
-
-                            let _ = app.emit("models:download-progress", ModelDownloadProgress {
-                                stage: "downloading".to_string(),
-                                downloaded_bytes,
-                                total_bytes,
-                                speed,
-                                file_name: file_name.to_string(),
-                                total_files,
-                                current_file_index,
-                                error: None,
-                            });
-                            last_emit = now;
-                        }
-                    }
-                    Some(Err(e)) => {
-                        return Err(e.to_string());
-                    }
-                    None => break,
-                }
-            }
-            _ = cancel_rx.changed() => {
-                drop(out_file);
-                tokio::fs::remove_file(dest_path).await.ok();
-                return Err("cancelled".to_string());
-            }
-        }
-    }
-
-    out_file.flush().await.map_err(|e| e.to_string())?;
-    drop(out_file);
-
-    if total_bytes > 0 {
-        let actual_size = tokio::fs::metadata(dest_path)
-            .await
-            .map_err(|e| e.to_string())?
-            .len();
-        if actual_size != total_bytes {
-            tokio::fs::remove_file(dest_path).await.ok();
-            return Err(format!(
-                "文件大小不匹配: 期望 {} 字节, 实际 {} 字节。下载可能不完整，请重试。",
-                total_bytes, actual_size
-            ));
-        }
-        mark_file_verified(dest_path, total_bytes)?;
-    }
-
-    Ok(())
-}
-
 #[tauri::command]
 pub async fn models_download_group_files(
     app: AppHandle,
@@ -662,17 +396,13 @@ pub async fn models_download_group_files(
         .to_string();
 
     let mirror = mirror_id.unwrap_or_else(|| state.hf_mirror_id.lock().unwrap().clone());
-    let base_url = match mirror.as_str() {
-        "hf-mirror" => "https://hf-mirror.com",
-        _ => "https://huggingface.co",
-    };
+    let download_config = state.download_config.lock().unwrap().clone();
+    let hf_api = create_hf_api(&models_folder, &mirror, &download_config)?;
 
     let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
     *state.download_cancel.lock().unwrap() = Some(cancel_tx);
 
-    let client = reqwest::Client::new();
     let total_files = hf_files.len() as u32;
-    let download_config = state.download_config.lock().unwrap().clone();
 
     for (index, file_ref) in hf_files.iter().enumerate() {
         let repo = file_ref["repo"].as_str().unwrap_or("");
@@ -703,8 +433,6 @@ pub async fn models_download_group_files(
             continue;
         }
 
-        let url = format!("{}/{}/resolve/main/{}", base_url, repo, file);
-
         if *cancel_rx.borrow() {
             return Ok(serde_json::json!({ "success": false, "error": "cancelled" }));
         }
@@ -712,10 +440,11 @@ pub async fn models_download_group_files(
         let max_retries = 3;
         let mut last_error = String::new();
         let mut succeeded = false;
+        let current_file_index = (index + 1) as u32;
 
         for attempt in 0..max_retries {
             if attempt > 0 {
-                // 重试前等待一段时间（指数退避）
+                // Wait before retrying to avoid hammering the remote endpoint.
                 let delay = std::time::Duration::from_secs(2u64.pow(attempt as u32));
                 let _ = app.emit(
                     "models:download-progress",
@@ -724,15 +453,15 @@ pub async fn models_download_group_files(
                         downloaded_bytes: 0,
                         total_bytes: -1i64 as u64,
                         speed: 0.0,
-                        file_name: format!("{} (重试 {}/{})", file, attempt, max_retries - 1),
+                        file_name: format!("{} (retry {}/{})", file, attempt, max_retries - 1),
                         total_files,
-                        current_file_index: (index + 1) as u32,
+                        current_file_index,
                         error: None,
                     },
                 );
                 tokio::time::sleep(delay).await;
 
-                // 删除可能的不完整文件
+                // Remove any incomplete local file before retrying.
                 if dest_path.exists() {
                     std::fs::remove_file(&dest_path).ok();
                 }
@@ -742,17 +471,37 @@ pub async fn models_download_group_files(
                 }
             }
 
-            let result = download_file_parallel(
-                &app,
-                &client,
-                &url,
-                &dest_path,
-                file,
-                total_files,
-                (index + 1) as u32,
-                cancel_rx.clone(),
-                &download_config,
-            )
+            let result = async {
+                if *cancel_rx.borrow() {
+                    return Err("cancelled".to_string());
+                }
+
+                let downloaded_path = match get_cached_hf_file(&models_folder, repo, file) {
+                    Some(path) => path,
+                    None => {
+                        let api_repo = hf_api.repo(Repo::model(repo.to_string()));
+                        let progress = HfProgressReporter::new(
+                            app.clone(),
+                            file.to_string(),
+                            total_files,
+                            current_file_index,
+                        );
+
+                        api_repo
+                            .download_with_progress(file, progress)
+                            .await
+                            .map_err(|e| e.to_string())?
+                    }
+                };
+
+                materialize_downloaded_file(&downloaded_path, &dest_path).await?;
+                let actual_size = tokio::fs::metadata(&dest_path)
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .len();
+                mark_file_verified(&dest_path, actual_size)?;
+                Ok::<(), String>(())
+            }
             .await;
 
             match result {
@@ -766,7 +515,7 @@ pub async fn models_download_group_files(
                         return Ok(serde_json::json!({ "success": false, "error": "cancelled" }));
                     }
                     last_error = e;
-                    // 继续重试
+                    // Keep retrying until the retry budget is exhausted.
                 }
             }
         }
@@ -774,7 +523,7 @@ pub async fn models_download_group_files(
         std::fs::remove_file(&lock_path).ok();
 
         if !succeeded {
-            return Err(format!("下载失败（已重试 {} 次）: {}", max_retries - 1, last_error));
+            return Err(format!("Download failed after {} retries: {}", max_retries - 1, last_error));
         }
     }
 
@@ -922,51 +671,9 @@ pub async fn models_verify_file(
     }
 
     let mirror = state.hf_mirror_id.lock().unwrap().clone();
-    let base_url = match mirror.as_str() {
-        "hf-mirror" => "https://hf-mirror.com",
-        _ => "https://huggingface.co",
-    };
-
-    let url = format!("{}/{}/resolve/main/{}", base_url, repo, file);
-
-    let client = reqwest::Client::new();
-    
-    let expected_size = {
-        let head_response = client
-            .head(&url)
-            .header("User-Agent", "HelloUI")
-            .send()
-            .await
-            .map_err(|e| format!("HTTP request failed: {}", e))?;
-
-        if let Some(size) = head_response.headers().get("content-length") {
-            size.to_str()
-                .map_err(|_| "Invalid content-length header")?
-                .parse::<u64>()
-                .map_err(|_| "Failed to parse content-length")?
-        } else {
-            let range_response = client
-                .get(&url)
-                .header("User-Agent", "HelloUI")
-                .header("Range", "bytes=0-0")
-                .send()
-                .await
-                .map_err(|e| format!("HTTP request failed: {}", e))?;
-
-            if let Some(content_range) = range_response.headers().get("content-range") {
-                let range_str = content_range.to_str()
-                    .map_err(|_| "Invalid content-range header")?;
-                if let Some(total_size) = range_str.split('/').nth(1) {
-                    total_size.parse::<u64>()
-                        .map_err(|_| "Failed to parse content-range")?
-                } else {
-                    return Err("Cannot determine file size from content-range".to_string());
-                }
-            } else {
-                return Err("Cannot determine expected file size".to_string());
-            }
-        }
-    };
+    let download_config = state.download_config.lock().unwrap().clone();
+    let hf_api = create_hf_api(&models_folder, &mirror, &download_config)?;
+    let expected_size = get_remote_file_size(&hf_api, repo, file).await?;
 
     let actual_size = std::fs::metadata(&full_path)
         .map_err(|e| e.to_string())?
@@ -974,7 +681,7 @@ pub async fn models_verify_file(
 
     if actual_size != expected_size {
         return Err(format!(
-            "文件大小不匹配: 期望 {} 字节, 实际 {} 字节",
+            "File size mismatch: expected {} bytes, got {} bytes",
             expected_size, actual_size
         ));
     }

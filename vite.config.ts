@@ -23,6 +23,16 @@ export default defineConfig({
     port: 5173,
     // Tauri expects a fixed port
     strictPort: true,
+    watch: {
+      usePolling: process.platform === 'win32',
+      interval: process.platform === 'win32' ? 300 : undefined,
+      ignored: [
+        '**/src-tauri/**',
+        '**/models/**',
+        '**/outputs/**',
+        '**/engines/**',
+      ],
+    },
   },
   // Env variables starting with TAURI_ will be exposed to the client
   envPrefix: ['VITE_', 'TAURI_'],
