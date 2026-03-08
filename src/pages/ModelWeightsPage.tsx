@@ -1020,7 +1020,7 @@ export const ModelWeightsPage = () => {
           >
             <Input
               value={searchQuery}
-              onChange={(_, data) => setSearchQuery(data.value)}
+              onChange={(_: any, data: any) => setSearchQuery(data.value)}
               placeholder="按组名 / 仓库 / 模型文件名检索"
             />
           </Field>
@@ -1028,7 +1028,7 @@ export const ModelWeightsPage = () => {
             <Dropdown
               value={taskTypeFilter === 'all' ? '全部' : getTaskTypeLabel(taskTypeFilter)}
               selectedOptions={[taskTypeFilter]}
-              onOptionSelect={(_, data) => {
+              onOptionSelect={(_: any, data: any) => {
                 if (data.optionValue) {
                   setTaskTypeFilter(data.optionValue as 'all' | TaskType);
                 }
@@ -1063,7 +1063,7 @@ export const ModelWeightsPage = () => {
               <Field label="权重文件夹路径" style={{ flex: 1 }}>
                 <Input
                   value={weightsFolderInput}
-                  onChange={(_, data) => handleFolderPathChange(data.value)}
+                  onChange={(_: any, data: any) => handleFolderPathChange(data.value)}
                   placeholder="默认使用应用数据目录下的 models 文件夹"
                   style={{ flex: 1 }}
                   onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
@@ -1510,7 +1510,7 @@ export const ModelWeightsPage = () => {
       </Card>
 
       {/* 模型组编辑对话框 */}
-      <Dialog open={groupDialogOpen} onOpenChange={(_, data) => {
+      <Dialog open={groupDialogOpen} onOpenChange={(_: any, data: any) => {
         setGroupDialogOpen(data.open);
         if (!data.open) {
           setDialogAdvancedOpen(false);
@@ -1541,7 +1541,7 @@ export const ModelWeightsPage = () => {
                 <Field label="组名称" required>
                   <Input
                     value={groupName}
-                    onChange={(_, data) => setGroupName(data.value)}
+                    onChange={(_: any, data: any) => setGroupName(data.value)}
                     placeholder="请输入模型组名称"
                   />
                 </Field>
@@ -1559,7 +1559,7 @@ export const ModelWeightsPage = () => {
                       groupTaskType === 'upscale' ? '图像超分辨率' : ''
                     }
                     selectedOptions={[groupTaskType]}
-                    onOptionSelect={(_, data) => {
+                    onOptionSelect={(_: any, data: any) => {
                       if (data.optionValue) {
                         setGroupTaskType(data.optionValue as TaskType);
                       }
@@ -1574,7 +1574,7 @@ export const ModelWeightsPage = () => {
                 <Field label="HuggingFace 仓库 ID" required hint="例如 leejet/Z-Image-GGUF">
                   <Input
                     value={groupHfRepo}
-                    onChange={(_, data) => setGroupHfRepo(data.value)}
+                    onChange={(_: any, data: any) => setGroupHfRepo(data.value)}
                     placeholder="owner/repo"
                   />
                 </Field>
@@ -1584,7 +1584,7 @@ export const ModelWeightsPage = () => {
                 >
                   <Input
                     value={groupSdModel}
-                    onChange={(_, data) => setGroupSdModel(data.value)}
+                    onChange={(_: any, data: any) => setGroupSdModel(data.value)}
                     placeholder={groupTaskType === 'video' ? '基础视频模型文件名' : 'SD模型文件名'}
                   />
                 </Field>
@@ -1595,7 +1595,7 @@ export const ModelWeightsPage = () => {
                   >
                     <Input
                       value={groupDiffusionModel}
-                      onChange={(_, data) => setGroupDiffusionModel(data.value)}
+                      onChange={(_: any, data: any) => setGroupDiffusionModel(data.value)}
                       placeholder="独立扩散模型文件名（可选）"
                     />
                   </Field>
@@ -1607,7 +1607,7 @@ export const ModelWeightsPage = () => {
                   >
                     <Input
                       value={groupHighNoiseSdModel}
-                      onChange={(_, data) => setGroupHighNoiseSdModel(data.value)}
+                      onChange={(_: any, data: any) => setGroupHighNoiseSdModel(data.value)}
                       placeholder="高噪声视频模型文件名（可选）"
                     />
                   </Field>
@@ -1615,7 +1615,7 @@ export const ModelWeightsPage = () => {
                 <Field label={editingGroup ? "VAE模型文件名（可选）" : "VAE模型文件名（必填）"}>
                   <Input
                     value={groupVaeModel}
-                    onChange={(_, data) => setGroupVaeModel(data.value)}
+                    onChange={(_: any, data: any) => setGroupVaeModel(data.value)}
                     placeholder="例如 wan2.2_vae.safetensors"
                   />
                 </Field>
@@ -1630,7 +1630,7 @@ export const ModelWeightsPage = () => {
                 >
                   <Input
                     value={groupLlmModel}
-                    onChange={(_, data) => setGroupLlmModel(data.value)}
+                    onChange={(_: any, data: any) => setGroupLlmModel(data.value)}
                     placeholder={
                       groupTaskType === 'video'
                         ? '例如 umt5-xxl-encoder-q4_k_m.gguf'
@@ -1642,7 +1642,7 @@ export const ModelWeightsPage = () => {
                   <Field label="CLIP Vision 模型文件名（可选，I2V/FLF2V用）">
                     <Input
                       value={groupClipVisionModel}
-                      onChange={(_, data) => setGroupClipVisionModel(data.value)}
+                      onChange={(_: any, data: any) => setGroupClipVisionModel(data.value)}
                       placeholder="CLIP Vision 模型文件名（可选）"
                     />
                   </Field>
@@ -1663,14 +1663,14 @@ export const ModelWeightsPage = () => {
                         <Field label="CLIP-L 模型文件名（可选）" hint="用于编辑任务的文本编码">
                           <Input
                             value={groupClipLModel}
-                            onChange={(_, data) => setGroupClipLModel(data.value)}
+                            onChange={(_: any, data: any) => setGroupClipLModel(data.value)}
                             placeholder="例如 clip_l.safetensors"
                           />
                         </Field>
                         <Field label="T5XXL 模型文件名（可选）" hint="用于编辑任务的高级文本编码">
                           <Input
                             value={groupT5xxlModel}
-                            onChange={(_, data) => setGroupT5xxlModel(data.value)}
+                            onChange={(_: any, data: any) => setGroupT5xxlModel(data.value)}
                             placeholder="例如 t5xxl_fp16.safetensors"
                           />
                         </Field>
@@ -1684,7 +1684,7 @@ export const ModelWeightsPage = () => {
                       <Field label={groupTaskType === 'video' ? '采样步数' : '采样步数'} hint="默认: 20">
                         <SpinButton
                           value={groupDefaultSteps}
-                          onChange={(_, data) => setGroupDefaultSteps(data.value ?? 20)}
+                          onChange={(_: any, data: any) => setGroupDefaultSteps(data.value ?? 20)}
                           min={1}
                           max={100}
                           step={1}
@@ -1693,7 +1693,7 @@ export const ModelWeightsPage = () => {
                       <Field label={groupTaskType === 'video' ? 'CFG Scale' : 'CFG Scale'} hint="默认: 7.0">
                         <SpinButton
                           value={groupDefaultCfgScale}
-                          onChange={(_, data) => setGroupDefaultCfgScale(data.value ?? 7.0)}
+                          onChange={(_: any, data: any) => setGroupDefaultCfgScale(data.value ?? 7.0)}
                           min={0.1}
                           max={30}
                           step={0.1}
@@ -1712,7 +1712,7 @@ export const ModelWeightsPage = () => {
                         >
                           <SpinButton
                             value={groupDefaultFlowShift}
-                            onChange={(_, data) => setGroupDefaultFlowShift(data.value ?? 3.0)}
+                            onChange={(_: any, data: any) => setGroupDefaultFlowShift(data.value ?? 3.0)}
                             step={0.1}
                           />
                         </Field>
@@ -1720,7 +1720,7 @@ export const ModelWeightsPage = () => {
                       <Field label={groupTaskType === 'video' ? '视频宽度' : '图片宽度'} hint="默认: 512，自动对齐到 16 的倍数">
                         <SpinButton
                           value={groupDefaultWidth}
-                          onChange={(_, data) => {
+                          onChange={(_: any, data: any) => {
                             const val = data.value ?? 512;
                             const aligned = Math.round(val / 16) * 16;
                             const clamped = Math.max(16, Math.min(2048, aligned));
@@ -1734,7 +1734,7 @@ export const ModelWeightsPage = () => {
                       <Field label={groupTaskType === 'video' ? '视频高度' : '图片高度'} hint="默认: 512，自动对齐到 16 的倍数">
                         <SpinButton
                           value={groupDefaultHeight}
-                          onChange={(_, data) => {
+                          onChange={(_: any, data: any) => {
                             const val = data.value ?? 512;
                             const aligned = Math.round(val / 16) * 16;
                             const clamped = Math.max(16, Math.min(2048, aligned));
@@ -1749,7 +1749,7 @@ export const ModelWeightsPage = () => {
                         <Dropdown
                           value={groupDefaultSamplingMethod}
                           selectedOptions={[groupDefaultSamplingMethod]}
-                          onOptionSelect={(_, data) => {
+                          onOptionSelect={(_: any, data: any) => {
                             if (data.optionValue) {
                               setGroupDefaultSamplingMethod(data.optionValue);
                             }
@@ -1774,7 +1774,7 @@ export const ModelWeightsPage = () => {
                           <Dropdown
                             value={groupDefaultScheduler}
                             selectedOptions={[groupDefaultScheduler]}
-                            onOptionSelect={(_, data) => {
+                            onOptionSelect={(_: any, data: any) => {
                               if (data.optionValue) {
                                 setGroupDefaultScheduler(data.optionValue);
                               }
@@ -1795,7 +1795,7 @@ export const ModelWeightsPage = () => {
                       <Field label="种子" hint="-1 表示随机">
                         <SpinButton
                           value={groupDefaultSeed}
-                          onChange={(_, data) => setGroupDefaultSeed(data.value ?? -1)}
+                          onChange={(_: any, data: any) => setGroupDefaultSeed(data.value ?? -1)}
                           min={-1}
                         />
                       </Field>
@@ -1830,7 +1830,7 @@ export const ModelWeightsPage = () => {
       </Dialog>
 
       {/* 模型组删除确认对话框 */}
-      <Dialog open={groupDeleteConfirmOpen} onOpenChange={(_, data) => setGroupDeleteConfirmOpen(data.open)}>
+      <Dialog open={groupDeleteConfirmOpen} onOpenChange={(_: any, data: any) => setGroupDeleteConfirmOpen(data.open)}>
         <DialogSurface>
           <DialogTitle>删除模型组</DialogTitle>
           <DialogBody>
@@ -1871,7 +1871,7 @@ export const ModelWeightsPage = () => {
       </Dialog>
 
       {/* 消息对话框 */}
-      <Dialog open={messageDialogOpen} onOpenChange={(_, data) => setMessageDialogOpen(data.open)}>
+      <Dialog open={messageDialogOpen} onOpenChange={(_: any, data: any) => setMessageDialogOpen(data.open)}>
         <DialogSurface>
           <DialogTitle>{messageDialogContent?.title || '提示'}</DialogTitle>
           <DialogBody>
@@ -1890,7 +1890,7 @@ export const ModelWeightsPage = () => {
         </DialogSurface>
       </Dialog>
 
-      <Dialog open={verifyFailedDialogOpen} onOpenChange={(_, data) => setVerifyFailedDialogOpen(data.open)}>
+      <Dialog open={verifyFailedDialogOpen} onOpenChange={(_: any, data: any) => setVerifyFailedDialogOpen(data.open)}>
         <DialogSurface>
           <DialogTitle>验证失败</DialogTitle>
           <DialogBody>

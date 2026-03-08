@@ -211,7 +211,7 @@ export const SettingsPage = () => {
             </Body1>
             <RadioGroup
               value={themeMode}
-              onChange={(_, data) => setThemeMode(data.value as ThemeMode)}
+              onChange={(_: any, data: any) => setThemeMode(data.value as ThemeMode)}
             >
               <Radio label="浅色" value="light" />
               <Radio label="深色" value="dark" />
@@ -241,7 +241,7 @@ export const SettingsPage = () => {
               <Dropdown
                 value={String(chunkSizeMb)}
                 selectedOptions={[String(chunkSizeMb)]}
-                onOptionSelect={(_, data) => setChunkSizeMb(Number(data.optionValue))}
+                onOptionSelect={(_: any, data: any) => setChunkSizeMb(Number(data.optionValue))}
                 style={{ maxWidth: '200px' }}
               >
                 <Option value="5">5 MB</Option>
@@ -260,7 +260,7 @@ export const SettingsPage = () => {
               <Dropdown
                 value={String(maxConcurrentChunks)}
                 selectedOptions={[String(maxConcurrentChunks)]}
-                onOptionSelect={(_, data) => setMaxConcurrentChunks(Number(data.optionValue))}
+                onOptionSelect={(_: any, data: any) => setMaxConcurrentChunks(Number(data.optionValue))}
                 style={{ maxWidth: '200px' }}
               >
                 <Option value="1">1</Option>

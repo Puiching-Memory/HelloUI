@@ -862,7 +862,7 @@ export const SDCppPage = () => {
               <Field label="引擎文件夹路径" style={{ flex: 1, minWidth: 280 }}>
                 <Input
                   value={engineFolderInput}
-                  onChange={(_, data) => handleFolderPathChange((data as { value: string }).value)}
+                  onChange={(_: any, data: any) => handleFolderPathChange((data as { value: string }).value)}
                   placeholder="默认使用应用数据目录下的 engines/sdcpp 文件夹"
                   onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
                     if (event.key === 'Enter') {
@@ -911,7 +911,7 @@ export const SDCppPage = () => {
               <Dropdown
                 value={selectedMirror?.name || '请选择下载源'}
                 selectedOptions={selectedMirror ? [selectedMirror.id] : []}
-                onOptionSelect={(_, data) => {
+                onOptionSelect={(_: any, data: any) => {
                   const optionValue = (data as { optionValue?: string }).optionValue
                   if (optionValue) {
                     setSelectedMirrorId(optionValue)
@@ -1099,7 +1099,7 @@ export const SDCppPage = () => {
                 <Dropdown
                   value={selectedReleaseLabel}
                   selectedOptions={selectedRelease ? [selectedRelease.tagName] : []}
-                  onOptionSelect={(_, data) => {
+                  onOptionSelect={(_: any, data: any) => {
                     const optionValue = (data as { optionValue?: string }).optionValue
                     const release = releases.find((item) => item.tagName === optionValue)
                     if (release) {
@@ -1184,7 +1184,7 @@ export const SDCppPage = () => {
                       </Button>
                       <Dialog
                         open={addMirrorOpen}
-                        onOpenChange={(_, data) => setAddMirrorOpen((data as { open: boolean }).open)}
+                        onOpenChange={(_: any, data: any) => setAddMirrorOpen((data as { open: boolean }).open)}
                       >
                         <DialogTrigger disableButtonEnhancement>
                           <Button icon={<AddRegular />} appearance="subtle">
@@ -1199,14 +1199,14 @@ export const SDCppPage = () => {
                                 <Field label="名称" required>
                                   <Input
                                     value={newMirrorName}
-                                    onChange={(_, data) => setNewMirrorName((data as { value: string }).value)}
+                                    onChange={(_: any, data: any) => setNewMirrorName((data as { value: string }).value)}
                                     placeholder="例：我的镜像站"
                                   />
                                 </Field>
                                 <Field label="代理 URL" required>
                                   <Input
                                     value={newMirrorUrl}
-                                    onChange={(_, data) => setNewMirrorUrl((data as { value: string }).value)}
+                                    onChange={(_: any, data: any) => setNewMirrorUrl((data as { value: string }).value)}
                                     placeholder="例：https://ghfast.top"
                                   />
                                 </Field>
@@ -1265,7 +1265,7 @@ export const SDCppPage = () => {
                                 icon={<DismissRegular />}
                                 appearance="subtle"
                                 size="small"
-                                onClick={(event) => {
+                                onClick={(event: any) => {
                                   ;(event as { stopPropagation?: () => void }).stopPropagation?.()
                                   handleRemoveMirror(mirror.id)
                                 }}

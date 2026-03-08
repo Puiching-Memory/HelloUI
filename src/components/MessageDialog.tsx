@@ -32,7 +32,7 @@ export function MessageDialog({
   const hasConfirm = !!onConfirm
 
   return (
-    <Dialog open={open} onOpenChange={(_, data) => !data.open && onClose()}>
+    <Dialog open={open} onOpenChange={(_: any, data: any) => !data.open && onClose()}>
       <DialogSurface>
         <DialogTitle>{title}</DialogTitle>
         <DialogBody>

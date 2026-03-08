@@ -1,70 +1,88 @@
 import { useNavigate } from 'react-router-dom';
-import './HomePage.css';
+import { Button, Card, Typography, Statistic, Row, Col, Table, Input, Space, Tag } from 'antd';
+import { PlusOutlined, ThunderboltOutlined } from '@ant-design/icons';
+
+const { Title, Paragraph, Text } = Typography;
 
 export const HomePage = () => {
   const navigate = useNavigate();
 
+  const taskColumns = [
+    { title: '任务', dataIndex: 'task', key: 'task' },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      render: (status: string) => (
+        <Tag color={status === '完成' ? 'success' : 'processing'}>{status}</Tag>
+      ),
+    },
+  ];
+
+  const taskData = [
+    { key: '1', task: '文生图批处理', status: '完成' },
+  ];
+
   return (
-    <div className="home-page pencil-page">
-      <header className="home-header pencil-page-header">
+    <div className="pencil-page">
+      <header className="pencil-page-header">
         <div className="pencil-page-title-row">
-          <h1 className="pencil-page-title">主页</h1>
-          <span className="pencil-page-kicker">OVERVIEW</span>
+          <Title level={2} style={{ margin: 0 }}>主页</Title>
+          <Tag color="blue">OVERVIEW</Tag>
         </div>
-        <p className="pencil-page-description">总览模型、任务状态与最新生成记录。</p>
+        <Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          总览模型、任务状态与最新生成记录。
+        </Paragraph>
       </header>
 
-      <section className="home-card home-hero">
-        <h2>欢迎使用 HelloUI</h2>
-        <p>统一入口管理模型、推理引擎与节点式多模态工作流。</p>
-        <button className="home-outline-btn" type="button" onClick={() => navigate('/studio')}>
-          <span>+</span>
+      <Card style={{ marginBottom: 24 }}>
+        <Title level={4}>欢迎使用 HelloUI</Title>
+        <Paragraph type="secondary">统一入口管理模型、推理引擎与节点式多模态工作流。</Paragraph>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/studio')}>
           打开工作台
-        </button>
-      </section>
+        </Button>
+      </Card>
 
-      <section className="home-metrics">
-        <article className="home-card home-metric-card">
-          <h3>今日生成任务</h3>
-          <p className="home-metric-value">48</p>
-          <span className="home-badge">+12%</span>
-        </article>
-        <article className="home-card home-metric-card">
-          <h3>已就绪模型组</h3>
-          <p className="home-metric-value">9</p>
-          <span className="home-badge">稳定</span>
-        </article>
-      </section>
+      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+        <Col xs={24} sm={12}>
+          <Card>
+            <Statistic title="今日生成任务" value={48} suffix={<Tag color="green">+12%</Tag>} />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12}>
+          <Card>
+            <Statistic title="已就绪模型组" value={9} suffix={<Tag>稳定</Tag>} />
+          </Card>
+        </Col>
+      </Row>
 
-      <section className="home-table">
-        <div className="home-table-header">
-          <input aria-label="搜索任务或结果" value="" placeholder="搜索任务或结果..." readOnly />
-          <button className="home-outline-btn home-outline-btn-wide" type="button" onClick={() => navigate('/studio')}>
-            <span>+</span>
+      <Card style={{ marginBottom: 24 }}>
+        <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 16 }}>
+          <Input.Search placeholder="搜索任务或结果..." style={{ width: 300 }} />
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/studio')}>
             新建工作流
-          </button>
-        </div>
+          </Button>
+        </Space>
+        <Table
+          columns={taskColumns}
+          dataSource={taskData}
+          pagination={{ pageSize: 10, size: 'small' }}
+          size="small"
+        />
+        <Text type="secondary" style={{ fontSize: 12 }}>显示最近 10 条记录</Text>
+      </Card>
 
-        <div className="home-table-content">最近任务：文生图批处理 / 完成</div>
-
-        <div className="home-table-footer">
-          <span>显示最近 10 条记录</span>
-          <div className="home-pagination">
-            <button type="button">Previous</button>
-            <button type="button">Next</button>
-          </div>
-        </div>
-      </section>
-
-      <footer className="home-status">
-        <div className="home-status-left">
-          <span className="home-status-dot" />
-          引擎状态：未载入（显存占用 0 GB）
-        </div>
-        <button type="button" onClick={() => navigate('/sdcpp')}>
-          [ Space ] 载入 / 卸载引擎
-        </button>
-      </footer>
+      <Card size="small">
+        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+          <Space>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--muted-foreground)', display: 'inline-block' }} />
+            <Text type="secondary">引擎状态：未载入（显存占用 0 GB）</Text>
+          </Space>
+          <Button type="text" icon={<ThunderboltOutlined />} onClick={() => navigate('/sdcpp')}>
+            [ Space ] 载入 / 卸载引擎
+          </Button>
+        </Space>
+      </Card>
     </div>
   );
 };

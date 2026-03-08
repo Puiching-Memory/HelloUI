@@ -159,7 +159,7 @@ const useStyles = makeStyles({
     top: tokens.spacingVerticalS,
     left: tokens.spacingHorizontalS,
     zIndex: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    backgroundColor: 'var(--card)',
     borderRadius: tokens.borderRadiusSmall,
     padding: '4px',
   },
@@ -844,7 +844,7 @@ export const GeneratedImagesPage = () => {
             }}>
               <Checkbox
                 checked={isAllSelected}
-                onChange={(_, data) => handleSelectAll(data.checked === true)}
+                onChange={(_: any, data: any) => handleSelectAll(data.checked === true)}
                 label="全选"
               />
             </div>
@@ -860,7 +860,7 @@ export const GeneratedImagesPage = () => {
                     <div
                       key={image.path}
                       className={`${styles.imageCard} ${isSelected ? styles.imageCardSelected : ''}`}
-                      onClick={(e) => {
+                      onClick={(e: any) => {
                         const target = e.target as HTMLElement;
                         // 如果点击的是按钮、复选框或操作按钮区域，不触发选择
                         if (target.closest('button') || 
@@ -874,10 +874,10 @@ export const GeneratedImagesPage = () => {
                       }}
                     >
                       {/* 复选框 */}
-                      <div className={styles.imageCardCheckbox} onClick={(e) => e.stopPropagation()}>
+                      <div className={styles.imageCardCheckbox} onClick={(e: any) => e.stopPropagation()}>
                         <Checkbox
                           checked={isSelected}
-                          onChange={(_, data) => {
+                          onChange={(_: any, data: any) => {
                             // 直接使用 data.checked 状态，避免重复调用
                             if (data.checked === true) {
                               setSelectedImages(prev => {
@@ -1033,7 +1033,7 @@ export const GeneratedImagesPage = () => {
                         {/* 操作按钮 */}
                         <div 
                           className={styles.imageCardActions} 
-                          onClick={(e) => e.stopPropagation()}
+                          onClick={(e: any) => e.stopPropagation()}
                           style={{ opacity: 1 }}
                         >
                           <Button
@@ -1086,7 +1086,7 @@ export const GeneratedImagesPage = () => {
                     <div
                       key={image.path}
                       className={`${styles.listItem} ${isSelected ? styles.listItemSelected : ''}`}
-                      onClick={(e) => {
+                      onClick={(e: any) => {
                         const target = e.target as HTMLElement;
                         // 如果点击的是按钮、复选框或操作按钮区域，不触发选择
                         if (target.closest('button') || 
@@ -1102,7 +1102,7 @@ export const GeneratedImagesPage = () => {
                       {/* 复选框 */}
                       <Checkbox
                         checked={isSelected}
-                        onChange={(_, data) => {
+                        onChange={(_: any, data: any) => {
                           // 直接使用 data.checked 状态，避免重复调用，提升响应速度
                           if (data.checked === true) {
                             setSelectedImages(prev => {
@@ -1118,7 +1118,7 @@ export const GeneratedImagesPage = () => {
                             });
                           }
                         }}
-                        onClick={(e) => e.stopPropagation()}
+                        onClick={(e: any) => e.stopPropagation()}
                       />
 
                       {/* 缩略图 */}
@@ -1193,7 +1193,7 @@ export const GeneratedImagesPage = () => {
                       </div>
 
                       {/* 操作按钮 */}
-                      <div className={styles.listItemActions} onClick={(e) => e.stopPropagation()}>
+                      <div className={styles.listItemActions} onClick={(e: any) => e.stopPropagation()}>
                         <Button
                           icon={<InfoRegular />}
                           appearance="subtle"
@@ -1244,7 +1244,7 @@ export const GeneratedImagesPage = () => {
       </Card>
 
       {/* 删除确认对话框 */}
-      <Dialog open={deleteDialogOpen} onOpenChange={(_, data) => setDeleteDialogOpen(data.open)}>
+      <Dialog open={deleteDialogOpen} onOpenChange={(_: any, data: any) => setDeleteDialogOpen(data.open)}>
         <DialogSurface>
           <DialogTitle>确认删除</DialogTitle>
           <DialogBody>
@@ -1273,7 +1273,7 @@ export const GeneratedImagesPage = () => {
       </Dialog>
 
       {/* 批量删除确认对话框 */}
-      <Dialog open={batchDeleteDialogOpen} onOpenChange={(_, data) => setBatchDeleteDialogOpen(data.open)}>
+      <Dialog open={batchDeleteDialogOpen} onOpenChange={(_: any, data: any) => setBatchDeleteDialogOpen(data.open)}>
         <DialogSurface>
           <DialogTitle>确认批量删除</DialogTitle>
           <DialogBody>
@@ -1299,7 +1299,7 @@ export const GeneratedImagesPage = () => {
       </Dialog>
 
       {/* 详情对话框 */}
-      <Dialog open={detailDialogOpen} onOpenChange={(_, data) => {
+      <Dialog open={detailDialogOpen} onOpenChange={(_: any, data: any) => {
         setDetailDialogOpen(data.open);
         if (!data.open) {
           // 清理 Blob URL 以释放内存
@@ -1734,7 +1734,7 @@ export const GeneratedImagesPage = () => {
       </Dialog>
 
       {/* 对比对话框 */}
-      <Dialog open={compareDialogOpen} onOpenChange={(_, data) => {
+      <Dialog open={compareDialogOpen} onOpenChange={(_: any, data: any) => {
         setCompareDialogOpen(data.open);
         if (!data.open) {
           setCompareImage1(null);
@@ -1822,7 +1822,7 @@ export const GeneratedImagesPage = () => {
       </Dialog>
 
       {/* 消息对话框 */}
-      <Dialog open={messageDialogOpen} onOpenChange={(_, data) => setMessageDialogOpen(data.open)}>
+      <Dialog open={messageDialogOpen} onOpenChange={(_: any, data: any) => setMessageDialogOpen(data.open)}>
         <DialogSurface>
           <DialogTitle>{messageDialogContent?.title || '提示'}</DialogTitle>
           <DialogBody>
@@ -1842,7 +1842,7 @@ export const GeneratedImagesPage = () => {
       </Dialog>
 
       {/* 消息对话框 */}
-      <Dialog open={messageDialogOpen} onOpenChange={(_, data) => setMessageDialogOpen(data.open)}>
+      <Dialog open={messageDialogOpen} onOpenChange={(_: any, data: any) => setMessageDialogOpen(data.open)}>
         <DialogSurface>
           <DialogTitle>{messageDialogContent?.title || '提示'}</DialogTitle>
           <DialogBody>

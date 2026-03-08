@@ -10,7 +10,6 @@ interface AppState {
   isUploading: boolean;
   isGenerating: boolean;
   systemIsDark: boolean;
-  sidebarWidth: number;
   sidebarCollapsed: boolean;
   
   // Actions
@@ -19,7 +18,6 @@ interface AppState {
   setIsUploading: (isUploading: boolean) => void;
   setIsGenerating: (isGenerating: boolean) => void;
   setSystemIsDark: (isDark: boolean) => void;
-  setSidebarWidth: (width: number) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   toggleSidebarCollapsed: () => void;
 }
@@ -32,7 +30,6 @@ export const useAppStore = create<AppState>()(
       isUploading: false,
       isGenerating: false,
       systemIsDark: false,
-      sidebarWidth: 256,
       sidebarCollapsed: false,
 
       setThemeMode: (themeMode) => set({ themeMode }),
@@ -40,7 +37,6 @@ export const useAppStore = create<AppState>()(
       setIsUploading: (isUploading) => set({ isUploading }),
       setIsGenerating: (isGenerating) => set({ isGenerating }),
       setSystemIsDark: (systemIsDark) => set({ systemIsDark }),
-      setSidebarWidth: (sidebarWidth) => set({ sidebarWidth }),
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
       toggleSidebarCollapsed: () =>
         set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
@@ -50,7 +46,6 @@ export const useAppStore = create<AppState>()(
       partialize: (state) => ({
         themeMode: state.themeMode,
         colorScheme: state.colorScheme,
-        sidebarWidth: state.sidebarWidth,
         sidebarCollapsed: state.sidebarCollapsed,
       }),
     }

@@ -495,7 +495,7 @@ export const PerfectPixelPage = () => {
             <Field label="采样方法" className={styles.paramField}>
               <Dropdown
                 value={sampleMethod === 'center' ? '中心采样' : sampleMethod === 'median' ? '中值采样' : '多数表决'}
-                onOptionSelect={(_, data) => {
+                onOptionSelect={(_: any, data: any) => {
                   const map: Record<string, SampleMethod> = {
                     '中心采样': 'center',
                     '中值采样': 'median',
@@ -517,7 +517,7 @@ export const PerfectPixelPage = () => {
                   max={16}
                   step={1}
                   value={outputScale}
-                  onChange={(_, data) => setOutputScale(data.value)}
+                  onChange={(_: any, data: any) => setOutputScale(data.value)}
                   style={{ flex: 1 }}
                 />
                 <Text>{outputScale}x</Text>
@@ -531,7 +531,7 @@ export const PerfectPixelPage = () => {
                   max={50}
                   step={1}
                   value={Math.round(refineIntensity * 100)}
-                  onChange={(_, data) => setRefineIntensity(data.value / 100)}
+                  onChange={(_: any, data: any) => setRefineIntensity(data.value / 100)}
                   style={{ flex: 1 }}
                 />
                 <Text>{refineIntensity.toFixed(2)}</Text>
@@ -543,7 +543,7 @@ export const PerfectPixelPage = () => {
             <Field label="最小像素尺寸" className={styles.paramField}>
               <SpinButton
                 value={minSize}
-                onChange={(_, data) => setMinSize(data.value ?? 4)}
+                onChange={(_: any, data: any) => setMinSize(data.value ?? 4)}
                 min={1}
               />
             </Field>
@@ -551,7 +551,7 @@ export const PerfectPixelPage = () => {
             <Field label="峰值检测宽度" className={styles.paramField}>
               <SpinButton
                 value={peakWidth}
-                onChange={(_, data) => setPeakWidth(data.value ?? 6)}
+                onChange={(_: any, data: any) => setPeakWidth(data.value ?? 6)}
                 min={1}
               />
             </Field>
@@ -559,13 +559,13 @@ export const PerfectPixelPage = () => {
 
           <Checkbox
             checked={fixSquare}
-            onChange={(_, data) => setFixSquare(!!data.checked)}
+            onChange={(_: any, data: any) => setFixSquare(!!data.checked)}
             label="自动修正为正方形（当检测到近正方形时）"
           />
 
           <Checkbox
             checked={manualGrid}
-            onChange={(_, data) => setManualGrid(!!data.checked)}
+            onChange={(_: any, data: any) => setManualGrid(!!data.checked)}
             label="手动指定网格大小（覆盖自动检测）"
           />
 
@@ -574,14 +574,14 @@ export const PerfectPixelPage = () => {
               <Field label="网格宽度" className={styles.paramField}>
                 <SpinButton
                   value={gridWidth}
-                  onChange={(_, data) => setGridWidth(data.value ?? 32)}
+                  onChange={(_: any, data: any) => setGridWidth(data.value ?? 32)}
                   min={1}
                 />
               </Field>
               <Field label="网格高度" className={styles.paramField}>
                 <SpinButton
                   value={gridHeight}
-                  onChange={(_, data) => setGridHeight(data.value ?? 32)}
+                  onChange={(_: any, data: any) => setGridHeight(data.value ?? 32)}
                   min={1}
                 />
               </Field>

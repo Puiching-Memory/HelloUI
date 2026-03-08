@@ -13,7 +13,7 @@
   background:
     radial-gradient(circle at right top, color-mix(in srgb, var(--primary) 11%, transparent) 0%, transparent 52%),
     linear-gradient(160deg, color-mix(in srgb, var(--card) 96%, var(--primary) 4%) 0%, var(--card) 100%);
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 8px 24px rgba(var(--shadow-rgb), 0.06);
 }
 
 .pencil-page-title-row {

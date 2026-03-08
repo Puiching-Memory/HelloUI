@@ -14,6 +14,8 @@
   --sidebar-foreground: #09090b;
   --sidebar-accent: #f4f4f4;
   --sidebar-border: #e4e4e7;
+  --shadow-rgb: 15, 23, 42;
+  --scrollbar-thumb-rgb: 0, 0, 0;
   font-family: 'MiSans', 'HarmonyOS Sans SC', 'SF Pro Display', 'Segoe UI', 'PingFang SC', sans-serif;
   line-height: 1.5;
   font-weight: 400;
@@ -37,6 +39,46 @@
   --sidebar-foreground: #fafafa;
   --sidebar-accent: #2a2a30;
   --sidebar-border: rgba(255, 255, 255, 0.1);
+  --shadow-rgb: 0, 0, 0;
+  --scrollbar-thumb-rgb: 255, 255, 255;
+}
+
+/* Catppuccin Frappé 色板 */
+[data-scheme='catppuccin'] {
+  --background: #303446;
+  --foreground: #c6d0f5;
+  --card: #292c3c;
+  --border: #414559;
+  --muted: #414559;
+  --muted-foreground: #a5adce;
+  --primary: #8caaee;
+  --primary-foreground: #232634;
+  --secondary: #51576d;
+  --sidebar: #292c3c;
+  --sidebar-foreground: #c6d0f5;
+  --sidebar-accent: #414559;
+  --sidebar-border: #51576d;
+  --shadow-rgb: 0, 0, 0;
+  --scrollbar-thumb-rgb: 198, 208, 245;
+}
+
+/* Catppuccin Latte 色板 */
+[data-scheme='latte'] {
+  --background: #eff1f5;
+  --foreground: #4c4f69;
+  --card: #e6e9ef;
+  --border: #ccd0da;
+  --muted: #dce0e8;
+  --muted-foreground: #6c6f85;
+  --primary: #1e66f5;
+  --primary-foreground: #eff1f5;
+  --secondary: #ccd0da;
+  --sidebar: #e6e9ef;
+  --sidebar-foreground: #4c4f69;
+  --sidebar-accent: #ccd0da;
+  --sidebar-border: #bcc0cc;
+  --shadow-rgb: 76, 79, 105;
+  --scrollbar-thumb-rgb: 76, 79, 105;
 }
 
 * {
@@ -71,7 +113,7 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: rgba(0, 0, 0, 0.18);
+  background-color: rgba(var(--scrollbar-thumb-rgb), 0.18);
   border-radius: 6px;
   border: 2px solid transparent;
   background-clip: padding-box;
@@ -79,53 +121,19 @@ body {
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(0, 0, 0, 0.28);
+  background-color: rgba(var(--scrollbar-thumb-rgb), 0.28);
 }
 
 ::-webkit-scrollbar-thumb:active {
-  background-color: rgba(0, 0, 0, 0.38);
+  background-color: rgba(var(--scrollbar-thumb-rgb), 0.38);
 }
 
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
 
-[data-theme="light"] ::-webkit-scrollbar-thumb,
-:root:not([data-theme="dark"]) ::-webkit-scrollbar-thumb {
-  background-color: rgba(0, 0, 0, 0.18);
-}
-
-[data-theme="light"] ::-webkit-scrollbar-thumb:hover,
-:root:not([data-theme="dark"]) ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(0, 0, 0, 0.28);
-}
-
-[data-theme="light"] ::-webkit-scrollbar-thumb:active,
-:root:not([data-theme="dark"]) ::-webkit-scrollbar-thumb:active {
-  background-color: rgba(0, 0, 0, 0.38);
-}
-
-/* 深色主题滚动条 */
-[data-theme="dark"] ::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.18);
-}
-
-[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(255, 255, 255, 0.28);
-}
-
-[data-theme="dark"] ::-webkit-scrollbar-thumb:active {
-  background-color: rgba(255, 255, 255, 0.38);
-}
-
-[data-theme="light"] *,
-:root:not([data-theme="dark"]) * {
+* {
   scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
-}
-
-[data-theme="dark"] * {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-color: rgba(var(--scrollbar-thumb-rgb), 0.18) transparent;
 }
 

@@ -1,48 +1,51 @@
 import type { CSSProperties, FC } from 'react';
-import type { LucideIcon, LucideProps } from 'lucide-react';
 import {
-  ArrowRight,
-  Check,
-  CheckCircle2,
-  ChevronLeft,
-  ChevronDown,
-  ChevronRight,
-  ChevronUp,
-  Code2,
-  Columns2,
-  Copy,
-  Download,
-  EllipsisVertical,
-  FileDown,
-  FileText,
-  Folder,
-  Globe,
-  Grid2x2,
-  House,
-  Image,
-  ImagePlus,
-  Info,
-  List,
-  Pencil,
-  Plug,
-  Plus,
-  Search,
-  Settings,
-  Share2,
-  Star,
-  TriangleAlert,
-  Trash2,
-  Upload,
-  User,
-  Video,
-  X,
-  XCircle,
-  Zap,
-  ZoomIn,
-  RefreshCw,
-} from 'lucide-react';
+  PlusOutlined,
+  DownloadOutlined,
+  ArrowRightOutlined,
+  SyncOutlined,
+  UploadOutlined,
+  CheckCircleFilled,
+  CheckOutlined,
+  DownOutlined,
+  LeftOutlined,
+  RightOutlined,
+  UpOutlined,
+  CodeOutlined,
+  CopyOutlined,
+  DeleteOutlined,
+  CloseCircleOutlined,
+  CloseOutlined,
+  FileTextOutlined,
+  FileDoneOutlined,
+  EditOutlined,
+  FolderOutlined,
+  GlobalOutlined,
+  AppstoreOutlined,
+  HomeOutlined,
+  PictureOutlined,
+  FileImageOutlined,
+  InfoCircleOutlined,
+  UnorderedListOutlined,
 
-type AnyProps = Omit<LucideProps, 'size'> & { fontSize?: number | string };
+  ApiOutlined,
+  SearchOutlined,
+  SettingOutlined,
+  ShareAltOutlined,
+  ColumnWidthOutlined,
+  StarOutlined,
+  ThunderboltOutlined,
+  VideoCameraOutlined,
+  WarningFilled,
+  ZoomInOutlined,
+} from '@ant-design/icons';
+
+type AnyProps = {
+  fontSize?: number | string;
+  style?: CSSProperties;
+  className?: string;
+  [key: string]: unknown;
+};
 
 const parseFontSize = (fontSize?: number | string): number | undefined => {
   if (typeof fontSize === 'number') return fontSize;
@@ -53,50 +56,49 @@ const parseFontSize = (fontSize?: number | string): number | undefined => {
   return undefined;
 };
 
-function createIcon(Icon: LucideIcon): FC<AnyProps> {
+function createIcon(Icon: FC<any>): FC<AnyProps> {
   const WrappedIcon: FC<AnyProps> = ({ fontSize, style, ...props }) => {
     const size = parseFontSize(fontSize) ?? 16;
-    return <Icon aria-hidden="true" size={size} style={style as CSSProperties} {...props} />;
+    return <Icon style={{ fontSize: size, ...(style as CSSProperties) }} {...props} />;
   };
   return WrappedIcon;
 }
 
-export const AddRegular = createIcon(Plus);
-export const ArrowDownloadRegular = createIcon(Download);
-export const ArrowRightRegular = createIcon(ArrowRight);
-export const ArrowSyncRegular = createIcon(RefreshCw);
-export const ArrowUploadRegular = createIcon(Upload);
-export const CheckmarkCircleFilled = createIcon(CheckCircle2);
-export const CheckmarkRegular = createIcon(Check);
-export const ChevronDownRegular = createIcon(ChevronDown);
-export const ChevronLeftRegular = createIcon(ChevronLeft);
-export const ChevronRightRegular = createIcon(ChevronRight);
-export const ChevronUpRegular = createIcon(ChevronUp);
-export const CodeRegular = createIcon(Code2);
-export const CopyRegular = createIcon(Copy);
-export const DeleteRegular = createIcon(Trash2);
-export const DismissCircleRegular = createIcon(XCircle);
-export const DismissRegular = createIcon(X);
-export const DocumentArrowDownRegular = createIcon(FileDown);
-export const DocumentRegular = createIcon(FileText);
-export const EditRegular = createIcon(Pencil);
-export const FolderRegular = createIcon(Folder);
-export const GlobeRegular = createIcon(Globe);
-export const GridRegular = createIcon(Grid2x2);
-export const HomeRegular = createIcon(House);
-export const ImageAddRegular = createIcon(ImagePlus);
-export const ImageRegular = createIcon(Image);
-export const InfoRegular = createIcon(Info);
-export const ListRegular = createIcon(List);
-export const MoreVerticalRegular = createIcon(EllipsisVertical);
-export const PersonRegular = createIcon(User);
-export const PlugConnectedRegular = createIcon(Plug);
-export const SearchRegular = createIcon(Search);
-export const SettingsRegular = createIcon(Settings);
-export const ShareRegular = createIcon(Share2);
-export const SplitHorizontalRegular = createIcon(Columns2);
-export const StarRegular = createIcon(Star);
-export const TopSpeedRegular = createIcon(Zap);
-export const VideoClipRegular = createIcon(Video);
-export const WarningFilled = createIcon(TriangleAlert);
-export const ZoomInRegular = createIcon(ZoomIn);
+export const AddRegular = createIcon(PlusOutlined);
+export const ArrowDownloadRegular = createIcon(DownloadOutlined);
+export const ArrowRightRegular = createIcon(ArrowRightOutlined);
+export const ArrowSyncRegular = createIcon(SyncOutlined);
+export const ArrowUploadRegular = createIcon(UploadOutlined);
+export const CheckmarkCircleFilled = createIcon(CheckCircleFilled);
+export const CheckmarkRegular = createIcon(CheckOutlined);
+export const ChevronDownRegular = createIcon(DownOutlined);
+export const ChevronLeftRegular = createIcon(LeftOutlined);
+export const ChevronRightRegular = createIcon(RightOutlined);
+export const ChevronUpRegular = createIcon(UpOutlined);
+export const CodeRegular = createIcon(CodeOutlined);
+export const CopyRegular = createIcon(CopyOutlined);
+export const DeleteRegular = createIcon(DeleteOutlined);
+export const DismissCircleRegular = createIcon(CloseCircleOutlined);
+export const DismissRegular = createIcon(CloseOutlined);
+export const DocumentArrowDownRegular = createIcon(FileDoneOutlined);
+export const DocumentRegular = createIcon(FileTextOutlined);
+export const EditRegular = createIcon(EditOutlined);
+export const FolderRegular = createIcon(FolderOutlined);
+export const GlobeRegular = createIcon(GlobalOutlined);
+export const GridRegular = createIcon(AppstoreOutlined);
+export const HomeRegular = createIcon(HomeOutlined);
+export const ImageAddRegular = createIcon(FileImageOutlined);
+export const ImageRegular = createIcon(PictureOutlined);
+export const InfoRegular = createIcon(InfoCircleOutlined);
+export const ListRegular = createIcon(UnorderedListOutlined);
+
+export const PlugConnectedRegular = createIcon(ApiOutlined);
+export const SearchRegular = createIcon(SearchOutlined);
+export const SettingsRegular = createIcon(SettingOutlined);
+export const ShareRegular = createIcon(ShareAltOutlined);
+export const SplitHorizontalRegular = createIcon(ColumnWidthOutlined);
+export const StarRegular = createIcon(StarOutlined);
+export const TopSpeedRegular = createIcon(ThunderboltOutlined);
+export const VideoClipRegular = createIcon(VideoCameraOutlined);
+export { WarningFilled };
+export const ZoomInRegular = createIcon(ZoomInOutlined);

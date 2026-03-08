@@ -29,7 +29,7 @@ export default tseslint.config(
         'warn',
         {
           allowConstantExport: true,
-          allowExportNames: ['makeStyles', 'tokens', 'createLightTheme', 'createDarkTheme', 'useToastController', 'useMessageDialog'],
+          allowExportNames: ['makeStyles', 'tokens', 'createLightTheme', 'createDarkTheme', 'useMessageDialog'],
         },
       ],
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
