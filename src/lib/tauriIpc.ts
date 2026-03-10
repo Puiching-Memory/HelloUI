@@ -15,6 +15,17 @@ function channelToCommand(channel: string): string {
   return channel.replace(/[:-]/g, '_')
 }
 
+export function getInvokeCommandName(channel: IpcInvokeChannel): string {
+  return channelToCommand(channel)
+}
+
+export async function ipcInvokeWithPayload<C extends IpcInvokeChannel>(
+  channel: C,
+  payload?: Record<string, unknown>,
+): Promise<IpcInvokeResponse<C>> {
+  return invoke(getInvokeCommandName(channel), payload ?? {}) as Promise<IpcInvokeResponse<C>>
+}
+
 /**
  * 调用 Tauri 后端命令
  */
@@ -22,37 +33,23 @@ export async function ipcInvoke<C extends IpcInvokeChannel>(
   channel: C,
   ...args: IpcInvokeArgs<C>
 ): Promise<IpcInvokeResponse<C>> {
-  const command = channelToCommand(channel)
-
-  // 将参数打包为 Tauri command 期望的格式
   let payload: Record<string, unknown> = {}
 
   if (args.length === 1) {
     const arg = args[0]
     if (arg !== null && arg !== undefined && typeof arg === 'object' && !Array.isArray(arg)) {
-      if (channel === 'sdcpp:fetch-releases') {
-        payload = arg as Record<string, unknown>
-      } else {
-        payload = {
-          ...(arg as Record<string, unknown>),
-          value: arg,
-        }
+      payload = {
+        ...(arg as Record<string, unknown>),
+        value: arg,
       }
     } else {
       payload = { value: arg }
     }
   } else if (args.length > 1) {
-    // 为已知的多参数 channel 提供命名参数
-    if (channel === 'sdcpp:list-files') {
-      payload = { folder: args[0], deviceType: args[1] } as Record<string, unknown>
-    } else if (channel === 'generated-images:batch-download') {
-      payload = { value: args[0] } as Record<string, unknown>
-    } else {
-      payload = { value: args as unknown }
-    }
+    payload = { args: args as unknown }
   }
 
-  return invoke(command, payload) as Promise<IpcInvokeResponse<C>>
+  return ipcInvokeWithPayload(channel, payload)
 }
 
 /**

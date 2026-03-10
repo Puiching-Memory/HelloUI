@@ -1,53 +1,63 @@
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 
-export type ThemeMode = 'light' | 'dark' | 'system';
-export type ColorScheme = 'catppuccin' | 'latte' | 'default';
+export type ThemeMode = 'light' | 'dark'
 
 interface AppState {
-  themeMode: ThemeMode;
-  colorScheme: ColorScheme;
-  isUploading: boolean;
-  isGenerating: boolean;
-  systemIsDark: boolean;
-  sidebarCollapsed: boolean;
-  
-  // Actions
-  setThemeMode: (mode: ThemeMode) => void;
-  setColorScheme: (scheme: ColorScheme) => void;
-  setIsUploading: (isUploading: boolean) => void;
-  setIsGenerating: (isGenerating: boolean) => void;
-  setSystemIsDark: (isDark: boolean) => void;
-  setSidebarCollapsed: (collapsed: boolean) => void;
-  toggleSidebarCollapsed: () => void;
+  themeMode: ThemeMode
+  sidebarCollapsed: boolean
+  setThemeMode: (mode: ThemeMode) => void
+  setSidebarCollapsed: (collapsed: boolean) => void
+  toggleSidebarCollapsed: () => void
+}
+
+function getPreferredThemeMode(): ThemeMode {
+  if (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    return 'dark'
+  }
+
+  return 'light'
+}
+
+function normalizeThemeMode(value: unknown): ThemeMode {
+  if (value === 'dark') {
+    return 'dark'
+  }
+
+  if (value === 'system') {
+    return getPreferredThemeMode()
+  }
+
+  return 'light'
 }
 
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
-      themeMode: 'system',
-      colorScheme: 'default',
-      isUploading: false,
-      isGenerating: false,
-      systemIsDark: false,
+      themeMode: getPreferredThemeMode(),
       sidebarCollapsed: false,
-
       setThemeMode: (themeMode) => set({ themeMode }),
-      setColorScheme: (colorScheme) => set({ colorScheme }),
-      setIsUploading: (isUploading) => set({ isUploading }),
-      setIsGenerating: (isGenerating) => set({ isGenerating }),
-      setSystemIsDark: (systemIsDark) => set({ systemIsDark }),
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
-      toggleSidebarCollapsed: () =>
-        set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+      toggleSidebarCollapsed: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
     }),
     {
       name: 'app-storage',
+      version: 2,
+      migrate: (persistedState) => {
+        const state = (persistedState ?? {}) as Partial<{
+          themeMode: unknown
+          sidebarCollapsed: unknown
+        }>
+
+        return {
+          themeMode: normalizeThemeMode(state.themeMode),
+          sidebarCollapsed: typeof state.sidebarCollapsed === 'boolean' ? state.sidebarCollapsed : false,
+        }
+      },
       partialize: (state) => ({
         themeMode: state.themeMode,
-        colorScheme: state.colorScheme,
         sidebarCollapsed: state.sidebarCollapsed,
       }),
-    }
-  )
-);
+    },
+  ),
+)

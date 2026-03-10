@@ -75,7 +75,7 @@
   min-height: 0;
   box-shadow:
     0 4px 20px rgba(var(--shadow-rgb), 0.14),
-    inset 0 0.5px 0 rgba(255, 255, 255, 0.1);
+    inset 0 0.5px 0 var(--app-glass-highlight);
 }
 
 .workflow-left,
@@ -124,7 +124,9 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .workflow-panel-collapse:hover {
@@ -154,7 +156,7 @@
   justify-content: center;
   box-shadow:
     0 2px 10px rgba(var(--shadow-rgb), 0.15),
-    inset 0 0.5px 0 rgba(255, 255, 255, 0.1);
+    inset 0 0.5px 0 var(--app-glass-highlight);
   cursor: pointer;
   transition: background 0.15s;
 }
@@ -211,7 +213,9 @@
   text-align: left;
   user-select: none;
   -webkit-user-drag: element;
-  transition: background 0.12s, border-color 0.12s;
+  transition:
+    background 0.12s,
+    border-color 0.12s;
 }
 
 .workflow-node-template:hover {
@@ -273,7 +277,7 @@
 }
 
 .workflow-io-tag.is-output {
-  color: #1a1a2e;
+  color: var(--app-workflow-output-tag-foreground);
   border: none;
 }
 
@@ -307,8 +311,6 @@
 .workflow-canvas.is-panning {
   cursor: grabbing;
 }
-
-
 
 .workflow-drop-overlay {
   position: absolute;
@@ -410,7 +412,9 @@
   cursor: grab;
   user-select: none;
   overflow: visible;
-  transition: box-shadow 0.15s, border-color 0.15s;
+  transition:
+    box-shadow 0.15s,
+    border-color 0.15s;
 }
 
 .workflow-node:disabled {
@@ -446,7 +450,7 @@
   gap: 6px;
   padding: 7px 10px;
   background: var(--node-color, var(--primary));
-  color: #fff;
+  color: var(--app-on-accent);
   font-size: 12px;
   font-weight: 600;
   border-radius: 7px 7px 0 0;
@@ -479,21 +483,21 @@
   border-radius: 3px;
   font-size: 10px;
   font-weight: 600;
-  background: rgba(255, 255, 255, 0.2);
-  color: #fff;
+  background: var(--app-on-accent-overlay);
+  color: var(--app-on-accent);
   white-space: nowrap;
 }
 
 .workflow-node-badge.is-ready {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--app-on-accent-overlay-strong);
 }
 
 .workflow-node-badge.is-running {
-  background: rgba(255, 200, 50, 0.4);
+  background: var(--app-on-accent-warning-overlay);
 }
 
 .workflow-node-badge.is-idle {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--app-on-accent-overlay-soft);
 }
 
 /* ── Node body ── */
@@ -542,7 +546,9 @@
   transform: translateY(-50%);
   pointer-events: auto;
   cursor: crosshair;
-  transition: transform 0.12s, box-shadow 0.12s;
+  transition:
+    transform 0.12s,
+    box-shadow 0.12s;
   z-index: 1;
 }
 
@@ -607,15 +613,15 @@
 }
 
 .workflow-inspector-note.is-ready {
-  background: #ecfdf5;
-  color: #166534;
-  border-color: #a7f3d0;
+  background: var(--app-success-bg);
+  color: var(--app-success);
+  border-color: var(--app-success-border);
 }
 
 .workflow-inspector-note.is-warning {
-  background: #fff7ed;
-  color: #9a3412;
-  border-color: #fdba74;
+  background: var(--app-warning-bg);
+  color: var(--app-warning);
+  border-color: var(--app-warning-border);
 }
 
 .workflow-inspector-actions {
@@ -651,7 +657,7 @@
   backdrop-filter: blur(24px) saturate(180%);
   box-shadow:
     0 8px 32px rgba(var(--shadow-rgb), 0.2),
-    inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
+    inset 0 0.5px 0 var(--app-glass-highlight);
   padding: 6px;
 }
 
@@ -758,15 +764,15 @@
 }
 
 .workflow-status-dot.is-ready {
-  background: #16a34a;
+  background: var(--app-success);
 }
 
 .workflow-status-dot.is-running {
-  background: #f59e0b;
+  background: var(--app-warning);
 }
 
 .workflow-status-dot.is-warning {
-  background: #f97316;
+  background: var(--app-error);
 }
 
 .workflow-status-message {
@@ -828,44 +834,10 @@
   .workflow-toolbar {
     flex-wrap: wrap;
   }
-
-
 }
 
-/* ── Dark theme adjustments for inspector notes ── */
-
-[data-theme='dark'] .workflow-inspector-note.is-ready {
-  background: rgba(22, 101, 52, 0.15);
-  color: #86efac;
-  border-color: rgba(134, 239, 172, 0.3);
-}
-
-[data-theme='dark'] .workflow-inspector-note.is-warning {
-  background: rgba(154, 52, 18, 0.15);
-  color: #fdba74;
-  border-color: rgba(253, 186, 116, 0.3);
-}
-
-[data-theme='dark'] .workflow-warning {
-  background: rgba(154, 52, 18, 0.15);
-  color: #fdba74;
-  border-color: rgba(253, 186, 116, 0.3);
-}
-
-[data-scheme='catppuccin'] .workflow-inspector-note.is-ready {
-  background: rgba(166, 218, 149, 0.1);
-  color: #a6da95;
-  border-color: rgba(166, 218, 149, 0.25);
-}
-
-[data-scheme='catppuccin'] .workflow-inspector-note.is-warning {
-  background: rgba(239, 159, 118, 0.1);
-  color: #ef9f76;
-  border-color: rgba(239, 159, 118, 0.25);
-}
-
-[data-scheme='catppuccin'] .workflow-warning {
-  background: rgba(239, 159, 118, 0.1);
-  color: #ef9f76;
-  border-color: rgba(239, 159, 118, 0.25);
+.workflow-warning {
+  background: var(--app-warning-bg);
+  color: var(--app-warning);
+  border-color: var(--app-warning-border);
 }

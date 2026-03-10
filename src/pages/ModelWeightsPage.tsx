@@ -27,7 +27,7 @@ import {
   TableCell,
   TableCellLayout,
   Badge,
-} from '@/ui/components';
+} from '@/ui/components'
 import {
   ArrowDownloadRegular,
   DeleteRegular,
@@ -45,13 +45,13 @@ import {
   DismissCircleRegular,
   DismissRegular,
   SearchRegular,
-} from '@/ui/icons';
-import { useState, useEffect, useCallback, useRef, Fragment, type KeyboardEvent } from 'react';
-import { useIpcListener } from '../hooks/useIpcListener';
-import { useTaskbarProgress } from '../hooks/useTaskbarProgress';
-import { ipcInvoke } from '../lib/tauriIpc';
-import { formatFileSize, formatSpeed, calculateEta, formatEta, calculatePercent } from '@/utils/format';
-import { getPathBaseName } from '@/utils/tauriPath';
+} from '@/ui/icons'
+import { modelWeightsService } from '@/features/model-weights/services/modelWeightsService'
+import { useState, useEffect, useCallback, useRef, Fragment, type KeyboardEvent } from 'react'
+import { useIpcListener } from '../hooks/useIpcListener'
+import { useTaskbarProgress } from '../hooks/useTaskbarProgress'
+import { formatFileSize, formatSpeed, calculateEta, formatEta, calculatePercent } from '@/utils/format'
+import { getPathBaseName } from '@/utils/tauriPath'
 import type { TaskType, ModelGroup, HfMirrorId, ModelDownloadProgress } from '../../shared/types'
 
 const useStyles = makeStyles({
@@ -372,439 +372,476 @@ const useStyles = makeStyles({
     border: `1px dashed ${tokens.colorNeutralStroke2}`,
     borderRadius: tokens.borderRadiusMedium,
   },
-});
+})
 
 export const ModelWeightsPage = () => {
-  const styles = useStyles();
-  const [weightsFolder, setWeightsFolder] = useState<string>('');
-  const [weightsFolderInput, setWeightsFolderInput] = useState<string>('');
-  const [loading, setLoading] = useState(false);
+  const styles = useStyles()
+  const [weightsFolder, setWeightsFolder] = useState<string>('')
+  const [weightsFolderInput, setWeightsFolderInput] = useState<string>('')
+  const [loading, setLoading] = useState(false)
 
   // HF 下载相关状态
-  const [hfMirrorId, setHfMirrorId] = useState<HfMirrorId>('hf-mirror');
-  const [modelDownloadProgress, setModelDownloadProgress] = useState<ModelDownloadProgress | null>(null);
-  const [downloadingGroupId, setDownloadingGroupId] = useState<string | null>(null);
-  const [fileStatusMap, setFileStatusMap] = useState<Record<string, Array<{ file: string; savePath?: string; exists: boolean; size?: number; verified: boolean; expectedSize?: number }>>>({});
+  const [hfMirrorId, setHfMirrorId] = useState<HfMirrorId>('hf-mirror')
+  const [modelDownloadProgress, setModelDownloadProgress] = useState<ModelDownloadProgress | null>(null)
+  const [downloadingGroupId, setDownloadingGroupId] = useState<string | null>(null)
+  const [fileStatusMap, setFileStatusMap] = useState<
+    Record<
+      string,
+      Array<{
+        file: string
+        savePath?: string
+        exists: boolean
+        size?: number
+        verified: boolean
+        expectedSize?: number
+      }>
+    >
+  >({})
 
   // 任务栏进度条
-  const { setProgress, clearProgress, setIndeterminate } = useTaskbarProgress();
+  const { setProgress, clearProgress, setIndeterminate } = useTaskbarProgress()
 
   // 监听模型下载进度
-  const loadModelGroupsRef = useRef<() => Promise<void>>(undefined);
+  const loadModelGroupsRef = useRef<() => Promise<void>>(undefined)
 
   useIpcListener('models:download-progress', (data) => {
-    setModelDownloadProgress(data);
-    
+    setModelDownloadProgress(data)
+
     // 更新任务栏进度条
     if (data.stage === 'downloading') {
       if (data.totalBytes > 0) {
-        const progress = (data.downloadedBytes / data.totalBytes) * 100;
-        setProgress(progress);
+        const progress = (data.downloadedBytes / data.totalBytes) * 100
+        setProgress(progress)
       } else {
-        setIndeterminate();
+        setIndeterminate()
       }
     } else if (data.stage === 'done') {
-      clearProgress();
+      clearProgress()
       setTimeout(() => {
-        setModelDownloadProgress(null);
-        setDownloadingGroupId(null);
+        setModelDownloadProgress(null)
+        setDownloadingGroupId(null)
         // 刷新模型组文件状态
-        loadModelGroupsRef.current?.();
-      }, 1500);
+        loadModelGroupsRef.current?.()
+      }, 1500)
     } else if (data.stage === 'error') {
-      clearProgress();
-      setModelDownloadProgress(null);
-      setDownloadingGroupId(null);
+      clearProgress()
+      setModelDownloadProgress(null)
+      setDownloadingGroupId(null)
     }
-  });
+  })
 
-  const [modelGroups, setModelGroups] = useState<ModelGroup[]>([]);
-  const [groupDialogOpen, setGroupDialogOpen] = useState(false);
-  const [editingGroup, setEditingGroup] = useState<ModelGroup | null>(null);
-  const [groupName, setGroupName] = useState('');
-  const [groupHfRepo, setGroupHfRepo] = useState<string>('');
-  const [groupSdModel, setGroupSdModel] = useState<string>('');
-  const [groupDiffusionModel, setGroupDiffusionModel] = useState<string>('');
-  const [groupHighNoiseSdModel, setGroupHighNoiseSdModel] = useState<string>('');
-  const [groupVaeModel, setGroupVaeModel] = useState<string>('');
-  const [groupLlmModel, setGroupLlmModel] = useState<string>('');
-  const [groupClipLModel, setGroupClipLModel] = useState<string>('');
-  const [groupT5xxlModel, setGroupT5xxlModel] = useState<string>('');
-  const [groupClipVisionModel, setGroupClipVisionModel] = useState<string>('');
-  const [groupDefaultSteps, setGroupDefaultSteps] = useState<number>(20);
-  const [groupDefaultCfgScale, setGroupDefaultCfgScale] = useState<number>(7.0);
-  const [groupDefaultWidth, setGroupDefaultWidth] = useState<number>(512);
-  const [groupDefaultHeight, setGroupDefaultHeight] = useState<number>(512);
-  const [groupDefaultSamplingMethod, setGroupDefaultSamplingMethod] = useState<string>('euler_a');
-  const [groupDefaultScheduler, setGroupDefaultScheduler] = useState<string>('discrete');
-  const [groupDefaultSeed, setGroupDefaultSeed] = useState<number>(-1);
-  const [groupDefaultFlowShift, setGroupDefaultFlowShift] = useState<number>(3.0);
-  const [groupTaskType, setGroupTaskType] = useState<TaskType>('generate');
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const [messageDialogOpen, setMessageDialogOpen] = useState(false);
-  const [messageDialogContent, setMessageDialogContent] = useState<{ title: string; message: string } | null>(null);
-  const [verifyFailedDialogOpen, setVerifyFailedDialogOpen] = useState(false);
-  const [verifyFailedInfo, setVerifyFailedInfo] = useState<{ groupId: string; fileName: string; errorMessage: string } | null>(null);
-  const [groupDeleteConfirmOpen, setGroupDeleteConfirmOpen] = useState(false);
-  const [groupToDelete, setGroupToDelete] = useState<ModelGroup | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [taskTypeFilter, setTaskTypeFilter] = useState<'all' | TaskType>('all');
-  const [dialogAdvancedOpen, setDialogAdvancedOpen] = useState(false);
+  const [modelGroups, setModelGroups] = useState<ModelGroup[]>([])
+  const [groupDialogOpen, setGroupDialogOpen] = useState(false)
+  const [editingGroup, setEditingGroup] = useState<ModelGroup | null>(null)
+  const [groupName, setGroupName] = useState('')
+  const [groupHfRepo, setGroupHfRepo] = useState<string>('')
+  const [groupSdModel, setGroupSdModel] = useState<string>('')
+  const [groupDiffusionModel, setGroupDiffusionModel] = useState<string>('')
+  const [groupHighNoiseSdModel, setGroupHighNoiseSdModel] = useState<string>('')
+  const [groupVaeModel, setGroupVaeModel] = useState<string>('')
+  const [groupLlmModel, setGroupLlmModel] = useState<string>('')
+  const [groupClipLModel, setGroupClipLModel] = useState<string>('')
+  const [groupT5xxlModel, setGroupT5xxlModel] = useState<string>('')
+  const [groupClipVisionModel, setGroupClipVisionModel] = useState<string>('')
+  const [groupDefaultSteps, setGroupDefaultSteps] = useState<number>(20)
+  const [groupDefaultCfgScale, setGroupDefaultCfgScale] = useState<number>(7.0)
+  const [groupDefaultWidth, setGroupDefaultWidth] = useState<number>(512)
+  const [groupDefaultHeight, setGroupDefaultHeight] = useState<number>(512)
+  const [groupDefaultSamplingMethod, setGroupDefaultSamplingMethod] = useState<string>('euler_a')
+  const [groupDefaultScheduler, setGroupDefaultScheduler] = useState<string>('discrete')
+  const [groupDefaultSeed, setGroupDefaultSeed] = useState<number>(-1)
+  const [groupDefaultFlowShift, setGroupDefaultFlowShift] = useState<number>(3.0)
+  const [groupTaskType, setGroupTaskType] = useState<TaskType>('generate')
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const [messageDialogOpen, setMessageDialogOpen] = useState(false)
+  const [messageDialogContent, setMessageDialogContent] = useState<{ title: string; message: string } | null>(null)
+  const [verifyFailedDialogOpen, setVerifyFailedDialogOpen] = useState(false)
+  const [verifyFailedInfo, setVerifyFailedInfo] = useState<{
+    groupId: string
+    fileName: string
+    errorMessage: string
+  } | null>(null)
+  const [groupDeleteConfirmOpen, setGroupDeleteConfirmOpen] = useState(false)
+  const [groupToDelete, setGroupToDelete] = useState<ModelGroup | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [taskTypeFilter, setTaskTypeFilter] = useState<'all' | TaskType>('all')
+  const [dialogAdvancedOpen, setDialogAdvancedOpen] = useState(false)
 
   // 加载权重文件夹路径
   useEffect(() => {
-    loadWeightsFolder().catch(console.error);
-  }, []);
+    loadWeightsFolder().catch(console.error)
+  }, [])
 
   // 加载模型组列表
   useEffect(() => {
-    loadModelGroups().catch(console.error);
-  }, []);
+    loadModelGroups().catch(console.error)
+  }, [])
 
   const loadWeightsFolder = async () => {
-    let folder = await ipcInvoke('weights:get-folder');
-    
+    let folder = await modelWeightsService.getWeightsFolder()
+
     if (!folder) {
-      folder = await ipcInvoke('weights:init-default-folder');
-      await ipcInvoke('weights:set-folder', folder);
+      folder = await modelWeightsService.initDefaultWeightsFolder()
+      await modelWeightsService.setWeightsFolder(folder)
     }
-    
+
     if (folder) {
-      setWeightsFolder(folder);
-      setWeightsFolderInput(folder);
+      setWeightsFolder(folder)
+      setWeightsFolderInput(folder)
     }
-  };
+  }
 
   const handleSetFolder = async () => {
-    const nextFolder = weightsFolderInput.trim();
+    const nextFolder = weightsFolderInput.trim()
 
     if (!nextFolder) {
       if (!nextFolder) {
-        setMessageDialogContent({ title: '提示', message: '请输入有效的文件夹路径' });
-        setMessageDialogOpen(true);
+        setMessageDialogContent({ title: '提示', message: '请输入有效的文件夹路径' })
+        setMessageDialogOpen(true)
       }
-      return;
-    }
-    
-    const exists = await ipcInvoke('weights:check-folder', nextFolder);
-    if (!exists) {
-      setMessageDialogContent({ title: '错误', message: '文件夹不存在，请检查路径是否正确' });
-      setMessageDialogOpen(true);
-      return;
-    }
-    
-    const setResult = await ipcInvoke('weights:set-folder', nextFolder);
-    if (!setResult) {
-      setMessageDialogContent({ title: '错误', message: '设置文件夹路径失败，请重试' });
-      setMessageDialogOpen(true);
-      return;
+      return
     }
 
-    setWeightsFolder(nextFolder);
-    setWeightsFolderInput(nextFolder);
+    const exists = await modelWeightsService.checkWeightsFolder(nextFolder)
+    if (!exists) {
+      setMessageDialogContent({ title: '错误', message: '文件夹不存在，请检查路径是否正确' })
+      setMessageDialogOpen(true)
+      return
+    }
+
+    const setResult = await modelWeightsService.setWeightsFolder(nextFolder)
+    if (!setResult) {
+      setMessageDialogContent({ title: '错误', message: '设置文件夹路径失败，请重试' })
+      setMessageDialogOpen(true)
+      return
+    }
+
+    setWeightsFolder(nextFolder)
+    setWeightsFolderInput(nextFolder)
 
     // 重新加载模型组列表及其文件状态
-    await loadModelGroups();
-  };
+    await loadModelGroups()
+  }
 
   const handleFolderPathChange = (value: string) => {
-    setWeightsFolderInput(value);
-  };
-
-
+    setWeightsFolderInput(value)
+  }
 
   const loadModelGroups = async () => {
-    const groups = await ipcInvoke('model-groups:list');
-    setModelGroups(groups || []);
-  };
+    const groups = await modelWeightsService.listModelGroups()
+    setModelGroups(groups || [])
+  }
 
   const checkAllGroupFiles = useCallback(async () => {
-    const statusMap: Record<string, Array<{ file: string; savePath?: string; exists: boolean; size?: number; verified: boolean; expectedSize?: number }>> = {};
+    const statusMap: Record<
+      string,
+      Array<{
+        file: string
+        savePath?: string
+        exists: boolean
+        size?: number
+        verified: boolean
+        expectedSize?: number
+      }>
+    > = {}
     for (const group of modelGroups) {
       if (group.hfFiles && group.hfFiles.length > 0) {
         try {
-          const result = await ipcInvoke('models:check-files', { groupId: group.id });
-          statusMap[group.id] = result;
+          const result = await modelWeightsService.checkModelGroupFiles(group.id)
+          statusMap[group.id] = result
         } catch (error) {
-          console.error(`Failed to check files for ${group.id}:`, error);
+          console.error(`Failed to check files for ${group.id}:`, error)
         }
       }
     }
-    setFileStatusMap(statusMap);
-  }, [modelGroups]);
+    setFileStatusMap(statusMap)
+  }, [modelGroups])
 
   // 保持 ref 始终最新
   useEffect(() => {
-    loadModelGroupsRef.current = loadModelGroups;
-  });
+    loadModelGroupsRef.current = loadModelGroups
+  })
 
   // 初始化 HF 镜像
   useEffect(() => {
-    ipcInvoke('models:get-hf-mirror').then((id: HfMirrorId) => {
-      setHfMirrorId(id);
-    }).catch(console.error);
-  }, []);
+    modelWeightsService.getHfMirror()
+      .then((id: HfMirrorId) => {
+        setHfMirrorId(id)
+      })
+      .catch(console.error)
+  }, [])
 
   // 加载模型组时检查文件状态
   useEffect(() => {
     if (modelGroups.length > 0) {
-      checkAllGroupFiles().catch(console.error);
+      checkAllGroupFiles().catch(console.error)
     } else {
-      setFileStatusMap({});
+      setFileStatusMap({})
     }
-  }, [modelGroups.length, checkAllGroupFiles]);
+  }, [modelGroups.length, checkAllGroupFiles])
 
   const handleHfMirrorChange = useCallback(async (mirrorId: HfMirrorId) => {
     try {
-      await ipcInvoke('models:set-hf-mirror', mirrorId);
-      setHfMirrorId(mirrorId);
+      await modelWeightsService.setHfMirror(mirrorId)
+      setHfMirrorId(mirrorId)
     } catch (error) {
-      console.error('Failed to set HF mirror:', error);
+      console.error('Failed to set HF mirror:', error)
     }
-  }, []);
+  }, [])
 
-  const downloadingRef = useRef(false);
+  const downloadingRef = useRef(false)
 
-  const handleDownloadGroupFiles = useCallback(async (groupId: string) => {
-    if (downloadingRef.current) return;
-    downloadingRef.current = true;
-    setDownloadingGroupId(groupId);
-    setModelDownloadProgress({
-      stage: 'downloading',
-      downloadedBytes: 0,
-      totalBytes: -1,
-      speed: 0,
-      fileName: '准备中...',
-      totalFiles: 0,
-      currentFileIndex: 0,
-    });
+  const handleDownloadGroupFiles = useCallback(
+    async (groupId: string) => {
+      if (downloadingRef.current) return
+      downloadingRef.current = true
+      setDownloadingGroupId(groupId)
+      setModelDownloadProgress({
+        stage: 'downloading',
+        downloadedBytes: 0,
+        totalBytes: -1,
+        speed: 0,
+        fileName: '准备中...',
+        totalFiles: 0,
+        currentFileIndex: 0,
+      })
 
-    try {
-      const result = await ipcInvoke('models:download-group-files', {
-        groupId,
-        mirrorId: hfMirrorId,
-      });
-      if (!result.success) {
-        setMessageDialogContent({ title: '下载失败', message: result.error || '下载失败' });
-        setMessageDialogOpen(true);
-        setModelDownloadProgress(null);
-        setDownloadingGroupId(null);
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      setMessageDialogContent({ title: '下载失败', message: errorMessage || '下载失败' });
-      setMessageDialogOpen(true);
-      setModelDownloadProgress(null);
-      setDownloadingGroupId(null);
-    } finally {
-      downloadingRef.current = false;
-    }
-  }, [hfMirrorId]);
-
-  const handleVerifyGroupFiles = useCallback(async (groupId: string) => {
-    const status = fileStatusMap[groupId];
-    if (!status) return;
-
-    const unverifiedFiles = status.filter(f => f.exists && !f.verified);
-    if (unverifiedFiles.length === 0) return;
-
-    setDownloadingGroupId(groupId);
-    setModelDownloadProgress({
-      stage: 'downloading',
-      downloadedBytes: 0,
-      totalBytes: -1,
-      speed: 0,
-      fileName: '验证中...',
-      totalFiles: unverifiedFiles.length,
-      currentFileIndex: 0,
-    });
-
-    let verifiedCount = 0;
-    for (const file of unverifiedFiles) {
       try {
-        setModelDownloadProgress(prev => prev ? {
-          ...prev,
-          fileName: `验证: ${file.file}`,
-          currentFileIndex: verifiedCount + 1,
-        } : null);
-
-        await ipcInvoke('models:verify-file', { groupId, filePath: file.file });
-        verifiedCount++;
+        const result = await modelWeightsService.downloadModelGroupFiles(groupId, hfMirrorId)
+        if (!result.success) {
+          setMessageDialogContent({ title: '下载失败', message: result.error || '下载失败' })
+          setMessageDialogOpen(true)
+          setModelDownloadProgress(null)
+          setDownloadingGroupId(null)
+        }
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        setModelDownloadProgress(null);
-        setDownloadingGroupId(null);
-        setVerifyFailedInfo({ groupId, fileName: file.file, errorMessage });
-        setVerifyFailedDialogOpen(true);
-        return;
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        setMessageDialogContent({ title: '下载失败', message: errorMessage || '下载失败' })
+        setMessageDialogOpen(true)
+        setModelDownloadProgress(null)
+        setDownloadingGroupId(null)
+      } finally {
+        downloadingRef.current = false
       }
-    }
+    },
+    [hfMirrorId],
+  )
 
-    setModelDownloadProgress(null);
-    setDownloadingGroupId(null);
-    await checkAllGroupFiles();
-  }, [fileStatusMap, checkAllGroupFiles]);
+  const handleVerifyGroupFiles = useCallback(
+    async (groupId: string) => {
+      const status = fileStatusMap[groupId]
+      if (!status) return
 
-  const handleReverifyGroupFiles = useCallback(async (groupId: string) => {
-    try {
-      await ipcInvoke('models:clear-verified', { groupId });
-      await checkAllGroupFiles();
-      await handleVerifyGroupFiles(groupId);
-    } catch (error) {
-      console.error('Failed to reverify files:', error);
-    }
-  }, [checkAllGroupFiles, handleVerifyGroupFiles]);
+      const unverifiedFiles = status.filter((f) => f.exists && !f.verified)
+      if (unverifiedFiles.length === 0) return
 
-  const handleDownloadOrVerifyGroupFiles = useCallback(async (groupId: string) => {
-    const status = fileStatusMap[groupId];
-    if (!status) return;
+      setDownloadingGroupId(groupId)
+      setModelDownloadProgress({
+        stage: 'downloading',
+        downloadedBytes: 0,
+        totalBytes: -1,
+        speed: 0,
+        fileName: '验证中...',
+        totalFiles: unverifiedFiles.length,
+        currentFileIndex: 0,
+      })
 
-    const missingFiles = status.filter(f => !f.exists);
-    const unverifiedFiles = status.filter(f => f.exists && !f.verified);
+      let verifiedCount = 0
+      for (const file of unverifiedFiles) {
+        try {
+          setModelDownloadProgress((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  fileName: `验证: ${file.file}`,
+                  currentFileIndex: verifiedCount + 1,
+                }
+              : null,
+          )
 
-    if (missingFiles.length > 0) {
-      await handleDownloadGroupFiles(groupId);
-    } else if (unverifiedFiles.length > 0) {
-      await handleVerifyGroupFiles(groupId);
-    }
-  }, [fileStatusMap, handleDownloadGroupFiles, handleVerifyGroupFiles]);
+          await modelWeightsService.verifyModelFile(groupId, file.file)
+          verifiedCount++
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          setModelDownloadProgress(null)
+          setDownloadingGroupId(null)
+          setVerifyFailedInfo({ groupId, fileName: file.file, errorMessage })
+          setVerifyFailedDialogOpen(true)
+          return
+        }
+      }
+
+      setModelDownloadProgress(null)
+      setDownloadingGroupId(null)
+      await checkAllGroupFiles()
+    },
+    [fileStatusMap, checkAllGroupFiles],
+  )
+
+  const handleReverifyGroupFiles = useCallback(
+    async (groupId: string) => {
+      try {
+        await modelWeightsService.clearVerifiedFiles(groupId)
+        await checkAllGroupFiles()
+        await handleVerifyGroupFiles(groupId)
+      } catch (error) {
+        console.error('Failed to reverify files:', error)
+      }
+    },
+    [checkAllGroupFiles, handleVerifyGroupFiles],
+  )
+
+  const handleDownloadOrVerifyGroupFiles = useCallback(
+    async (groupId: string) => {
+      const status = fileStatusMap[groupId]
+      if (!status) return
+
+      const missingFiles = status.filter((f) => !f.exists)
+      const unverifiedFiles = status.filter((f) => f.exists && !f.verified)
+
+      if (missingFiles.length > 0) {
+        await handleDownloadGroupFiles(groupId)
+      } else if (unverifiedFiles.length > 0) {
+        await handleVerifyGroupFiles(groupId)
+      }
+    },
+    [fileStatusMap, handleDownloadGroupFiles, handleVerifyGroupFiles],
+  )
 
   const handleCancelModelDownload = useCallback(async () => {
     try {
-      await ipcInvoke('models:cancel-download');
-      setModelDownloadProgress(null);
-      setDownloadingGroupId(null);
+      await modelWeightsService.cancelModelDownload()
+      setModelDownloadProgress(null)
+      setDownloadingGroupId(null)
     } catch (error) {
-      console.error('Failed to cancel download:', error);
+      console.error('Failed to cancel download:', error)
     }
-  }, []);
+  }, [])
 
   const handleCreateGroup = () => {
-    setEditingGroup(null);
-    setGroupName('');
-    setGroupHfRepo('');
-    setGroupSdModel('');
-    setGroupDiffusionModel('');
-    setGroupHighNoiseSdModel('');
-    setGroupVaeModel('');
-    setGroupLlmModel('');
-    setGroupClipLModel('');
-    setGroupT5xxlModel('');
-    setGroupClipVisionModel('');
-    setGroupDefaultSteps(20);
-    setGroupDefaultCfgScale(7.0);
-    setGroupDefaultWidth(512);
-    setGroupDefaultHeight(512);
-    setGroupDefaultSamplingMethod('euler_a');
-    setGroupDefaultScheduler('discrete');
-    setGroupDefaultSeed(-1);
-    setGroupDefaultFlowShift(3.0);
-    setGroupTaskType('generate');
-    setDialogAdvancedOpen(false);
-    setGroupDialogOpen(true);
-  };
+    setEditingGroup(null)
+    setGroupName('')
+    setGroupHfRepo('')
+    setGroupSdModel('')
+    setGroupDiffusionModel('')
+    setGroupHighNoiseSdModel('')
+    setGroupVaeModel('')
+    setGroupLlmModel('')
+    setGroupClipLModel('')
+    setGroupT5xxlModel('')
+    setGroupClipVisionModel('')
+    setGroupDefaultSteps(20)
+    setGroupDefaultCfgScale(7.0)
+    setGroupDefaultWidth(512)
+    setGroupDefaultHeight(512)
+    setGroupDefaultSamplingMethod('euler_a')
+    setGroupDefaultScheduler('discrete')
+    setGroupDefaultSeed(-1)
+    setGroupDefaultFlowShift(3.0)
+    setGroupTaskType('generate')
+    setDialogAdvancedOpen(false)
+    setGroupDialogOpen(true)
+  }
 
   const handleEditGroup = (group: ModelGroup) => {
-    setEditingGroup(group);
-    setGroupName(group.name);
+    setEditingGroup(group)
+    setGroupName(group.name)
     // 从 hfFiles 中提取 repo（取第一个 entry 的 repo 作为默认）
-    const defaultRepo = group.hfFiles?.[0]?.repo || '';
-    setGroupHfRepo(defaultRepo);
+    const defaultRepo = group.hfFiles?.[0]?.repo || ''
+    setGroupHfRepo(defaultRepo)
     // 从 hfFiles 中查找对应模型的文件名，若无则从 model path 中提取文件名
     const findHfFile = (modelPath?: string) => {
-      if (!modelPath) return '';
-      const fileName = getPathBaseName(modelPath, modelPath);
-      const hfEntry = group.hfFiles?.find(f => f.file === fileName || f.savePath === fileName);
-      return hfEntry?.file || fileName;
-    };
-    setGroupSdModel(findHfFile(group.sdModel));
-    setGroupDiffusionModel(findHfFile(group.diffusionModel));
-    setGroupHighNoiseSdModel(findHfFile(group.highNoiseSdModel));
-    setGroupVaeModel(findHfFile(group.vaeModel));
-    setGroupLlmModel(findHfFile(group.llmModel));
-    setGroupClipLModel(findHfFile(group.clipLModel));
-    setGroupT5xxlModel(findHfFile(group.t5xxlModel));
-    setGroupClipVisionModel(findHfFile(group.clipVisionModel));
-    setGroupDefaultSteps(group.defaultSteps ?? 20);
-    setGroupDefaultCfgScale(group.defaultCfgScale ?? 7.0);
-    setGroupDefaultWidth(group.defaultWidth ?? 512);
-    setGroupDefaultHeight(group.defaultHeight ?? 512);
-    setGroupDefaultSamplingMethod(group.defaultSamplingMethod || 'euler_a');
-    setGroupDefaultScheduler(group.defaultScheduler || 'discrete');
-    setGroupDefaultSeed(group.defaultSeed ?? -1);
-    setGroupDefaultFlowShift(group.defaultFlowShift ?? 3.0);
-    setGroupTaskType(group.taskType || 'generate');
-    setDialogAdvancedOpen(true);
-    setGroupDialogOpen(true);
-  };
+      if (!modelPath) return ''
+      const fileName = getPathBaseName(modelPath, modelPath)
+      const hfEntry = group.hfFiles?.find((f) => f.file === fileName || f.savePath === fileName)
+      return hfEntry?.file || fileName
+    }
+    setGroupSdModel(findHfFile(group.sdModel))
+    setGroupDiffusionModel(findHfFile(group.diffusionModel))
+    setGroupHighNoiseSdModel(findHfFile(group.highNoiseSdModel))
+    setGroupVaeModel(findHfFile(group.vaeModel))
+    setGroupLlmModel(findHfFile(group.llmModel))
+    setGroupClipLModel(findHfFile(group.clipLModel))
+    setGroupT5xxlModel(findHfFile(group.t5xxlModel))
+    setGroupClipVisionModel(findHfFile(group.clipVisionModel))
+    setGroupDefaultSteps(group.defaultSteps ?? 20)
+    setGroupDefaultCfgScale(group.defaultCfgScale ?? 7.0)
+    setGroupDefaultWidth(group.defaultWidth ?? 512)
+    setGroupDefaultHeight(group.defaultHeight ?? 512)
+    setGroupDefaultSamplingMethod(group.defaultSamplingMethod || 'euler_a')
+    setGroupDefaultScheduler(group.defaultScheduler || 'discrete')
+    setGroupDefaultSeed(group.defaultSeed ?? -1)
+    setGroupDefaultFlowShift(group.defaultFlowShift ?? 3.0)
+    setGroupTaskType(group.taskType || 'generate')
+    setDialogAdvancedOpen(true)
+    setGroupDialogOpen(true)
+  }
 
   const handleSaveGroup = async () => {
     if (!groupName.trim()) {
-      setMessageDialogContent({ title: '提示', message: '请输入组名称' });
-      setMessageDialogOpen(true);
-      return;
+      setMessageDialogContent({ title: '提示', message: '请输入组名称' })
+      setMessageDialogOpen(true)
+      return
     }
 
     // 创建新模型组时，必须填写 HF 仓库和必需的模型文件名
     if (!editingGroup) {
       if (!groupHfRepo || !groupHfRepo.trim()) {
-        setMessageDialogContent({ title: '提示', message: '请填写 HuggingFace 仓库 ID（如 leejet/Z-Image-GGUF）' });
-        setMessageDialogOpen(true);
-        return;
+        setMessageDialogContent({ title: '提示', message: '请填写 HuggingFace 仓库 ID（如 leejet/Z-Image-GGUF）' })
+        setMessageDialogOpen(true)
+        return
       }
       if ((!groupSdModel || !groupSdModel.trim()) && (!groupDiffusionModel || !groupDiffusionModel.trim())) {
-        setMessageDialogContent({ title: '提示', message: '请填写 SD 模型或扩散模型文件名' });
-        setMessageDialogOpen(true);
-        return;
+        setMessageDialogContent({ title: '提示', message: '请填写 SD 模型或扩散模型文件名' })
+        setMessageDialogOpen(true)
+        return
       }
       if (!groupVaeModel || !groupVaeModel.trim()) {
-        setMessageDialogContent({ title: '提示', message: '请填写 VAE 模型文件名' });
-        setMessageDialogOpen(true);
-        return;
+        setMessageDialogContent({ title: '提示', message: '请填写 VAE 模型文件名' })
+        setMessageDialogOpen(true)
+        return
       }
       if (!groupLlmModel || !groupLlmModel.trim()) {
-        setMessageDialogContent({ 
-          title: '提示', 
-          message: groupTaskType === 'edit' 
-            ? '请填写 LLM 模型文件名 (Qwen 2511)' 
-            : '请填写 LLM/CLIP 模型文件名' 
-        });
-        setMessageDialogOpen(true);
-        return;
+        setMessageDialogContent({
+          title: '提示',
+          message: groupTaskType === 'edit' ? '请填写 LLM 模型文件名 (Qwen 2511)' : '请填写 LLM/CLIP 模型文件名',
+        })
+        setMessageDialogOpen(true)
+        return
       }
     }
 
     // 构建 hfFiles 数组和模型相对路径
-    const repo = groupHfRepo.trim();
-    const folderName = groupName.trim();
-    const hfFiles: { repo: string; file: string }[] = [];
+    const repo = groupHfRepo.trim()
+    const folderName = groupName.trim()
+    const hfFiles: { repo: string; file: string }[] = []
     const addHfFile = (fileName: string) => {
       if (fileName && repo) {
-        if (!hfFiles.some(f => f.repo === repo && f.file === fileName)) {
-          hfFiles.push({ repo, file: fileName });
+        if (!hfFiles.some((f) => f.repo === repo && f.file === fileName)) {
+          hfFiles.push({ repo, file: fileName })
         }
       }
-    };
+    }
 
-    const sdFile = groupSdModel.trim();
-    const diffusionFile = groupDiffusionModel.trim();
-    const highNoiseSdFile = groupHighNoiseSdModel.trim();
-    const vaeFile = groupVaeModel.trim();
-    const llmFile = groupLlmModel.trim();
-    const clipLFile = groupClipLModel.trim();
-    const t5xxlFile = groupT5xxlModel.trim();
-    const clipVisionFile = groupClipVisionModel.trim();
+    const sdFile = groupSdModel.trim()
+    const diffusionFile = groupDiffusionModel.trim()
+    const highNoiseSdFile = groupHighNoiseSdModel.trim()
+    const vaeFile = groupVaeModel.trim()
+    const llmFile = groupLlmModel.trim()
+    const clipLFile = groupClipLModel.trim()
+    const t5xxlFile = groupT5xxlModel.trim()
+    const clipVisionFile = groupClipVisionModel.trim()
 
-    addHfFile(sdFile);
-    addHfFile(diffusionFile);
-    addHfFile(highNoiseSdFile);
-    addHfFile(vaeFile);
-    addHfFile(llmFile);
-    addHfFile(clipLFile);
-    addHfFile(t5xxlFile);
-    addHfFile(clipVisionFile);
+    addHfFile(sdFile)
+    addHfFile(diffusionFile)
+    addHfFile(highNoiseSdFile)
+    addHfFile(vaeFile)
+    addHfFile(llmFile)
+    addHfFile(clipLFile)
+    addHfFile(t5xxlFile)
+    addHfFile(clipVisionFile)
 
-    setLoading(true);
+    setLoading(true)
     try {
       const groupData = {
         name: folderName,
@@ -827,116 +864,113 @@ export const ModelWeightsPage = () => {
         defaultScheduler: groupDefaultScheduler || undefined,
         defaultSeed: groupDefaultSeed >= 0 ? groupDefaultSeed : undefined,
         defaultFlowShift: groupDefaultFlowShift,
-      };
+      }
 
       if (editingGroup) {
-        await ipcInvoke('model-groups:update', {
-          id: editingGroup.id,
-          updates: groupData,
-        });
+        await modelWeightsService.updateModelGroup(editingGroup.id, groupData)
       } else {
-        await ipcInvoke('model-groups:create', groupData);
+        await modelWeightsService.createModelGroup(groupData)
       }
-      await loadModelGroups();
-      setGroupDialogOpen(false);
+      await loadModelGroups()
+      setGroupDialogOpen(false)
       if (!editingGroup) {
-        setMessageDialogContent({ 
-          title: '创建成功', 
-          message: `模型组 "${folderName}" 已创建。\n\n请在模型组卡片上点击"下载"按钮来获取模型文件。` 
-        });
-        setMessageDialogOpen(true);
+        setMessageDialogContent({
+          title: '创建成功',
+          message: `模型组 "${folderName}" 已创建。\n\n请在模型组卡片上点击"下载"按钮来获取模型文件。`,
+        })
+        setMessageDialogOpen(true)
       }
-      setEditingGroup(null);
+      setEditingGroup(null)
     } catch (error) {
-      console.error('Failed to save group:', error);
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      setMessageDialogContent({ title: '保存失败', message: `保存模型组失败: ${errorMessage}` });
-      setMessageDialogOpen(true);
+      console.error('Failed to save group:', error)
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      setMessageDialogContent({ title: '保存失败', message: `保存模型组失败: ${errorMessage}` })
+      setMessageDialogOpen(true)
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   const handleDeleteGroup = (group: ModelGroup) => {
-    setGroupToDelete(group);
-    setGroupDeleteConfirmOpen(true);
-  };
+    setGroupToDelete(group)
+    setGroupDeleteConfirmOpen(true)
+  }
 
   const handleConfirmDeleteGroup = async (deleteFiles: boolean) => {
-    if (!groupToDelete) return;
+    if (!groupToDelete) return
 
-    setLoading(true);
-    setGroupDeleteConfirmOpen(false);
+    setLoading(true)
+    setGroupDeleteConfirmOpen(false)
     try {
-      await ipcInvoke('model-groups:delete', { id: groupToDelete.id, deleteFiles });
-      await loadModelGroups();
-      setMessageDialogContent({ 
-        title: '删除成功', 
-        message: deleteFiles 
-          ? `模型组 "${groupToDelete.name}" 及其物理文件已成功删除。` 
-          : `模型组 "${groupToDelete.name}" 已从列表中移除（物理文件已保留）。` 
-      });
-      setMessageDialogOpen(true);
+      await modelWeightsService.deleteModelGroup(groupToDelete.id, deleteFiles)
+      await loadModelGroups()
+      setMessageDialogContent({
+        title: '删除成功',
+        message: deleteFiles
+          ? `模型组 "${groupToDelete.name}" 及其物理文件已成功删除。`
+          : `模型组 "${groupToDelete.name}" 已从列表中移除（物理文件已保留）。`,
+      })
+      setMessageDialogOpen(true)
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      setMessageDialogContent({ title: '删除失败', message: `删除模型组失败: ${errorMessage}` });
-      setMessageDialogOpen(true);
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      setMessageDialogContent({ title: '删除失败', message: `删除模型组失败: ${errorMessage}` })
+      setMessageDialogOpen(true)
     } finally {
-      setLoading(false);
-      setGroupToDelete(null);
+      setLoading(false)
+      setGroupToDelete(null)
     }
-  };
+  }
 
   const getModelFileName = (path: string | undefined): string => {
-    if (!path) return '未选择';
-    return getPathBaseName(path, path);
-  };
+    if (!path) return '未选择'
+    return getPathBaseName(path, path)
+  }
 
   const getTaskTypeLabel = (taskType?: TaskType) => {
     switch (taskType) {
       case 'generate':
-        return '图片生成';
+        return '图片生成'
       case 'edit':
-        return '图片编辑';
+        return '图片编辑'
       case 'video':
-        return '视频生成';
+        return '视频生成'
       case 'upscale':
-        return '图像超分辨率';
+        return '图像超分辨率'
       default:
-        return '未指定';
+        return '未指定'
     }
-  };
+  }
 
   const getTaskTypeIcon = (taskType?: TaskType) => {
     switch (taskType) {
       case 'generate':
-        return <ImageAddRegular fontSize={16} />;
+        return <ImageAddRegular fontSize={16} />
       case 'edit':
-        return <EditIcon fontSize={16} />;
+        return <EditIcon fontSize={16} />
       case 'video':
-        return <VideoClipRegular fontSize={16} />;
+        return <VideoClipRegular fontSize={16} />
       case 'upscale':
-        return <ZoomInRegular fontSize={16} />;
+        return <ZoomInRegular fontSize={16} />
       default:
-        return null;
+        return null
     }
-  };
+  }
 
   const getGroupStatus = (groupId: string) => {
-    const status = fileStatusMap[groupId] || [];
-    const total = status.length;
-    const missing = status.filter((f) => !f.exists).length;
-    const unverified = status.filter((f) => f.exists && !f.verified).length;
-    const verified = status.filter((f) => f.exists && f.verified).length;
-    const isComplete = total > 0 && missing === 0 && unverified === 0;
+    const status = fileStatusMap[groupId] || []
+    const total = status.length
+    const missing = status.filter((f) => !f.exists).length
+    const unverified = status.filter((f) => f.exists && !f.verified).length
+    const verified = status.filter((f) => f.exists && f.verified).length
+    const isComplete = total > 0 && missing === 0 && unverified === 0
 
-    return { total, missing, unverified, verified, isComplete };
-  };
+    return { total, missing, unverified, verified, isComplete }
+  }
 
   const filteredModelGroups = modelGroups.filter((group) => {
-    if (taskTypeFilter !== 'all' && group.taskType !== taskTypeFilter) return false;
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return true;
+    if (taskTypeFilter !== 'all' && group.taskType !== taskTypeFilter) return false
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return true
 
     const searchable = [
       group.name,
@@ -952,20 +986,20 @@ export const ModelWeightsPage = () => {
     ]
       .filter(Boolean)
       .join(' ')
-      .toLowerCase();
+      .toLowerCase()
 
-    return searchable.includes(q);
-  });
+    return searchable.includes(q)
+  })
 
-  const availableCount = modelGroups.filter((group) => getGroupStatus(group.id).isComplete).length;
+  const availableCount = modelGroups.filter((group) => getGroupStatus(group.id).isComplete).length
   const pendingCount = modelGroups.filter((group) => {
-    const status = getGroupStatus(group.id);
-    return status.total === 0 || status.missing > 0 || status.unverified > 0;
-  }).length;
+    const status = getGroupStatus(group.id)
+    return status.total === 0 || status.missing > 0 || status.unverified > 0
+  }).length
   const downloadingLabel =
     modelDownloadProgress?.stage === 'downloading'
       ? `${modelDownloadProgress.currentFileIndex}/${modelDownloadProgress.totalFiles || '?'}`
-      : '空闲';
+      : '空闲'
   const isCreateDisabled =
     loading ||
     !groupName.trim() ||
@@ -973,18 +1007,16 @@ export const ModelWeightsPage = () => {
       (!groupHfRepo.trim() ||
         (!groupSdModel.trim() && !groupDiffusionModel.trim()) ||
         !groupVaeModel.trim() ||
-        !groupLlmModel.trim()));
+        !groupLlmModel.trim()))
 
   return (
-    <div className={`${styles.container} pencil-page`}>
-      <header className="pencil-page-header">
-        <div className="pencil-page-title-row">
-          <Title1 className="pencil-page-title">模型权重管理</Title1>
-          <span className="pencil-page-kicker">WEIGHTS</span>
+    <div className={`${styles.container} app-page`}>
+      <header className="app-page-header">
+        <div className="app-page-header-main">
+          <Title1 className="app-page-title">模型权重管理</Title1>
+          <span className="app-page-tag">WEIGHTS</span>
         </div>
-        <Body1 className="pencil-page-description">
-          用更少的操作完成模型入库、下载校验和分组维护，高级参数按需展开。
-        </Body1>
+        <Body1 className="app-page-description">用更少的操作完成模型入库、下载校验和分组维护，高级参数按需展开。</Body1>
       </header>
 
       <Card className={styles.section}>
@@ -1030,7 +1062,7 @@ export const ModelWeightsPage = () => {
               selectedOptions={[taskTypeFilter]}
               onOptionSelect={(_: any, data: any) => {
                 if (data.optionValue) {
-                  setTaskTypeFilter(data.optionValue as 'all' | TaskType);
+                  setTaskTypeFilter(data.optionValue as 'all' | TaskType)
                 }
               }}
             >
@@ -1068,7 +1100,7 @@ export const ModelWeightsPage = () => {
                   style={{ flex: 1 }}
                   onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
                     if (e.key === 'Enter') {
-                      handleSetFolder();
+                      handleSetFolder()
                     }
                   }}
                 />
@@ -1114,20 +1146,21 @@ export const ModelWeightsPage = () => {
           <div className={styles.downloadProgressCard}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>
-                正在下载 ({modelDownloadProgress.currentFileIndex}/{modelDownloadProgress.totalFiles}): {modelDownloadProgress.fileName}
-                {modelDownloadProgress.totalBytes > 0 && ` — ${calculatePercent(modelDownloadProgress.downloadedBytes, modelDownloadProgress.totalBytes)}`}
+                正在下载 ({modelDownloadProgress.currentFileIndex}/{modelDownloadProgress.totalFiles}):{' '}
+                {modelDownloadProgress.fileName}
+                {modelDownloadProgress.totalBytes > 0 &&
+                  ` — ${calculatePercent(modelDownloadProgress.downloadedBytes, modelDownloadProgress.totalBytes)}`}
               </Body1>
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<DismissRegular />}
-                onClick={handleCancelModelDownload}
-              >
+              <Button appearance="subtle" size="small" icon={<DismissRegular />} onClick={handleCancelModelDownload}>
                 取消
               </Button>
             </div>
             <ProgressBar
-              value={modelDownloadProgress.totalBytes > 0 ? modelDownloadProgress.downloadedBytes / modelDownloadProgress.totalBytes : undefined}
+              value={
+                modelDownloadProgress.totalBytes > 0
+                  ? modelDownloadProgress.downloadedBytes / modelDownloadProgress.totalBytes
+                  : undefined
+              }
               max={1}
             />
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -1138,12 +1171,16 @@ export const ModelWeightsPage = () => {
               </Body1>
               <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
                 {(() => {
-                  const parts: string[] = [];
-                  if (modelDownloadProgress.speed > 0) parts.push(formatSpeed(modelDownloadProgress.speed));
-                  const eta = calculateEta(modelDownloadProgress.downloadedBytes, modelDownloadProgress.totalBytes, modelDownloadProgress.speed);
-                  const etaStr = formatEta(eta);
-                  if (etaStr) parts.push(etaStr);
-                  return parts.join(' · ');
+                  const parts: string[] = []
+                  if (modelDownloadProgress.speed > 0) parts.push(formatSpeed(modelDownloadProgress.speed))
+                  const eta = calculateEta(
+                    modelDownloadProgress.downloadedBytes,
+                    modelDownloadProgress.totalBytes,
+                    modelDownloadProgress.speed,
+                  )
+                  const etaStr = formatEta(eta)
+                  if (etaStr) parts.push(etaStr)
+                  return parts.join(' · ')
                 })()}
               </Body1>
             </div>
@@ -1188,29 +1225,33 @@ export const ModelWeightsPage = () => {
               </TableHeader>
               <TableBody>
                 {filteredModelGroups.map((group) => {
-                  const isExpanded = expandedGroups.has(group.id);
+                  const isExpanded = expandedGroups.has(group.id)
                   const toggleExpand = () => {
-                    const newExpanded = new Set(expandedGroups);
+                    const newExpanded = new Set(expandedGroups)
                     if (isExpanded) {
-                      newExpanded.delete(group.id);
+                      newExpanded.delete(group.id)
                     } else {
-                      newExpanded.add(group.id);
+                      newExpanded.add(group.id)
                     }
-                    setExpandedGroups(newExpanded);
-                  };
+                    setExpandedGroups(newExpanded)
+                  }
 
-                  const groupFileStatus = fileStatusMap[group.id];
-                  const isGroupComplete = groupFileStatus && groupFileStatus.length > 0 
-                    ? groupFileStatus.every(f => f.exists && f.verified) 
-                    : false;
-                  const hasMissingFiles = groupFileStatus && groupFileStatus.length > 0
-                    ? groupFileStatus.some(f => !f.exists)
-                    : false;
+                  const groupFileStatus = fileStatusMap[group.id]
+                  const isGroupComplete =
+                    groupFileStatus && groupFileStatus.length > 0
+                      ? groupFileStatus.every((f) => f.exists && f.verified)
+                      : false
+                  const hasMissingFiles =
+                    groupFileStatus && groupFileStatus.length > 0 ? groupFileStatus.some((f) => !f.exists) : false
 
                   const modelCount = [
-                    group.sdModel, group.diffusionModel, group.highNoiseSdModel, 
-                    group.vaeModel, group.llmModel, group.clipVisionModel
-                  ].filter(Boolean).length;
+                    group.sdModel,
+                    group.diffusionModel,
+                    group.highNoiseSdModel,
+                    group.vaeModel,
+                    group.llmModel,
+                    group.clipVisionModel,
+                  ].filter(Boolean).length
 
                   return (
                     <Fragment key={group.id}>
@@ -1235,23 +1276,24 @@ export const ModelWeightsPage = () => {
                                 icon={isGroupComplete ? <CheckmarkCircleFilled /> : <WarningFilled />}
                                 appearance="filled"
                               >
-                                {isGroupComplete ? '可用' : (hasMissingFiles ? '文件缺失' : '需验证')}
+                                {isGroupComplete ? '可用' : hasMissingFiles ? '文件缺失' : '需验证'}
                               </Badge>
                             ) : (
-                              <Badge color="informative" appearance="tint">未检查</Badge>
+                              <Badge color="informative" appearance="tint">
+                                未检查
+                              </Badge>
                             )}
                           </TableCellLayout>
                         </TableCell>
                         <TableCell className={styles.colFiles}>
-                          <TableCellLayout>
-                            {modelCount} 个模型
-                          </TableCellLayout>
+                          <TableCellLayout>{modelCount} 个模型</TableCellLayout>
                         </TableCell>
                         <TableCell className={styles.colActions}>
                           <TableCellLayout>
                             <div style={{ display: 'flex', gap: tokens.spacingHorizontalXS, flexWrap: 'nowrap' }}>
-                              {group.hfFiles && group.hfFiles.length > 0 && (
-                                downloadingGroupId === group.id ? (
+                              {group.hfFiles &&
+                                group.hfFiles.length > 0 &&
+                                (downloadingGroupId === group.id ? (
                                   <Button
                                     icon={<DismissRegular />}
                                     size="small"
@@ -1262,26 +1304,35 @@ export const ModelWeightsPage = () => {
                                   </Button>
                                 ) : (
                                   <Button
-                                    icon={fileStatusMap[group.id]?.every(f => f.exists && f.verified) ? <CheckmarkCircleFilled /> : <ArrowDownloadRegular />}
+                                    icon={
+                                      fileStatusMap[group.id]?.every((f) => f.exists && f.verified) ? (
+                                        <CheckmarkCircleFilled />
+                                      ) : (
+                                        <ArrowDownloadRegular />
+                                      )
+                                    }
                                     size="small"
-                                    appearance={fileStatusMap[group.id]?.every(f => f.exists && f.verified) ? "subtle" : "primary"}
+                                    appearance={
+                                      fileStatusMap[group.id]?.every((f) => f.exists && f.verified)
+                                        ? 'subtle'
+                                        : 'primary'
+                                    }
                                     onClick={() => {
-                                      if (fileStatusMap[group.id]?.every(f => f.exists && f.verified)) {
-                                        handleReverifyGroupFiles(group.id);
+                                      if (fileStatusMap[group.id]?.every((f) => f.exists && f.verified)) {
+                                        handleReverifyGroupFiles(group.id)
                                       } else {
-                                        handleDownloadOrVerifyGroupFiles(group.id);
+                                        handleDownloadOrVerifyGroupFiles(group.id)
                                       }
                                     }}
                                     disabled={!!downloadingGroupId || loading}
                                   >
-                                    {fileStatusMap[group.id]?.every(f => f.exists && f.verified) 
-                                      ? '重新验证' 
-                                      : fileStatusMap[group.id]?.every(f => f.exists) 
-                                        ? '验证' 
+                                    {fileStatusMap[group.id]?.every((f) => f.exists && f.verified)
+                                      ? '重新验证'
+                                      : fileStatusMap[group.id]?.every((f) => f.exists)
+                                        ? '验证'
                                         : '下载'}
                                   </Button>
-                                )
-                              )}
+                                ))}
                               <Button
                                 icon={<EditRegular />}
                                 size="small"
@@ -1311,7 +1362,7 @@ export const ModelWeightsPage = () => {
                           </TableCellLayout>
                         </TableCell>
                       </TableRow>
-                      
+
                       {isExpanded && (
                         <TableRow className={styles.expandedRow}>
                           <TableCell colSpan={6}>
@@ -1331,7 +1382,10 @@ export const ModelWeightsPage = () => {
                                   {group.diffusionModel && (
                                     <div className={styles.modelItem}>
                                       <span className={styles.modelLabel}>扩散模型</span>
-                                      <span className={styles.modelValue} title={getModelFileName(group.diffusionModel)}>
+                                      <span
+                                        className={styles.modelValue}
+                                        title={getModelFileName(group.diffusionModel)}
+                                      >
                                         {getModelFileName(group.diffusionModel)}
                                       </span>
                                     </div>
@@ -1339,7 +1393,10 @@ export const ModelWeightsPage = () => {
                                   {group.highNoiseSdModel && (
                                     <div className={styles.modelItem}>
                                       <span className={styles.modelLabel}>高噪声模型</span>
-                                      <span className={styles.modelValue} title={getModelFileName(group.highNoiseSdModel)}>
+                                      <span
+                                        className={styles.modelValue}
+                                        title={getModelFileName(group.highNoiseSdModel)}
+                                      >
                                         {getModelFileName(group.highNoiseSdModel)}
                                       </span>
                                     </div>
@@ -1352,31 +1409,32 @@ export const ModelWeightsPage = () => {
                                       </span>
                                     </div>
                                   )}
-                                  {group.taskType === 'edit' ? (
-                                    group.llmModel && (
-                                      <div className={styles.modelItem}>
-                                        <span className={styles.modelLabel}>LLM模型</span>
-                                        <span className={styles.modelValue} title={getModelFileName(group.llmModel)}>
-                                          {getModelFileName(group.llmModel)}
-                                        </span>
-                                      </div>
-                                    )
-                                  ) : (
-                                    group.llmModel && (
-                                      <div className={styles.modelItem}>
-                                        <span className={styles.modelLabel}>
-                                          {group.taskType === 'video' ? 'T5/文本编码器' : 'LLM/CLIP'}
-                                        </span>
-                                        <span className={styles.modelValue} title={getModelFileName(group.llmModel)}>
-                                          {getModelFileName(group.llmModel)}
-                                        </span>
-                                      </div>
-                                    )
-                                  )}
+                                  {group.taskType === 'edit'
+                                    ? group.llmModel && (
+                                        <div className={styles.modelItem}>
+                                          <span className={styles.modelLabel}>LLM模型</span>
+                                          <span className={styles.modelValue} title={getModelFileName(group.llmModel)}>
+                                            {getModelFileName(group.llmModel)}
+                                          </span>
+                                        </div>
+                                      )
+                                    : group.llmModel && (
+                                        <div className={styles.modelItem}>
+                                          <span className={styles.modelLabel}>
+                                            {group.taskType === 'video' ? 'T5/文本编码器' : 'LLM/CLIP'}
+                                          </span>
+                                          <span className={styles.modelValue} title={getModelFileName(group.llmModel)}>
+                                            {getModelFileName(group.llmModel)}
+                                          </span>
+                                        </div>
+                                      )}
                                   {group.taskType === 'video' && group.clipVisionModel && (
                                     <div className={styles.modelItem}>
                                       <span className={styles.modelLabel}>CLIP Vision</span>
-                                      <span className={styles.modelValue} title={getModelFileName(group.clipVisionModel)}>
+                                      <span
+                                        className={styles.modelValue}
+                                        title={getModelFileName(group.clipVisionModel)}
+                                      >
                                         {getModelFileName(group.clipVisionModel)}
                                       </span>
                                     </div>
@@ -1385,21 +1443,32 @@ export const ModelWeightsPage = () => {
                               </div>
 
                               {/* 默认参数 */}
-                              {(group.defaultSteps || group.defaultCfgScale || group.defaultWidth || group.defaultHeight || 
-                                group.defaultSamplingMethod || group.defaultScheduler || group.defaultSeed ||
-                                group.defaultHighNoiseSteps || group.defaultHighNoiseCfgScale || group.defaultHighNoiseSamplingMethod) && (
+                              {(group.defaultSteps ||
+                                group.defaultCfgScale ||
+                                group.defaultWidth ||
+                                group.defaultHeight ||
+                                group.defaultSamplingMethod ||
+                                group.defaultScheduler ||
+                                group.defaultSeed ||
+                                group.defaultHighNoiseSteps ||
+                                group.defaultHighNoiseCfgScale ||
+                                group.defaultHighNoiseSamplingMethod) && (
                                 <div className={styles.expandedSection}>
                                   <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>默认参数</Body1>
                                   <div className={styles.paramGrid}>
                                     {group.defaultSteps && (
                                       <div className={styles.paramItem}>
-                                        <span className={styles.paramLabel}>{group.taskType === 'video' ? '采样步数 (主)' : '采样步数'}</span>
+                                        <span className={styles.paramLabel}>
+                                          {group.taskType === 'video' ? '采样步数 (主)' : '采样步数'}
+                                        </span>
                                         <span className={styles.paramValue}>{group.defaultSteps}</span>
                                       </div>
                                     )}
                                     {group.defaultCfgScale && (
                                       <div className={styles.paramItem}>
-                                        <span className={styles.paramLabel}>{group.taskType === 'video' ? 'CFG Scale (主)' : 'CFG Scale'}</span>
+                                        <span className={styles.paramLabel}>
+                                          {group.taskType === 'video' ? 'CFG Scale (主)' : 'CFG Scale'}
+                                        </span>
                                         <span className={styles.paramValue}>{group.defaultCfgScale}</span>
                                       </div>
                                     )}
@@ -1418,24 +1487,32 @@ export const ModelWeightsPage = () => {
                                     {group.taskType === 'video' && group.defaultHighNoiseSamplingMethod && (
                                       <div className={styles.paramItem}>
                                         <span className={styles.paramLabel}>采样方法 (高噪)</span>
-                                        <span className={styles.paramValue}>{group.defaultHighNoiseSamplingMethod}</span>
+                                        <span className={styles.paramValue}>
+                                          {group.defaultHighNoiseSamplingMethod}
+                                        </span>
                                       </div>
                                     )}
                                     {group.defaultWidth && (
                                       <div className={styles.paramItem}>
-                                        <span className={styles.paramLabel}>{group.taskType === 'video' ? '视频宽度' : '图片宽度'}</span>
+                                        <span className={styles.paramLabel}>
+                                          {group.taskType === 'video' ? '视频宽度' : '图片宽度'}
+                                        </span>
                                         <span className={styles.paramValue}>{group.defaultWidth}px</span>
                                       </div>
                                     )}
                                     {group.defaultHeight && (
                                       <div className={styles.paramItem}>
-                                        <span className={styles.paramLabel}>{group.taskType === 'video' ? '视频高度' : '图片高度'}</span>
+                                        <span className={styles.paramLabel}>
+                                          {group.taskType === 'video' ? '视频高度' : '图片高度'}
+                                        </span>
                                         <span className={styles.paramValue}>{group.defaultHeight}px</span>
                                       </div>
                                     )}
                                     {group.defaultSamplingMethod && (
                                       <div className={styles.paramItem}>
-                                        <span className={styles.paramLabel}>{group.taskType === 'video' ? '采样方法 (主)' : '采样方法'}</span>
+                                        <span className={styles.paramLabel}>
+                                          {group.taskType === 'video' ? '采样方法 (主)' : '采样方法'}
+                                        </span>
                                         <span className={styles.paramValue}>{group.defaultSamplingMethod}</span>
                                       </div>
                                     )}
@@ -1445,12 +1522,14 @@ export const ModelWeightsPage = () => {
                                         <span className={styles.paramValue}>{group.defaultScheduler}</span>
                                       </div>
                                     )}
-                                    {group.defaultSeed !== undefined && group.defaultSeed !== null && group.defaultSeed !== -1 && (
-                                      <div className={styles.paramItem}>
-                                        <span className={styles.paramLabel}>种子</span>
-                                        <span className={styles.paramValue}>{group.defaultSeed}</span>
-                                      </div>
-                                    )}
+                                    {group.defaultSeed !== undefined &&
+                                      group.defaultSeed !== null &&
+                                      group.defaultSeed !== -1 && (
+                                        <div className={styles.paramItem}>
+                                          <span className={styles.paramLabel}>种子</span>
+                                          <span className={styles.paramValue}>{group.defaultSeed}</span>
+                                        </div>
+                                      )}
                                   </div>
                                 </div>
                               )}
@@ -1458,30 +1537,46 @@ export const ModelWeightsPage = () => {
                               {/* HF 文件状态 */}
                               {group.hfFiles && group.hfFiles.length > 0 && (
                                 <div className={styles.expandedSection}>
-                                  <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>文件状态 ({group.hfFiles.length})</Body1>
+                                  <Body1 style={{ fontWeight: tokens.fontWeightSemibold }}>
+                                    文件状态 ({group.hfFiles.length})
+                                  </Body1>
                                   <div className={styles.fileStatusList}>
                                     {group.hfFiles.map((hfFile) => {
                                       const status = fileStatusMap[group.id]?.find(
-                                        s => s.file === hfFile.file || s.savePath === (hfFile.savePath || hfFile.file)
-                                      );
+                                        (s) =>
+                                          s.file === hfFile.file || s.savePath === (hfFile.savePath || hfFile.file),
+                                      )
                                       return (
                                         <div key={hfFile.file} className={styles.fileStatusItem}>
                                           {status?.exists ? (
                                             status.verified ? (
-                                              <CheckmarkCircleFilled style={{ color: tokens.colorPaletteGreenForeground1, fontSize: '14px' }} />
+                                              <CheckmarkCircleFilled
+                                                style={{ color: tokens.colorPaletteGreenForeground1, fontSize: '14px' }}
+                                              />
                                             ) : (
-                                              <WarningFilled style={{ color: tokens.colorPaletteYellowForeground1, fontSize: '14px' }} />
+                                              <WarningFilled
+                                                style={{
+                                                  color: tokens.colorPaletteYellowForeground1,
+                                                  fontSize: '14px',
+                                                }}
+                                              />
                                             )
                                           ) : (
-                                            <DismissCircleRegular style={{ color: tokens.colorNeutralForeground3, fontSize: '14px' }} />
+                                            <DismissCircleRegular
+                                              style={{ color: tokens.colorNeutralForeground3, fontSize: '14px' }}
+                                            />
                                           )}
-                                          <span style={{ 
-                                            color: status?.exists ? tokens.colorNeutralForeground1 : tokens.colorNeutralForeground3,
-                                            overflow: 'hidden',
-                                            textOverflow: 'ellipsis',
-                                            whiteSpace: 'nowrap',
-                                            flex: 1,
-                                          }}>
+                                          <span
+                                            style={{
+                                              color: status?.exists
+                                                ? tokens.colorNeutralForeground1
+                                                : tokens.colorNeutralForeground3,
+                                              overflow: 'hidden',
+                                              textOverflow: 'ellipsis',
+                                              whiteSpace: 'nowrap',
+                                              flex: 1,
+                                            }}
+                                          >
                                             {hfFile.savePath || hfFile.file}
                                           </span>
                                           {status?.exists && status.size !== undefined && (
@@ -1491,7 +1586,7 @@ export const ModelWeightsPage = () => {
                                             </span>
                                           )}
                                         </div>
-                                      );
+                                      )
                                     })}
                                   </div>
                                 </div>
@@ -1501,7 +1596,7 @@ export const ModelWeightsPage = () => {
                         </TableRow>
                       )}
                     </Fragment>
-                  );
+                  )
                 })}
               </TableBody>
             </Table>
@@ -1510,29 +1605,32 @@ export const ModelWeightsPage = () => {
       </Card>
 
       {/* 模型组编辑对话框 */}
-      <Dialog open={groupDialogOpen} onOpenChange={(_: any, data: any) => {
-        setGroupDialogOpen(data.open);
-        if (!data.open) {
-          setDialogAdvancedOpen(false);
-          setEditingGroup(null);
-          setGroupName('');
-          setGroupHfRepo('');
-          setGroupSdModel('');
-          setGroupDiffusionModel('');
-          setGroupVaeModel('');
-          setGroupLlmModel('');
-          setGroupClipLModel('');
-          setGroupT5xxlModel('');
-          setGroupDefaultSteps(20);
-          setGroupDefaultCfgScale(7.0);
-          setGroupDefaultWidth(512);
-          setGroupDefaultHeight(512);
-          setGroupDefaultSamplingMethod('euler_a');
-          setGroupDefaultScheduler('discrete');
-          setGroupDefaultSeed(-1);
-          setGroupDefaultFlowShift(3.0);
-        }
-      }}>
+      <Dialog
+        open={groupDialogOpen}
+        onOpenChange={(_: any, data: any) => {
+          setGroupDialogOpen(data.open)
+          if (!data.open) {
+            setDialogAdvancedOpen(false)
+            setEditingGroup(null)
+            setGroupName('')
+            setGroupHfRepo('')
+            setGroupSdModel('')
+            setGroupDiffusionModel('')
+            setGroupVaeModel('')
+            setGroupLlmModel('')
+            setGroupClipLModel('')
+            setGroupT5xxlModel('')
+            setGroupDefaultSteps(20)
+            setGroupDefaultCfgScale(7.0)
+            setGroupDefaultWidth(512)
+            setGroupDefaultHeight(512)
+            setGroupDefaultSamplingMethod('euler_a')
+            setGroupDefaultScheduler('discrete')
+            setGroupDefaultSeed(-1)
+            setGroupDefaultFlowShift(3.0)
+          }
+        }}
+      >
         <DialogSurface style={{ minWidth: '600px' }}>
           <DialogTitle>{editingGroup ? '编辑模型组' : '创建模型组'}</DialogTitle>
           <DialogBody>
@@ -1546,22 +1644,27 @@ export const ModelWeightsPage = () => {
                   />
                 </Field>
                 <Body1 style={{ fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 }}>
-                  {editingGroup 
-                    ? '修改模型组的配置信息。' 
+                  {editingGroup
+                    ? '修改模型组的配置信息。'
                     : '填写 HuggingFace 仓库信息和模型文件名，创建后可通过下载按钮获取模型文件。'}
                 </Body1>
                 <Field label="任务类型" hint="选择此模型组可用于哪些任务" required>
                   <Dropdown
                     value={
-                      groupTaskType === 'generate' ? '图片生成' :
-                      groupTaskType === 'edit' ? '图片编辑' :
-                      groupTaskType === 'video' ? '视频生成' :
-                      groupTaskType === 'upscale' ? '图像超分辨率' : ''
+                      groupTaskType === 'generate'
+                        ? '图片生成'
+                        : groupTaskType === 'edit'
+                          ? '图片编辑'
+                          : groupTaskType === 'video'
+                            ? '视频生成'
+                            : groupTaskType === 'upscale'
+                              ? '图像超分辨率'
+                              : ''
                     }
                     selectedOptions={[groupTaskType]}
                     onOptionSelect={(_: any, data: any) => {
                       if (data.optionValue) {
-                        setGroupTaskType(data.optionValue as TaskType);
+                        setGroupTaskType(data.optionValue as TaskType)
                       }
                     }}
                   >
@@ -1580,7 +1683,9 @@ export const ModelWeightsPage = () => {
                 </Field>
                 <Field
                   label={groupTaskType === 'video' ? '基础视频模型文件名（LowNoise）' : 'SD模型文件名'}
-                  hint={groupTaskType === 'video' ? '例如 Wan2.2-TI2V-5B-Q4_K_M.gguf' : '完整SD模型（与扩散模型二选一）'}
+                  hint={
+                    groupTaskType === 'video' ? '例如 Wan2.2-TI2V-5B-Q4_K_M.gguf' : '完整SD模型（与扩散模型二选一）'
+                  }
                 >
                   <Input
                     value={groupSdModel}
@@ -1601,10 +1706,7 @@ export const ModelWeightsPage = () => {
                   </Field>
                 )}
                 {groupTaskType === 'video' && (
-                  <Field
-                    label="高噪声视频模型文件名（可选，HighNoise）"
-                    hint="例如 Wan2.2-T2V-HighNoise-*.gguf"
-                  >
+                  <Field label="高噪声视频模型文件名（可选，HighNoise）" hint="例如 Wan2.2-T2V-HighNoise-*.gguf">
                     <Input
                       value={groupHighNoiseSdModel}
                       onChange={(_: any, data: any) => setGroupHighNoiseSdModel(data.value)}
@@ -1612,7 +1714,7 @@ export const ModelWeightsPage = () => {
                     />
                   </Field>
                 )}
-                <Field label={editingGroup ? "VAE模型文件名（可选）" : "VAE模型文件名（必填）"}>
+                <Field label={editingGroup ? 'VAE模型文件名（可选）' : 'VAE模型文件名（必填）'}>
                   <Input
                     value={groupVaeModel}
                     onChange={(_: any, data: any) => setGroupVaeModel(data.value)}
@@ -1622,10 +1724,16 @@ export const ModelWeightsPage = () => {
                 <Field
                   label={
                     groupTaskType === 'edit'
-                      ? (editingGroup ? 'LLM模型文件名（可选）' : 'LLM模型文件名（必填）')
+                      ? editingGroup
+                        ? 'LLM模型文件名（可选）'
+                        : 'LLM模型文件名（必填）'
                       : groupTaskType === 'video'
-                        ? (editingGroup ? '文本编码器 / T5 模型文件名（可选）' : '文本编码器 / T5 模型文件名（必填）')
-                        : (editingGroup ? 'LLM/CLIP模型文件名（可选）' : 'LLM/CLIP模型文件名（必填）')
+                        ? editingGroup
+                          ? '文本编码器 / T5 模型文件名（可选）'
+                          : '文本编码器 / T5 模型文件名（必填）'
+                        : editingGroup
+                          ? 'LLM/CLIP模型文件名（可选）'
+                          : 'LLM/CLIP模型文件名（必填）'
                   }
                 >
                   <Input
@@ -1680,7 +1788,9 @@ export const ModelWeightsPage = () => {
                     <Title2 style={{ fontSize: tokens.fontSizeBase400, marginTop: tokens.spacingVerticalXS }}>
                       推荐默认设置（可选）
                     </Title2>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: tokens.spacingHorizontalM }}>
+                    <div
+                      style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: tokens.spacingHorizontalM }}
+                    >
                       <Field label={groupTaskType === 'video' ? '采样步数' : '采样步数'} hint="默认: 20">
                         <SpinButton
                           value={groupDefaultSteps}
@@ -1717,28 +1827,34 @@ export const ModelWeightsPage = () => {
                           />
                         </Field>
                       )}
-                      <Field label={groupTaskType === 'video' ? '视频宽度' : '图片宽度'} hint="默认: 512，自动对齐到 16 的倍数">
+                      <Field
+                        label={groupTaskType === 'video' ? '视频宽度' : '图片宽度'}
+                        hint="默认: 512，自动对齐到 16 的倍数"
+                      >
                         <SpinButton
                           value={groupDefaultWidth}
                           onChange={(_: any, data: any) => {
-                            const val = data.value ?? 512;
-                            const aligned = Math.round(val / 16) * 16;
-                            const clamped = Math.max(16, Math.min(2048, aligned));
-                            setGroupDefaultWidth(clamped);
+                            const val = data.value ?? 512
+                            const aligned = Math.round(val / 16) * 16
+                            const clamped = Math.max(16, Math.min(2048, aligned))
+                            setGroupDefaultWidth(clamped)
                           }}
                           min={16}
                           max={2048}
                           step={16}
                         />
                       </Field>
-                      <Field label={groupTaskType === 'video' ? '视频高度' : '图片高度'} hint="默认: 512，自动对齐到 16 的倍数">
+                      <Field
+                        label={groupTaskType === 'video' ? '视频高度' : '图片高度'}
+                        hint="默认: 512，自动对齐到 16 的倍数"
+                      >
                         <SpinButton
                           value={groupDefaultHeight}
                           onChange={(_: any, data: any) => {
-                            const val = data.value ?? 512;
-                            const aligned = Math.round(val / 16) * 16;
-                            const clamped = Math.max(16, Math.min(2048, aligned));
-                            setGroupDefaultHeight(clamped);
+                            const val = data.value ?? 512
+                            const aligned = Math.round(val / 16) * 16
+                            const clamped = Math.max(16, Math.min(2048, aligned))
+                            setGroupDefaultHeight(clamped)
                           }}
                           min={16}
                           max={2048}
@@ -1751,7 +1867,7 @@ export const ModelWeightsPage = () => {
                           selectedOptions={[groupDefaultSamplingMethod]}
                           onOptionSelect={(_: any, data: any) => {
                             if (data.optionValue) {
-                              setGroupDefaultSamplingMethod(data.optionValue);
+                              setGroupDefaultSamplingMethod(data.optionValue)
                             }
                           }}
                         >
@@ -1776,7 +1892,7 @@ export const ModelWeightsPage = () => {
                             selectedOptions={[groupDefaultScheduler]}
                             onOptionSelect={(_: any, data: any) => {
                               if (data.optionValue) {
-                                setGroupDefaultScheduler(data.optionValue);
+                                setGroupDefaultScheduler(data.optionValue)
                               }
                             }}
                           >
@@ -1804,12 +1920,21 @@ export const ModelWeightsPage = () => {
                 )}
               </div>
             </DialogContent>
-            <DialogActions style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: tokens.spacingHorizontalM, width: '100%', boxSizing: 'border-box' }}>
+            <DialogActions
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: tokens.spacingHorizontalM,
+                width: '100%',
+                boxSizing: 'border-box',
+              }}
+            >
               <Button
                 appearance="secondary"
                 onClick={() => {
-                  setGroupDialogOpen(false);
-                  setEditingGroup(null);
+                  setGroupDialogOpen(false)
+                  setEditingGroup(null)
                 }}
               >
                 取消
@@ -1817,11 +1942,7 @@ export const ModelWeightsPage = () => {
 
               <div style={{ flex: 1 }} />
 
-              <Button
-                appearance="primary"
-                onClick={handleSaveGroup}
-                disabled={isCreateDisabled}
-              >
+              <Button appearance="primary" onClick={handleSaveGroup} disabled={isCreateDisabled}>
                 {editingGroup ? '保存' : '创建'}
               </Button>
             </DialogActions>
@@ -1837,7 +1958,8 @@ export const ModelWeightsPage = () => {
             <DialogContent>
               <Body1>
                 确定要删除模型组 "{groupToDelete?.name}" 吗？
-                <br /><br />
+                <br />
+                <br />
                 您可以选择仅从列表中移除，或者同时删除磁盘上的模型文件。
               </Body1>
             </DialogContent>
@@ -1845,24 +1967,16 @@ export const ModelWeightsPage = () => {
               <Button
                 appearance="secondary"
                 onClick={() => {
-                  setGroupDeleteConfirmOpen(false);
-                  setGroupToDelete(null);
+                  setGroupDeleteConfirmOpen(false)
+                  setGroupToDelete(null)
                 }}
               >
                 取消
               </Button>
-              <Button
-                appearance="secondary"
-                onClick={() => handleConfirmDeleteGroup(false)}
-                disabled={loading}
-              >
+              <Button appearance="secondary" onClick={() => handleConfirmDeleteGroup(false)} disabled={loading}>
                 仅从列表中移除
               </Button>
-              <Button
-                appearance="primary"
-                onClick={() => handleConfirmDeleteGroup(true)}
-                disabled={loading}
-              >
+              <Button appearance="primary" onClick={() => handleConfirmDeleteGroup(true)} disabled={loading}>
                 同时删除物理文件
               </Button>
             </DialogActions>
@@ -1880,10 +1994,7 @@ export const ModelWeightsPage = () => {
             </DialogContent>
           </DialogBody>
           <DialogActions>
-            <Button
-              appearance="primary"
-              onClick={() => setMessageDialogOpen(false)}
-            >
+            <Button appearance="primary" onClick={() => setMessageDialogOpen(false)}>
               确定
             </Button>
           </DialogActions>
@@ -1907,17 +2018,14 @@ export const ModelWeightsPage = () => {
             <Button
               appearance="primary"
               onClick={async () => {
-                setVerifyFailedDialogOpen(false);
+                setVerifyFailedDialogOpen(false)
                 if (verifyFailedInfo) {
                   try {
-                    await ipcInvoke('models:delete-file', {
-                      groupId: verifyFailedInfo.groupId,
-                      filePath: verifyFailedInfo.fileName,
-                    });
+                    await modelWeightsService.deleteModelFile(verifyFailedInfo.groupId, verifyFailedInfo.fileName)
                   } catch (error) {
-                    console.error('Failed to delete file:', error);
+                    console.error('Failed to delete file:', error)
                   }
-                  await handleDownloadGroupFiles(verifyFailedInfo.groupId);
+                  await handleDownloadGroupFiles(verifyFailedInfo.groupId)
                 }
               }}
             >
@@ -1927,6 +2035,5 @@ export const ModelWeightsPage = () => {
         </DialogSurface>
       </Dialog>
     </div>
-  );
-};
-
+  )
+}

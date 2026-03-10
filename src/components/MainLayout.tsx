@@ -1,50 +1,9 @@
 import { type ReactNode, useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Tooltip } from 'antd';
-import {
-  HomeRegular,
-  FolderRegular,
-  PlugConnectedRegular,
-  ShareRegular,
-  GridRegular,
-  StarRegular,
-  SettingsRegular,
-} from '@/ui/icons';
+import { sidebarRouteGroups } from '@/app/routes';
 import { useAppStore } from '../hooks/useAppStore';
 import './MainLayout.css';
-
-interface NavItem {
-  key: string;
-  icon: React.ReactNode;
-  label: string;
-  group: string;
-}
-
-const navItems: NavItem[] = [
-  { key: '/', icon: <HomeRegular fontSize={18} />, label: '主页', group: '总览' },
-  { key: '/studio', icon: <ShareRegular fontSize={18} />, label: '节点工作台', group: '工作流' },
-  { key: '/weights', icon: <FolderRegular fontSize={18} />, label: '模型权重管理', group: 'SD.cpp 引擎' },
-  { key: '/sdcpp', icon: <PlugConnectedRegular fontSize={18} />, label: '引擎管理', group: 'SD.cpp 引擎' },
-  { key: '/images', icon: <GridRegular fontSize={18} />, label: '生成结果', group: 'SD.cpp 引擎' },
-  { key: '/perfect-pixel', icon: <StarRegular fontSize={18} />, label: '像素画精修', group: '像素工具' },
-  { key: '/settings', icon: <SettingsRegular fontSize={18} />, label: '设置', group: '其他' },
-];
-
-// 按 group 分组，保留插入顺序
-function groupedNav() {
-  const groups: { label: string; items: NavItem[] }[] = [];
-  let current: (typeof groups)[number] | null = null;
-  for (const item of navItems) {
-    if (!current || current.label !== item.group) {
-      current = { label: item.group, items: [] };
-      groups.push(current);
-    }
-    current.items.push(item);
-  }
-  return groups;
-}
-
-const groups = groupedNav();
 
 export const MainLayout = ({ children }: { children: ReactNode }) => {
   const navigate = useNavigate();
@@ -52,14 +11,7 @@ export const MainLayout = ({ children }: { children: ReactNode }) => {
   const [isDesktop, setIsDesktop] = useState(() =>
     typeof window !== 'undefined' ? window.matchMedia('(min-width: 961px)').matches : true,
   );
-  const {
-    isUploading,
-    isGenerating,
-    sidebarCollapsed,
-    toggleSidebarCollapsed,
-  } = useAppStore();
-
-  const navigationDisabled = isUploading || isGenerating;
+  const { sidebarCollapsed, toggleSidebarCollapsed } = useAppStore();
   const collapsed = isDesktop && sidebarCollapsed;
 
   useEffect(() => {
@@ -71,7 +23,6 @@ export const MainLayout = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const handleNav = (key: string) => {
-    if (navigationDisabled) return;
     navigate(key);
   };
 
@@ -92,24 +43,24 @@ export const MainLayout = ({ children }: { children: ReactNode }) => {
 
         {/* Navigation */}
         <nav className="sidebar-nav">
-          {groups.map((g) => (
+          {sidebarRouteGroups.map((g) => (
             <div className="sidebar-group" key={g.label}>
               {!collapsed && <div className="sidebar-group-label">{g.label}</div>}
               {g.items.map((item) => {
-                const active = location.pathname === item.key;
+                const active = location.pathname === item.path;
+                const Icon = item.icon;
                 const btn = (
                   <button
-                    key={item.key}
+                    key={item.path}
                     className={`sidebar-item${active ? ' is-active' : ''}`}
-                    onClick={() => handleNav(item.key)}
-                    disabled={navigationDisabled}
+                    onClick={() => handleNav(item.path)}
                   >
-                    <span className="sidebar-item-icon">{item.icon}</span>
+                    <span className="sidebar-item-icon"><Icon fontSize={18} /></span>
                     {!collapsed && <span className="sidebar-item-label">{item.label}</span>}
                   </button>
                 );
                 return collapsed ? (
-                  <Tooltip key={item.key} title={item.label} placement="right">
+                  <Tooltip key={item.path} title={item.label} placement="right">
                     {btn}
                   </Tooltip>
                 ) : btn;
@@ -140,5 +91,4 @@ export const MainLayout = ({ children }: { children: ReactNode }) => {
     </div>
   );
 };
-
 

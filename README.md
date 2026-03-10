@@ -1,163 +1,58 @@
-# 🎨 HelloUI
+﻿# HelloUI
 
-> **基于 SD.cpp 引擎的现代化 AI 创作桌面工作站**
->
-> 为创意而生，让 AI 图片与视频生成变得简单、直观且高效。
+> 一个尽量不打扰创作的桌面 AI 工作台。
 
----
+HelloUI 关心两件事：`稳定` 和 `纯粹`。
 
-## ✨ 核心亮点
+- 稳定：从打开应用到拿到结果，尽量少折腾环境、路径和流程
+- 纯粹：功能只服务创作闭环，不把工具本身变成负担
 
-- **🚀 零配置引擎**：集成 SD.cpp，支持 CPU / CUDA / Vulkan 多后端切换，无需繁琐的 Python 环境配置。
-- **🧩 智能模型组**：独创的"模型组"管理逻辑，将 SD 模型、VAE、文本编码器解耦组合，并支持任务标签匹配。
-- **🎭 全栈创作流**：从文生图、图生图、图片编辑、上采样到视频生成（本地 + 云端），覆盖全链路 AI 创作。
-- **📊 结果实验室**：统一管理生成历史，支持双图实时对比、元数据查看及批量管理。
-- **💻 现代化体验**：基于 Fluent UI (WinUI 3 风格) 设计，极致响应式体验，预置多套主题方案（含深色/浅色模式）。
+如果你只是想直接开始使用，**不需要了解 `pnpm`，也不需要自己跑开发环境**。
 
----
+## 下载
 
-## 🛠️ 功能概览
+请直接前往 GitHub Releases 下载：
 
-### 1. 模型权重与管理
+- 最新版本：`https://github.com/Puiching-Memory/HelloUI/releases/latest`
+- 所有版本：`https://github.com/Puiching-Memory/HelloUI/releases`
 
-- **资产中心**：一站式管理 SD、VAE、LLM/CLIP、ControlNet 等权重文件。
-- **智能过滤**：根据任务类型（生成/编辑/视频/上采样）自动筛选匹配的模型组。
-- **模型组导入/导出**：支持模型组配置打包分享与一键导入。
-- **资源监控**：实时检查权重文件夹状态。
+下载对应你系统的安装包或压缩包，安装后直接打开即可。
 
-### 2. 多维图片创作
+## 你可以用它做什么
 
-- **专业级参数**：精细控制采样步数、Cfg Scale、种子点、采样方法及调度器。
-- **实时预览**：生成过程通过渲染进程实时呈现，进度清晰可见。
-- **高清修复**：内置超分辨率模型，一键提升图片清晰度。
-- **图片编辑**：支持基于参考图的 AI 图片编辑能力。
+- 管理模型权重和 `SD.cpp` 引擎
+- 用节点工作台组织生成流程
+- 浏览、导出和清理生成结果
+- 在同一个应用里完成从准备到产出的基本闭环
 
-### 3. 本地与云端视频
+## 三步开始使用
 
-- **本地创作**：深度集成 Wan2.2 引擎，支持本地生成高质量视频。
-- **云端扩展**：完美接入阿里通义万相 API，提供文生视频的云端加速方案。
+1. 打开 `引擎管理`，准备 `SD.cpp`
+2. 打开 `模型权重管理`，设置模型目录或导入模型组
+3. 打开 `节点工作台`，开始组织你的生成流程
 
-### 4. 结果管理与对比
+## 常用页面
 
-- **画廊视图**：瀑布流展示生成作品，支持按任务类型筛选。
-- **参数回溯**：完整记录每次生成的提示词与技术细节。
-- **像素对比**：内置滑动对比组件，直观感受 AI 修改前后的细微差异。
-- **批量操作**：支持批量下载与删除生成结果。
+- `首页`：看总览和最近结果
+- `节点工作台`：搭工作流
+- `模型权重管理`：管模型和模型组
+- `引擎管理`：管引擎和运行资源
+- `生成结果`：看图、导出、删除
+- `Perfect Pixel`：做图像精修
 
----
+## 默认目录
 
-## 🚀 快速开始
+应用默认会在运行目录下使用这些路径：
 
-### 前提条件
+- `models/`：模型与 `model-groups.json`
+- `engines/sdcpp/`：`SD.cpp` 引擎
+- `engines/ffmpeg/`：视频相关资源
+- `outputs/`：生成结果与元数据
 
-- **Node.js**: >= 18.x
-- **pnpm**: >= 8.x
-- **Rust**: >= 1.77（建议使用 rustup 安装稳定版）
-- **Tauri 构建环境**: 请按 [Tauri 官方文档](https://tauri.app/start/prerequisites/) 安装平台依赖（Windows 需安装 WebView2 与 Visual Studio C++ 构建工具）
+## 给开发者
 
-### 安装与运行
+如果你是开发者，项目结构和本地开发说明见 `docs/DEVELOPER.md:1`。
 
-```bash
-# 克隆仓库并安装依赖
-pnpm install
+## License
 
-# 启动桌面应用开发模式（Tauri + Vite，支持热重载）
-pnpm run dev
-
-# 构建桌面安装包（由 Tauri bundle 生成）
-pnpm run build
-```
-
-### 常用命令
-
-```bash
-pnpm run dev              # 启动开发模式（Tauri 桌面应用）
-pnpm run dev:frontend     # 仅启动前端 Vite 开发服务器
-pnpm run build            # 构建并打包桌面应用（Tauri）
-pnpm run build:frontend   # 仅构建前端静态资源
-pnpm run preview          # 预览前端构建产物
-pnpm run typecheck        # TypeScript 类型检查
-pnpm run lint             # ESLint 代码检查
-pnpm run lint:fix         # ESLint 自动修复
-pnpm run format           # Prettier 格式化
-pnpm run format:check     # Prettier 格式检查
-pnpm run test             # 运行测试
-pnpm run test:watch       # 监听模式运行测试
-pnpm run test:coverage    # 运行测试并生成覆盖率报告
-```
-
----
-
-## 📂 项目架构
-
-```text
-HelloUI/
-├── src-tauri/            # 桌面宿主层（Tauri v2 / Rust）
-│   ├── src/main.rs       # Tauri 主进程入口
-│   ├── src/lib.rs        # 命令注册与应用初始化
-│   ├── src/state.rs      # 后端全局状态
-│   ├── src/commands/     # Tauri commands（按功能拆分）
-│   │   ├── generate.rs
-│   │   ├── video_generate.rs
-│   │   ├── weights.rs
-│   │   ├── model_groups.rs
-│   │   ├── sdcpp.rs
-│   │   ├── dialog.rs
-│   │   ├── system.rs
-│   │   ├── generated_images.rs
-│   │   ├── model_download.rs
-│   │   └── perfect_pixel.rs
-│   └── tauri.conf.json   # Tauri 构建、窗口与资源配置
-├── src/                  # 渲染进程：React UI 层
-│   ├── pages/            # 页面组件（13 个功能页面）
-│   ├── components/       # 通用组件（布局、命令行面板、对话框）
-│   ├── hooks/            # 自定义 Hooks（状态、IPC 监听、模型组）
-│   ├── styles/           # 样式文件
-│   ├── theme/            # 主题配置（多主题方案）
-│   ├── types/            # 前端类型定义
-│   └── utils/            # 前端工具函数
-├── shared/               # 通用层：前后端共享的 IPC 协议、类型与常量
-│   ├── ipc.ts            # IPC 通道与类型签名定义
-│   └── types.ts          # 共享类型（模型组、生成参数等）
-├── engines/              # 引擎层：预置 ffmpeg 与 sdcpp 核心组件
-└── models/               # 模型层：模型权重与模型组配置
-```
-
----
-
-## 🛠️ 技术栈
-
-| 层级         | 技术                                    |
-| ------------ | --------------------------------------- |
-| **桌面框架** | Tauri 2 + Vite 7                        |
-| **后端**     | Rust 2021 + Tauri Plugins               |
-| **前端**     | React 19 + TypeScript 5                 |
-| **UI 组件**  | Fluent UI React v9                      |
-| **状态管理** | Zustand                                 |
-| **路由**     | React Router v7 (Hash 模式)             |
-| **AI 引擎**  | SD.cpp (Stable Diffusion)               |
-| **视频处理** | FFmpeg                                  |
-| **测试**     | Vitest + Testing Library                |
-| **代码规范** | ESLint + Prettier + Husky + lint-staged |
-
----
-
-## 📡 数据存储
-
-- **模型配置**：`models/model-groups.json`
-- **生成记录**：`outputs/` (JSON 元数据 + 媒体文件)
-- **应用持久化**：使用浏览器 `localStorage` 存储偏好设置（如主题、API Key）。
-
----
-
-## 📜 许可证
-
-本项目采用 [MIT License](LICENSE) 许可协议。
-
----
-
-## 🙏 致谢
-
-- **[SD.cpp](https://github.com/leejet/stable-diffusion.cpp)**：提供强大的底层生成能力。
-- **[Catppuccin](https://github.com/catppuccin/catppuccin)**：极简悦目的配色方案。
-- **[Fluent UI](https://react.fluentui.dev/)**：让界面如同原生系统般精致。
+`MIT`

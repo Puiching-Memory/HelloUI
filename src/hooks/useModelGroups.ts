@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { ModelGroup, TaskType } from '../../shared/types'
-import { ipcInvoke } from '../lib/tauriIpc'
+import { modelWeightsService } from '@/features/model-weights/services/modelWeightsService'
 
 type FileStatus = { file: string; exists: boolean; size?: number; verified: boolean; expectedSize?: number }
 
@@ -17,7 +17,7 @@ export function useModelGroups(taskType: TaskType) {
   const loadModelGroups = useCallback(async () => {
     try {
       setLoading(true)
-      const groups = await ipcInvoke('model-groups:list')
+      const groups = await modelWeightsService.listModelGroups()
       const filtered = (groups || []).filter((g) => g.taskType === taskType)
       setModelGroups(filtered)
     } catch (error) {
@@ -32,7 +32,7 @@ export function useModelGroups(taskType: TaskType) {
     const statusMap: Record<string, FileStatus[]> = {}
     for (const group of modelGroups) {
       try {
-        const result = await ipcInvoke('models:check-files', { groupId: group.id })
+        const result = await modelWeightsService.checkModelGroupFiles(group.id)
         statusMap[group.id] = result
       } catch (error) {
         console.error(`Failed to check files for group ${group.id}:`, error)

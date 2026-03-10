@@ -14,26 +14,20 @@ import {
   Checkbox,
   Text,
   Slider,
-} from '@/ui/components';
-import {
-  ImageAddRegular,
-  DocumentArrowDownRegular,
-  ArrowUploadRegular,
-  DismissRegular,
-  ImageRegular,
-} from '@/ui/icons';
-import { PhotoView } from 'react-photo-view';
-import { useState, useCallback, useRef, useEffect } from 'react';
-import { useSharedStyles } from '../styles/sharedStyles';
-import { MessageDialog, useMessageDialog } from '../components/MessageDialog';
-import { ipcInvoke } from '../lib/tauriIpc';
+} from '@/ui/components'
+import { ImageAddRegular, DocumentArrowDownRegular, ArrowUploadRegular, DismissRegular, ImageRegular } from '@/ui/icons'
+import { perfectPixelService } from '@/features/perfect-pixel/services/perfectPixelService'
+import { PhotoView } from 'react-photo-view'
+import { useState, useCallback, useRef, useEffect } from 'react'
+import { useSharedStyles } from '../styles/sharedStyles'
+import { MessageDialog, useMessageDialog } from '../components/MessageDialog'
 import {
   getPerfectPixel,
   imageToRGB,
   resultToDataURL,
   type SampleMethod,
   type PerfectPixelResult,
-} from '../utils/perfectPixel';
+} from '../utils/perfectPixel'
 
 const useLocalStyles = makeStyles({
   // 左右分栏预览区
@@ -168,87 +162,90 @@ const useLocalStyles = makeStyles({
     display: 'flex',
     gap: tokens.spacingHorizontalS,
   },
-});
+})
 
 export const PerfectPixelPage = () => {
-  const sharedStyles = useSharedStyles();
-  const styles = useLocalStyles();
-  const msgDialog = useMessageDialog();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const sharedStyles = useSharedStyles()
+  const styles = useLocalStyles()
+  const msgDialog = useMessageDialog()
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [loadedImage, setLoadedImage] = useState<HTMLImageElement | null>(null);
-  const [processing, setProcessing] = useState(false);
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [loadedImage, setLoadedImage] = useState<HTMLImageElement | null>(null)
+  const [processing, setProcessing] = useState(false)
 
   // 结果
-  const [resultData, setResultData] = useState<PerfectPixelResult | null>(null);
-  const [resultScaledUrl, setResultScaledUrl] = useState<string | null>(null);
-  const [resultOriginalUrl, setResultOriginalUrl] = useState<string | null>(null);
+  const [resultData, setResultData] = useState<PerfectPixelResult | null>(null)
+  const [resultScaledUrl, setResultScaledUrl] = useState<string | null>(null)
+  const [resultOriginalUrl, setResultOriginalUrl] = useState<string | null>(null)
   // 输出面板显示哪张图：original | scaled
-  const [outputView, setOutputView] = useState<'original' | 'scaled'>('scaled');
+  const [outputView, setOutputView] = useState<'original' | 'scaled'>('scaled')
 
   // 参数
-  const [sampleMethod, setSampleMethod] = useState<SampleMethod>('center');
-  const [manualGrid, setManualGrid] = useState(false);
-  const [gridWidth, setGridWidth] = useState<number>(32);
-  const [gridHeight, setGridHeight] = useState<number>(32);
-  const [minSize, setMinSize] = useState<number>(4);
-  const [peakWidth, setPeakWidth] = useState<number>(6);
-  const [refineIntensity, setRefineIntensity] = useState<number>(0.25);
-  const [fixSquare, setFixSquare] = useState(true);
-  const [outputScale, setOutputScale] = useState<number>(8);
+  const [sampleMethod, setSampleMethod] = useState<SampleMethod>('center')
+  const [manualGrid, setManualGrid] = useState(false)
+  const [gridWidth, setGridWidth] = useState<number>(32)
+  const [gridHeight, setGridHeight] = useState<number>(32)
+  const [minSize, setMinSize] = useState<number>(4)
+  const [peakWidth, setPeakWidth] = useState<number>(6)
+  const [refineIntensity, setRefineIntensity] = useState<number>(0.25)
+  const [fixSquare, setFixSquare] = useState(true)
+  const [outputScale, setOutputScale] = useState<number>(8)
 
   const loadImageFromDataUrl = useCallback((dataUrl: string) => {
-    setImagePreview(dataUrl);
-    setResultData(null);
-    setResultScaledUrl(null);
-    setResultOriginalUrl(null);
+    setImagePreview(dataUrl)
+    setResultData(null)
+    setResultScaledUrl(null)
+    setResultOriginalUrl(null)
 
-    const img = new Image();
-    img.onload = () => setLoadedImage(img);
-    img.src = dataUrl;
-  }, []);
+    const img = new Image()
+    img.onload = () => setLoadedImage(img)
+    img.src = dataUrl
+  }, [])
 
   // 选择图片：Tauri IPC 或浏览器文件选择
   const selectImage = useCallback(async () => {
     try {
-      const filePath = await ipcInvoke('perfect-pixel:select-image');
-      if (!filePath) return;
-      const dataUrl = await ipcInvoke('perfect-pixel:read-image', filePath);
-      loadImageFromDataUrl(dataUrl);
+      const filePath = await perfectPixelService.selectImage()
+      if (!filePath) return
+      const dataUrl = await perfectPixelService.readImage(filePath)
+      loadImageFromDataUrl(dataUrl)
     } catch {
-      fileInputRef.current?.click();
+      fileInputRef.current?.click()
     }
-  }, [loadImageFromDataUrl]);
+  }, [loadImageFromDataUrl])
 
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => loadImageFromDataUrl(reader.result as string);
-    reader.readAsDataURL(file);
-    e.target.value = '';
-  }, [loadImageFromDataUrl]);
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = () => loadImageFromDataUrl(reader.result as string)
+      reader.readAsDataURL(file)
+      e.target.value = ''
+    },
+    [loadImageFromDataUrl],
+  )
 
   const removeImage = useCallback(() => {
-    setImagePreview(null);
-    setLoadedImage(null);
-    setResultData(null);
-    setResultScaledUrl(null);
-    setResultOriginalUrl(null);
-  }, []);
+    setImagePreview(null)
+    setLoadedImage(null)
+    setResultData(null)
+    setResultScaledUrl(null)
+    setResultOriginalUrl(null)
+  }, [])
 
   const processImage = useCallback(async () => {
-    if (!loadedImage) return;
-    setProcessing(true);
-    setResultData(null);
-    setResultScaledUrl(null);
-    setResultOriginalUrl(null);
+    if (!loadedImage) return
+    setProcessing(true)
+    setResultData(null)
+    setResultScaledUrl(null)
+    setResultOriginalUrl(null)
 
     // 放到 setTimeout 让 UI 有机会渲染 loading 状态
     setTimeout(() => {
       try {
-        const { data: rgbData, width, height } = imageToRGB(loadedImage);
+        const { data: rgbData, width, height } = imageToRGB(loadedImage)
 
         const result = getPerfectPixel(rgbData, width, height, {
           sampleMethod,
@@ -257,93 +254,112 @@ export const PerfectPixelPage = () => {
           peakWidth,
           refineIntensity,
           fixSquare,
-        });
+        })
 
         if (!result) {
-          msgDialog.showMessage('处理失败', '无法检测网格大小。请尝试手动设置网格尺寸，或选择一张网格更明显的像素风格图片。');
-          setProcessing(false);
-          return;
+          msgDialog.showMessage(
+            '处理失败',
+            '无法检测网格大小。请尝试手动设置网格尺寸，或选择一张网格更明显的像素风格图片。',
+          )
+          setProcessing(false)
+          return
         }
 
-        setResultData(result);
-        setResultOriginalUrl(resultToDataURL(result, 1));
-        setResultScaledUrl(resultToDataURL(result, outputScale));
+        setResultData(result)
+        setResultOriginalUrl(resultToDataURL(result, 1))
+        setResultScaledUrl(resultToDataURL(result, outputScale))
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        msgDialog.showMessage('错误', message || '处理过程中出错');
+        const message = err instanceof Error ? err.message : String(err)
+        msgDialog.showMessage('错误', message || '处理过程中出错')
       } finally {
-        setProcessing(false);
+        setProcessing(false)
       }
-    }, 50);
-  }, [loadedImage, sampleMethod, manualGrid, gridWidth, gridHeight, minSize, peakWidth, refineIntensity, fixSquare, outputScale, msgDialog]);
+    }, 50)
+  }, [
+    loadedImage,
+    sampleMethod,
+    manualGrid,
+    gridWidth,
+    gridHeight,
+    minSize,
+    peakWidth,
+    refineIntensity,
+    fixSquare,
+    outputScale,
+    msgDialog,
+  ])
 
   // 参数变化时自动处理（防抖 300ms）
-  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isFirstRenderRef = useRef(true);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isFirstRenderRef = useRef(true)
 
   useEffect(() => {
     // 跳过首次渲染
     if (isFirstRenderRef.current) {
-      isFirstRenderRef.current = false;
-      return;
+      isFirstRenderRef.current = false
+      return
     }
-    if (!loadedImage) return;
+    if (!loadedImage) return
 
     if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
+      clearTimeout(debounceTimerRef.current)
     }
     debounceTimerRef.current = setTimeout(() => {
-      processImage();
-    }, 300);
+      processImage()
+    }, 300)
 
     return () => {
       if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
+        clearTimeout(debounceTimerRef.current)
       }
-    };
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sampleMethod, manualGrid, gridWidth, gridHeight, minSize, peakWidth, refineIntensity, fixSquare, outputScale]);
+  }, [sampleMethod, manualGrid, gridWidth, gridHeight, minSize, peakWidth, refineIntensity, fixSquare, outputScale])
 
   // 加载新图片后立即处理
   useEffect(() => {
     if (loadedImage) {
-      processImage();
+      processImage()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadedImage]);
+  }, [loadedImage])
 
   const downloadImage = useCallback((dataUrl: string, suffix: string) => {
-    const a = document.createElement('a');
-    a.href = dataUrl;
-    a.download = `perfect_pixel_${suffix}_${Date.now()}.png`;
-    a.click();
-  }, []);
+    const a = document.createElement('a')
+    a.href = dataUrl
+    a.download = `perfect_pixel_${suffix}_${Date.now()}.png`
+    a.click()
+  }, [])
 
-  const saveImage = useCallback(async (dataUrl: string, suffix: string) => {
-    try {
-      const result = await ipcInvoke('perfect-pixel:save', dataUrl);
-      if (result.success) {
-        msgDialog.showMessage('保存成功', `文件已保存到: ${result.filePath}`);
+  const saveImage = useCallback(
+    async (dataUrl: string, suffix: string) => {
+      try {
+        const result = await perfectPixelService.saveImage(dataUrl)
+        if (result.success) {
+          msgDialog.showMessage('保存成功', `文件已保存到: ${result.filePath}`)
+        }
+      } catch {
+        downloadImage(dataUrl, suffix)
       }
-    } catch {
-      downloadImage(dataUrl, suffix);
-    }
-  }, [msgDialog, downloadImage]);
+    },
+    [msgDialog, downloadImage],
+  )
 
   // 当前输出图
-  const currentOutputUrl = outputView === 'scaled' ? resultScaledUrl : resultOriginalUrl;
-  const currentOutputLabel = outputView === 'scaled'
-    ? `${outputScale}x 放大 (${(resultData?.width ?? 0) * outputScale}×${(resultData?.height ?? 0) * outputScale})`
-    : `原始尺寸 (${resultData?.width ?? 0}×${resultData?.height ?? 0})`;
+  const currentOutputUrl = outputView === 'scaled' ? resultScaledUrl : resultOriginalUrl
+  const currentOutputLabel =
+    outputView === 'scaled'
+      ? `${outputScale}x 放大 (${(resultData?.width ?? 0) * outputScale}×${(resultData?.height ?? 0) * outputScale})`
+      : `原始尺寸 (${resultData?.width ?? 0}×${resultData?.height ?? 0})`
 
   return (
-    <div className={`${sharedStyles.container} pencil-page`}>
-      <header className="pencil-page-header">
-        <div className="pencil-page-title-row">
-          <Title1 className="pencil-page-title">Perfect Pixel — 像素画精修</Title1>
-          <span className="pencil-page-kicker">PIXEL LAB</span>
+    <div className={`${sharedStyles.container} app-page`}>
+      <header className="app-page-header">
+        <div className="app-page-header-main">
+          <Title1 className="app-page-title">Perfect Pixel — 像素画精修</Title1>
+          <span className="app-page-tag">PIXEL LAB</span>
         </div>
-        <Body1 className="pencil-page-description">
+        <Body1 className="app-page-description">
           对像素图进行网格修复、边缘提纯和放大输出，支持参数回调与双结果视图切换。
         </Body1>
       </header>
@@ -370,21 +386,19 @@ export const PerfectPixelPage = () => {
             {processing ? '处理中...' : '重新处理'}
           </Button>
 
-          <Button
-            icon={<ArrowUploadRegular />}
-            onClick={selectImage}
-            disabled={processing}
-          >
+          <Button icon={<ArrowUploadRegular />} onClick={selectImage} disabled={processing}>
             {imagePreview ? '重新选择图片' : '选择图片'}
           </Button>
 
           {resultScaledUrl && (
             <Button
               icon={<DocumentArrowDownRegular />}
-              onClick={() => saveImage(
-                outputView === 'scaled' ? resultScaledUrl! : resultOriginalUrl!,
-                outputView === 'scaled' ? `${outputScale}x` : 'original'
-              )}
+              onClick={() =>
+                saveImage(
+                  outputView === 'scaled' ? resultScaledUrl! : resultOriginalUrl!,
+                  outputView === 'scaled' ? `${outputScale}x` : 'original',
+                )
+              }
             >
               保存当前结果
             </Button>
@@ -422,11 +436,7 @@ export const PerfectPixelPage = () => {
                     size="small"
                   />
                   <PhotoView src={imagePreview}>
-                    <img
-                      src={imagePreview}
-                      alt="输入图片"
-                      className={styles.paneImage}
-                    />
+                    <img src={imagePreview} alt="输入图片" className={styles.paneImage} />
                   </PhotoView>
                 </>
               )}
@@ -466,14 +476,12 @@ export const PerfectPixelPage = () => {
                 <>
                   <Text className={styles.infoText} style={{ marginBottom: tokens.spacingVerticalS }}>
                     {currentOutputLabel}{' '}
-                    <span className={styles.badge}>{resultData!.width}×{resultData!.height} 像素</span>
+                    <span className={styles.badge}>
+                      {resultData!.width}×{resultData!.height} 像素
+                    </span>
                   </Text>
                   <PhotoView src={currentOutputUrl}>
-                    <img
-                      src={currentOutputUrl}
-                      alt="输出结果"
-                      className={styles.paneImagePixelated}
-                    />
+                    <img src={currentOutputUrl} alt="输出结果" className={styles.paneImagePixelated} />
                   </PhotoView>
                 </>
               ) : (
@@ -497,11 +505,11 @@ export const PerfectPixelPage = () => {
                 value={sampleMethod === 'center' ? '中心采样' : sampleMethod === 'median' ? '中值采样' : '多数表决'}
                 onOptionSelect={(_: any, data: any) => {
                   const map: Record<string, SampleMethod> = {
-                    '中心采样': 'center',
-                    '中值采样': 'median',
-                    '多数表决': 'majority',
-                  };
-                  setSampleMethod(map[data.optionValue as string] ?? 'center');
+                    中心采样: 'center',
+                    中值采样: 'median',
+                    多数表决: 'majority',
+                  }
+                  setSampleMethod(map[data.optionValue as string] ?? 'center')
                 }}
               >
                 <Option value="中心采样">中心采样（最快）</Option>
@@ -541,19 +549,11 @@ export const PerfectPixelPage = () => {
 
           <div className={styles.paramRow}>
             <Field label="最小像素尺寸" className={styles.paramField}>
-              <SpinButton
-                value={minSize}
-                onChange={(_: any, data: any) => setMinSize(data.value ?? 4)}
-                min={1}
-              />
+              <SpinButton value={minSize} onChange={(_: any, data: any) => setMinSize(data.value ?? 4)} min={1} />
             </Field>
 
             <Field label="峰值检测宽度" className={styles.paramField}>
-              <SpinButton
-                value={peakWidth}
-                onChange={(_: any, data: any) => setPeakWidth(data.value ?? 6)}
-                min={1}
-              />
+              <SpinButton value={peakWidth} onChange={(_: any, data: any) => setPeakWidth(data.value ?? 6)} min={1} />
             </Field>
           </div>
 
@@ -590,8 +590,12 @@ export const PerfectPixelPage = () => {
         </div>
       </Card>
 
-      <MessageDialog open={msgDialog.open} title={msgDialog.title} message={msgDialog.message} onClose={msgDialog.close} />
+      <MessageDialog
+        open={msgDialog.open}
+        title={msgDialog.title}
+        message={msgDialog.message}
+        onClose={msgDialog.close}
+      />
     </div>
-  );
-};
-
+  )
+}

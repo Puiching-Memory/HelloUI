@@ -40,10 +40,10 @@ import {
   PlugConnectedRegular,
   TopSpeedRegular,
 } from '@/ui/icons'
+import { sdcppService } from '@/features/sdcpp/services/sdcppService'
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { useIpcListener } from '../hooks/useIpcListener'
 import { useTaskbarProgress } from '../hooks/useTaskbarProgress'
-import { ipcInvoke } from '../lib/tauriIpc'
 import type {
   DeviceType,
   MirrorSource,
@@ -457,9 +457,9 @@ export const SDCppPage = () => {
 
   const loadEngineFolder = async () => {
     try {
-      let folder = await ipcInvoke('sdcpp:get-folder')
+      let folder = await sdcppService.getFolder()
       if (!folder) {
-        folder = await ipcInvoke('sdcpp:init-default-folder')
+        folder = await sdcppService.initDefaultFolder()
       }
       if (folder) {
         setEngineFolder(folder)
@@ -478,7 +478,7 @@ export const SDCppPage = () => {
       const deviceTypes: DeviceType[] = ['cpu', 'vulkan', 'cuda', 'rocm']
       const allFilesPromises = deviceTypes.map(async (deviceType) => {
         try {
-          const result = await ipcInvoke('sdcpp:list-files', engineFolder, deviceType)
+          const result = await sdcppService.listFiles(engineFolder, deviceType)
           const deviceFiles = (result?.files || []).map((file: Omit<EngineFile, 'deviceType'>) => ({
             ...file,
             deviceType,
@@ -524,14 +524,14 @@ export const SDCppPage = () => {
       return
     }
 
-    const exists = await ipcInvoke('sdcpp:check-folder', nextFolder)
+    const exists = await sdcppService.checkFolder(nextFolder)
     if (!exists) {
       setMessageDialogContent({ title: '错误', message: '文件夹不存在，请检查路径是否正确' })
       setMessageDialogOpen(true)
       return
     }
 
-    const setResult = await ipcInvoke('sdcpp:set-folder', nextFolder)
+    const setResult = await sdcppService.setFolder(nextFolder)
     if (!setResult) {
       setMessageDialogContent({ title: '错误', message: '设置文件夹路径失败，请重试' })
       setMessageDialogOpen(true)
@@ -548,7 +548,7 @@ export const SDCppPage = () => {
 
   const loadMirrors = async () => {
     try {
-      const result = await ipcInvoke('sdcpp:get-mirrors')
+      const result = await sdcppService.getMirrors()
       setMirrors(result)
     } catch (error) {
       console.error('Failed to load mirrors:', error)
@@ -560,10 +560,7 @@ export const SDCppPage = () => {
     setDownloadError(null)
 
     try {
-      const result = await ipcInvoke('sdcpp:fetch-releases', {
-        mirrorId: selectedMirrorId,
-        count: 10,
-      })
+      const result = await sdcppService.fetchReleases({ mirrorId: selectedMirrorId, count: 10 })
       setReleases(result)
       setSelectedRelease((previous) => {
         if (result.length === 0) return null
@@ -593,11 +590,7 @@ export const SDCppPage = () => {
       })
 
       try {
-        const result = await ipcInvoke('sdcpp:download-engine', {
-          asset,
-          release: selectedRelease,
-          mirrorId: selectedMirrorId,
-        })
+        const result = await sdcppService.downloadEngine(asset, selectedRelease, selectedMirrorId)
 
         if (!result.success) {
           setDownloadError(result.error || '下载失败')
@@ -613,7 +606,7 @@ export const SDCppPage = () => {
 
   const handleCancelDownload = useCallback(async () => {
     try {
-      await ipcInvoke('sdcpp:cancel-download')
+      await sdcppService.cancelDownload()
       setDownloadProgress(null)
     } catch (error) {
       console.error('Failed to cancel download:', error)
@@ -623,7 +616,7 @@ export const SDCppPage = () => {
   const handleTestMirrors = useCallback(async () => {
     setTestingMirrors(true)
     try {
-      const results = await ipcInvoke('sdcpp:test-mirrors')
+      const results = await sdcppService.testMirrors()
       const resultMap: Record<string, MirrorTestResult> = {}
       results.forEach((result) => {
         resultMap[result.mirrorId] = result
@@ -639,7 +632,7 @@ export const SDCppPage = () => {
   const handleAutoSelectMirror = useCallback(async () => {
     setTestingMirrors(true)
     try {
-      const best = await ipcInvoke('sdcpp:auto-select-mirror')
+      const best = await sdcppService.autoSelectMirror()
       setSelectedMirrorId(best.id)
       await handleTestMirrors()
     } catch (error) {
@@ -653,7 +646,7 @@ export const SDCppPage = () => {
     if (!newMirrorName || !newMirrorUrl) return
 
     try {
-      const mirror = await ipcInvoke('sdcpp:add-mirror', {
+      const mirror = await sdcppService.addMirror({
         name: newMirrorName,
         type: 'proxy' as const,
         url: newMirrorUrl.replace(/\/+$/, ''),
@@ -672,7 +665,7 @@ export const SDCppPage = () => {
   const handleRemoveMirror = useCallback(
     async (mirrorId: string) => {
       try {
-        await ipcInvoke('sdcpp:remove-mirror', mirrorId)
+        await sdcppService.removeMirror(mirrorId)
         setMirrors((previous) => previous.filter((mirror) => mirror.id !== mirrorId))
         if (selectedMirrorId === mirrorId) {
           setSelectedMirrorId('github')
@@ -779,13 +772,13 @@ export const SDCppPage = () => {
     : '空闲'
 
   return (
-    <div className={`${styles.container} pencil-page`}>
-      <header className="pencil-page-header">
-        <div className="pencil-page-title-row">
-          <Title1 className="pencil-page-title">SD.cpp 推理引擎</Title1>
-          <span className="pencil-page-kicker">ENGINE</span>
+    <div className={`${styles.container} app-page`}>
+      <header className="app-page-header">
+        <div className="app-page-header-main">
+          <Title1 className="app-page-title">SD.cpp 推理引擎</Title1>
+          <span className="app-page-tag">ENGINE</span>
         </div>
-        <Body1 className="pencil-page-description">
+        <Body1 className="app-page-description">
           用更统一的工作台管理引擎目录、安装状态、版本下载和镜像策略，常用操作保持简洁，高级能力按需展开。
         </Body1>
       </header>
@@ -1199,7 +1192,9 @@ export const SDCppPage = () => {
                                 <Field label="名称" required>
                                   <Input
                                     value={newMirrorName}
-                                    onChange={(_: any, data: any) => setNewMirrorName((data as { value: string }).value)}
+                                    onChange={(_: any, data: any) =>
+                                      setNewMirrorName((data as { value: string }).value)
+                                    }
                                     placeholder="例：我的镜像站"
                                   />
                                 </Field>

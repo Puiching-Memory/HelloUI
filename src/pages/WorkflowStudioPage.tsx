@@ -20,294 +20,48 @@ import {
   VideoClipRegular,
   ZoomInRegular,
 } from '@/ui/icons'
+import {
+  autoArrangeNodes,
+  buildDefaultWorkflow,
+  buildNodeFromDraft,
+  canConnect,
+  createNodeFromTemplate,
+  EMPTY_DRAFT,
+  getExecutionPlan,
+  getNextNodeSeed,
+  getNodeStatus,
+  getNodeSummary,
+  isWorkflowNodeType,
+  loadWorkflowDocument,
+  nodeIOMap,
+  nodeTemplates,
+  nodeToDraft,
+  nodeTypeLabel,
+  suggestNodePosition,
+  validateNode,
+  WORKFLOW_NODE_HEIGHT,
+  WORKFLOW_NODE_WIDTH,
+  WORKFLOW_STORAGE_KEY,
+  wouldCreateCycle,
+} from '@/features/workflow-studio/domain/workflowDomain'
+import type {
+  InspectorDraft,
+  MediaFormat,
+  WorkflowEdge,
+  WorkflowNode,
+  WorkflowNodeStatus,
+  WorkflowNodeType,
+} from '@/features/workflow-studio/types'
 import './WorkflowStudioPage.css'
 
-type WorkflowNodeType =
-  | 'checkpoint'
-  | 'lora'
-  | 'prompt'
-  | 'imageInput'
-  | 'generate'
-  | 'videoGen'
-  | 'upscale'
-  | 'controlNet'
-  | 'output'
-  | 'performance'
-
-type MediaFormat = 'model' | 'prompt' | 'image' | 'control' | 'result' | 'config'
-
-type WorkflowNodeStatus = 'ready' | 'running' | 'idle'
-
-type WorkflowNodeConfig = {
-  // Checkpoint —— --model, --diffusion-model, --vae, --clip_l/g, --t5xxl, --type
-  modelPath?: string
-  diffusionModel?: string
-  vaePath?: string
-  clipL?: string
-  clipG?: string
-  t5xxl?: string
-  weightType?: string
-  // LoRA —— --lora-model-dir
-  loraModelDir?: string
-  // Prompt —— --prompt, --negative-prompt, --clip-skip
-  prompt?: string
-  negativePrompt?: string
-  clipSkip?: number
-  // Image Input —— --init-img, --mask, --strength
-  initImage?: string
-  maskImage?: string
-  strength?: number
-  // Generation —— --width, --height, --steps, --cfg-scale, --seed, --sampling-method, --scheduler, --batch-count, --guidance
-  width?: number
-  height?: number
-  steps?: number
-  cfgScale?: number
-  seed?: number
-  samplingMethod?: string
-  scheduler?: string
-  batchCount?: number
-  guidance?: number
-  // Video —— --video-frames, --fps
-  videoFrames?: number
-  fps?: number
-  // Upscale —— --upscale-model, --upscale-repeats, --upscale-tile-size
-  upscaleModel?: string
-  upscaleRepeats?: number
-  upscaleTileSize?: number
-  // ControlNet —— --control-net, --control-image, --control-strength
-  controlNetPath?: string
-  controlImage?: string
-  controlStrength?: number
-  // Output —— --output, --preview-path
-  outputPath?: string
-  previewPath?: string
-  // Performance —— --threads, --vae-tiling, --offload-to-cpu, --fa
-  threads?: number
-  vaeTiling?: boolean
-  offloadToCpu?: boolean
-  flashAttention?: boolean
-}
-
-type WorkflowNode = {
-  id: string
-  title: string
-  type: WorkflowNodeType
-  x: number
-  y: number
-  description: string
-  config: WorkflowNodeConfig
-}
-
-type WorkflowEdge = {
-  from: string
-  to: string
-}
-
-type WorkflowDocument = {
-  nodes: WorkflowNode[]
-  edges: WorkflowEdge[]
-}
-
-type WorkflowLoadResult = WorkflowDocument & {
-  restored: boolean
-}
-
-type NodeValidation = {
-  ready: boolean
-  issues: string[]
-}
-
-type NodeTemplate = {
-  type: WorkflowNodeType
-  title: string
-  description: string
-  config: WorkflowNodeConfig
-}
-
-type InspectorDraft = {
-  title: string
-  description: string
-  // Checkpoint
-  modelPath: string
-  diffusionModel: string
-  vaePath: string
-  clipL: string
-  clipG: string
-  t5xxl: string
-  weightType: string
-  // LoRA
-  loraModelDir: string
-  // Prompt
-  prompt: string
-  negativePrompt: string
-  clipSkip: string
-  // Image Input
-  initImage: string
-  maskImage: string
-  strength: string
-  // Generation
-  width: string
-  height: string
-  steps: string
-  cfgScale: string
-  seed: string
-  samplingMethod: string
-  scheduler: string
-  batchCount: string
-  guidance: string
-  // Video
-  videoFrames: string
-  fps: string
-  // Upscale
-  upscaleModel: string
-  upscaleRepeats: string
-  upscaleTileSize: string
-  // ControlNet
-  controlNetPath: string
-  controlImage: string
-  controlStrength: string
-  // Output
-  outputPath: string
-  previewPath: string
-  // Performance
-  threads: string
-  vaeTiling: boolean
-  offloadToCpu: boolean
-  flashAttention: boolean
-}
-
-const STORAGE_KEY = 'hello-ui-workflow-studio-v1'
-const NODE_WIDTH = 228
-const NODE_HEIGHT = 132
+const NODE_WIDTH = WORKFLOW_NODE_WIDTH
+const NODE_HEIGHT = WORKFLOW_NODE_HEIGHT
 const WORLD_MIN = -2400
 const WORLD_MAX = 3200
 const TEMPLATE_DRAG_MIME = 'application/x-hello-ui-node-template'
 const ZOOM_MIN = 0.25
 const ZOOM_MAX = 2.0
 const ZOOM_STEP = 0.1
-
-const EMPTY_DRAFT: InspectorDraft = {
-  title: '',
-  description: '',
-  modelPath: '',
-  diffusionModel: '',
-  vaePath: '',
-  clipL: '',
-  clipG: '',
-  t5xxl: '',
-  weightType: '',
-  loraModelDir: '',
-  prompt: '',
-  negativePrompt: '',
-  clipSkip: '',
-  initImage: '',
-  maskImage: '',
-  strength: '0.75',
-  width: '512',
-  height: '512',
-  steps: '20',
-  cfgScale: '7',
-  seed: '',
-  samplingMethod: 'euler_a',
-  scheduler: 'discrete',
-  batchCount: '1',
-  guidance: '3.5',
-  videoFrames: '25',
-  fps: '8',
-  upscaleModel: '',
-  upscaleRepeats: '1',
-  upscaleTileSize: '128',
-  controlNetPath: '',
-  controlImage: '',
-  controlStrength: '0.9',
-  outputPath: '',
-  previewPath: '',
-  threads: '',
-  vaeTiling: false,
-  offloadToCpu: false,
-  flashAttention: false,
-}
-
-const nodeTemplates: NodeTemplate[] = [
-  {
-    type: 'checkpoint',
-    title: '模型加载',
-    description: '加载 Stable Diffusion 模型权重文件。',
-    config: { modelPath: '' },
-  },
-  {
-    type: 'lora',
-    title: 'LoRA',
-    description: '指定 LoRA 模型目录，应用微调权重。',
-    config: { loraModelDir: '' },
-  },
-  {
-    type: 'prompt',
-    title: '提示词',
-    description: '配置正向和反向提示词。',
-    config: { prompt: '', negativePrompt: '' },
-  },
-  {
-    type: 'imageInput',
-    title: '图像输入',
-    description: '加载初始图像或遮罩，用于图生图。',
-    config: { initImage: '', strength: 0.75 },
-  },
-  {
-    type: 'generate',
-    title: '图像生成',
-    description: '配置采样参数并执行文生图或图生图。',
-    config: { width: 512, height: 512, steps: 20, cfgScale: 7, seed: -1, samplingMethod: 'euler_a', scheduler: 'discrete', batchCount: 1 },
-  },
-  {
-    type: 'videoGen',
-    title: '视频生成',
-    description: '从图像生成短视频片段。',
-    config: { videoFrames: 25, fps: 8, steps: 20, cfgScale: 7, samplingMethod: 'euler', scheduler: 'discrete' },
-  },
-  {
-    type: 'upscale',
-    title: '图像放大',
-    description: '使用 ESRGAN 模型放大图像分辨率。',
-    config: { upscaleModel: '', upscaleRepeats: 1, upscaleTileSize: 128 },
-  },
-  {
-    type: 'controlNet',
-    title: 'ControlNet',
-    description: '使用 ControlNet 控制生成结构。',
-    config: { controlNetPath: '', controlImage: '', controlStrength: 0.9 },
-  },
-  {
-    type: 'output',
-    title: '输出保存',
-    description: '设置输出文件路径和预览路径。',
-    config: { outputPath: './output.png' },
-  },
-  {
-    type: 'performance',
-    title: '性能设置',
-    description: '配置线程数、显存优化和加速选项。',
-    config: { threads: -1, vaeTiling: false, offloadToCpu: false, flashAttention: false },
-  },
-]
-
-const templateMap = Object.fromEntries(nodeTemplates.map((template) => [template.type, template])) as Record<
-  WorkflowNodeType,
-  NodeTemplate
->
-
-const nodeTypeLabel: Record<WorkflowNodeType, string> = {
-  checkpoint: '模型加载',
-  lora: 'LoRA',
-  prompt: '提示词',
-  imageInput: '图像输入',
-  generate: '图像生成',
-  videoGen: '视频生成',
-  upscale: '图像放大',
-  controlNet: 'ControlNet',
-  output: '输出保存',
-  performance: '性能设置',
-}
 
 const nodeTypeIcon: Record<WorkflowNodeType, ReactNode> = {
   checkpoint: <ArrowDownloadRegular />,
@@ -329,16 +83,16 @@ const statusText: Record<WorkflowNodeStatus, string> = {
 }
 
 const nodeTypeColor: Record<WorkflowNodeType, string> = {
-  checkpoint: '#5B61B4',
-  lora: '#7E57C2',
-  prompt: '#43A047',
-  imageInput: '#00897B',
-  generate: '#E65100',
-  videoGen: '#AD1457',
-  upscale: '#2E7D32',
-  controlNet: '#6A1B9A',
-  output: '#00695C',
-  performance: '#546E7A',
+  checkpoint: 'var(--app-node-checkpoint)',
+  lora: 'var(--app-node-lora)',
+  prompt: 'var(--app-node-prompt)',
+  imageInput: 'var(--app-node-image-input)',
+  generate: 'var(--app-node-generate)',
+  videoGen: 'var(--app-node-video-gen)',
+  upscale: 'var(--app-node-upscale)',
+  controlNet: 'var(--app-node-control-net)',
+  output: 'var(--app-node-output)',
+  performance: 'var(--app-node-performance)',
 }
 
 const mediaFormatLabel: Record<MediaFormat, string> = {
@@ -351,42 +105,12 @@ const mediaFormatLabel: Record<MediaFormat, string> = {
 }
 
 const mediaFormatColor: Record<MediaFormat, string> = {
-  model: '#B39DDB',
-  prompt: '#A5D6A7',
-  image: '#80CBC4',
-  control: '#FFCC80',
-  result: '#90CAF9',
-  config: '#BDBDBD',
-}
-
-const nodeIOMap: Record<WorkflowNodeType, { inputs: MediaFormat[]; outputs: MediaFormat[] }> = {
-  checkpoint: { inputs: [], outputs: ['model'] },
-  lora: { inputs: ['model'], outputs: ['model'] },
-  prompt: { inputs: [], outputs: ['prompt'] },
-  imageInput: { inputs: [], outputs: ['image'] },
-  generate: { inputs: ['model', 'prompt', 'image', 'control', 'config'], outputs: ['result'] },
-  videoGen: { inputs: ['model', 'prompt', 'image', 'config'], outputs: ['result'] },
-  upscale: { inputs: ['image', 'config'], outputs: ['result'] },
-  controlNet: { inputs: ['image'], outputs: ['control'] },
-  output: { inputs: ['result'], outputs: [] },
-  performance: { inputs: [], outputs: ['config'] },
-}
-
-const validNodeTypes = new Set<WorkflowNodeType>([
-  'checkpoint',
-  'lora',
-  'prompt',
-  'imageInput',
-  'generate',
-  'videoGen',
-  'upscale',
-  'controlNet',
-  'output',
-  'performance',
-])
-
-const isRecord = (value: unknown): value is Record<string, unknown> => {
-  return typeof value === 'object' && value !== null
+  model: 'var(--app-media-model)',
+  prompt: 'var(--app-media-prompt)',
+  image: 'var(--app-media-image)',
+  control: 'var(--app-media-control)',
+  result: 'var(--app-media-result)',
+  config: 'var(--app-media-config)',
 }
 
 const clamp = (value: number, min: number, max: number) => {
@@ -394,500 +118,6 @@ const clamp = (value: number, min: number, max: number) => {
 }
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
-
-const shortText = (value: string | undefined, max = 32) => {
-  if (!value) return '未填写'
-  return value.length > max ? `${value.slice(0, max)}…` : value
-}
-
-const parseOptionalNumber = (value: string): number | undefined => {
-  const trimmed = value.trim()
-  if (!trimmed) return undefined
-  const parsed = Number(trimmed)
-  return Number.isFinite(parsed) ? parsed : undefined
-}
-
-const createNodeFromTemplate = (
-  id: string,
-  type: WorkflowNodeType,
-  x: number,
-  y: number,
-  overrides: Partial<Omit<WorkflowNode, 'id' | 'type' | 'x' | 'y'>> = {},
-): WorkflowNode => {
-  const template = templateMap[type]
-  return {
-    id,
-    type,
-    x,
-    y,
-    title: overrides.title ?? template.title,
-    description: overrides.description ?? template.description,
-    config: { ...template.config, ...(overrides.config ?? {}) },
-  }
-}
-
-const buildDefaultWorkflow = (): WorkflowDocument => {
-  return {
-    nodes: [
-      createNodeFromTemplate('node-1', 'checkpoint', 60, 140),
-      createNodeFromTemplate('node-2', 'prompt', 60, 340),
-      createNodeFromTemplate('node-3', 'generate', 400, 200),
-      createNodeFromTemplate('node-4', 'output', 740, 200),
-    ],
-    edges: [
-      { from: 'node-1', to: 'node-3' },   // model → generate ✅
-      { from: 'node-2', to: 'node-3' },   // prompt → generate ✅
-      { from: 'node-3', to: 'node-4' },   // result → output ✅
-    ],
-  }
-}
-
-const sanitizeNode = (value: unknown, index: number): WorkflowNode | null => {
-  if (!isRecord(value)) return null
-  if (typeof value.id !== 'string' || typeof value.title !== 'string' || typeof value.type !== 'string') return null
-  if (!validNodeTypes.has(value.type as WorkflowNodeType)) return null
-
-  return {
-    id: value.id,
-    title: value.title,
-    type: value.type as WorkflowNodeType,
-    x: typeof value.x === 'number' ? value.x : 48 + (index % 3) * 272,
-    y: typeof value.y === 'number' ? value.y : 72 + Math.floor(index / 3) * 176,
-    description: typeof value.description === 'string' ? value.description : '',
-    config: isRecord(value.config) ? ({ ...value.config } as WorkflowNodeConfig) : {},
-  }
-}
-
-const sanitizeEdges = (nodes: WorkflowNode[], values: unknown[]): WorkflowEdge[] => {
-  const ids = new Set(nodes.map((node) => node.id))
-  const nodeById = new Map(nodes.map((n) => [n.id, n]))
-  const seen = new Set<string>()
-
-  return values.flatMap((value) => {
-    if (!isRecord(value) || typeof value.from !== 'string' || typeof value.to !== 'string') return []
-    if (!ids.has(value.from) || !ids.has(value.to) || value.from === value.to) return []
-
-    const fromNode = nodeById.get(value.from)
-    const toNode = nodeById.get(value.to)
-    if (fromNode && toNode && !canConnect(fromNode.type, toNode.type)) return []
-
-    const key = `${value.from}->${value.to}`
-    if (seen.has(key)) return []
-    seen.add(key)
-
-    return [{ from: value.from, to: value.to }]
-  })
-}
-
-const loadWorkflowDocument = (): WorkflowLoadResult => {
-  const fallback = buildDefaultWorkflow()
-  if (typeof window === 'undefined') return { ...fallback, restored: false }
-
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { ...fallback, restored: false }
-
-    const parsed = JSON.parse(raw)
-    if (!isRecord(parsed) || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
-      return { ...fallback, restored: false }
-    }
-
-    const nodes = parsed.nodes
-      .map((value, index) => sanitizeNode(value, index))
-      .filter((node): node is WorkflowNode => !!node)
-    if (nodes.length === 0) return { ...fallback, restored: false }
-
-    return {
-      nodes,
-      edges: sanitizeEdges(nodes, parsed.edges),
-      restored: true,
-    }
-  } catch {
-    return { ...fallback, restored: false }
-  }
-}
-
-const getNextNodeSeed = (nodes: WorkflowNode[]) => {
-  return (
-    nodes.reduce((maxValue, node) => {
-      const matched = node.id.match(/(?:node-|n)(\d+)$/)
-      const nextValue = matched ? Number(matched[1]) : 0
-      return Number.isFinite(nextValue) ? Math.max(maxValue, nextValue) : maxValue
-    }, 0) + 1
-  )
-}
-
-const nodeToDraft = (node: WorkflowNode | null): InspectorDraft => {
-  if (!node) return { ...EMPTY_DRAFT }
-
-  return {
-    title: node.title,
-    description: node.description,
-    modelPath: node.config.modelPath ?? '',
-    diffusionModel: node.config.diffusionModel ?? '',
-    vaePath: node.config.vaePath ?? '',
-    clipL: node.config.clipL ?? '',
-    clipG: node.config.clipG ?? '',
-    t5xxl: node.config.t5xxl ?? '',
-    weightType: node.config.weightType ?? '',
-    loraModelDir: node.config.loraModelDir ?? '',
-    prompt: node.config.prompt ?? '',
-    negativePrompt: node.config.negativePrompt ?? '',
-    clipSkip: node.config.clipSkip?.toString() ?? '',
-    initImage: node.config.initImage ?? '',
-    maskImage: node.config.maskImage ?? '',
-    strength: node.config.strength?.toString() ?? '0.75',
-    width: node.config.width?.toString() ?? '512',
-    height: node.config.height?.toString() ?? '512',
-    steps: node.config.steps?.toString() ?? '20',
-    cfgScale: node.config.cfgScale?.toString() ?? '7',
-    seed: node.config.seed?.toString() ?? '',
-    samplingMethod: node.config.samplingMethod ?? 'euler_a',
-    scheduler: node.config.scheduler ?? 'discrete',
-    batchCount: node.config.batchCount?.toString() ?? '1',
-    guidance: node.config.guidance?.toString() ?? '3.5',
-    videoFrames: node.config.videoFrames?.toString() ?? '25',
-    fps: node.config.fps?.toString() ?? '8',
-    upscaleModel: node.config.upscaleModel ?? '',
-    upscaleRepeats: node.config.upscaleRepeats?.toString() ?? '1',
-    upscaleTileSize: node.config.upscaleTileSize?.toString() ?? '128',
-    controlNetPath: node.config.controlNetPath ?? '',
-    controlImage: node.config.controlImage ?? '',
-    controlStrength: node.config.controlStrength?.toString() ?? '0.9',
-    outputPath: node.config.outputPath ?? '',
-    previewPath: node.config.previewPath ?? '',
-    threads: node.config.threads?.toString() ?? '',
-    vaeTiling: node.config.vaeTiling ?? false,
-    offloadToCpu: node.config.offloadToCpu ?? false,
-    flashAttention: node.config.flashAttention ?? false,
-  }
-}
-
-const buildNodeFromDraft = (node: WorkflowNode, draft: InspectorDraft): WorkflowNode => {
-  return {
-    ...node,
-    title: draft.title.trim() || templateMap[node.type].title,
-    description: draft.description.trim(),
-    config: {
-      modelPath: draft.modelPath.trim(),
-      diffusionModel: draft.diffusionModel.trim(),
-      vaePath: draft.vaePath.trim(),
-      clipL: draft.clipL.trim(),
-      clipG: draft.clipG.trim(),
-      t5xxl: draft.t5xxl.trim(),
-      weightType: draft.weightType.trim(),
-      loraModelDir: draft.loraModelDir.trim(),
-      prompt: draft.prompt.trim(),
-      negativePrompt: draft.negativePrompt.trim(),
-      clipSkip: parseOptionalNumber(draft.clipSkip),
-      initImage: draft.initImage.trim(),
-      maskImage: draft.maskImage.trim(),
-      strength: parseOptionalNumber(draft.strength),
-      width: parseOptionalNumber(draft.width),
-      height: parseOptionalNumber(draft.height),
-      steps: parseOptionalNumber(draft.steps),
-      cfgScale: parseOptionalNumber(draft.cfgScale),
-      seed: parseOptionalNumber(draft.seed),
-      samplingMethod: draft.samplingMethod.trim(),
-      scheduler: draft.scheduler.trim(),
-      batchCount: parseOptionalNumber(draft.batchCount),
-      guidance: parseOptionalNumber(draft.guidance),
-      videoFrames: parseOptionalNumber(draft.videoFrames),
-      fps: parseOptionalNumber(draft.fps),
-      upscaleModel: draft.upscaleModel.trim(),
-      upscaleRepeats: parseOptionalNumber(draft.upscaleRepeats),
-      upscaleTileSize: parseOptionalNumber(draft.upscaleTileSize),
-      controlNetPath: draft.controlNetPath.trim(),
-      controlImage: draft.controlImage.trim(),
-      controlStrength: parseOptionalNumber(draft.controlStrength),
-      outputPath: draft.outputPath.trim(),
-      previewPath: draft.previewPath.trim(),
-      threads: parseOptionalNumber(draft.threads),
-      vaeTiling: draft.vaeTiling,
-      offloadToCpu: draft.offloadToCpu,
-      flashAttention: draft.flashAttention,
-    },
-  }
-}
-
-const validateNode = (node: WorkflowNode): NodeValidation => {
-  const issues: string[] = []
-
-  switch (node.type) {
-    case 'checkpoint':
-      if (!node.config.modelPath?.trim() && !node.config.diffusionModel?.trim())
-        issues.push('需指定 --model 或 --diffusion-model')
-      break
-    case 'lora':
-      if (!node.config.loraModelDir?.trim()) issues.push('需指定 LoRA 模型目录')
-      break
-    case 'prompt':
-      if (!node.config.prompt?.trim()) issues.push('缺少提示词')
-      break
-    case 'imageInput':
-      if (!node.config.initImage?.trim()) issues.push('未选择初始图像')
-      break
-    case 'generate':
-      if (!node.config.steps || node.config.steps <= 0) issues.push('采样步数需大于 0')
-      break
-    case 'videoGen':
-      if (!node.config.videoFrames || node.config.videoFrames <= 0) issues.push('视频帧数需大于 0')
-      break
-    case 'upscale':
-      if (!node.config.upscaleModel?.trim()) issues.push('未指定超分模型')
-      break
-    case 'controlNet':
-      if (!node.config.controlNetPath?.trim()) issues.push('未指定 ControlNet 模型')
-      break
-    case 'output':
-      if (!node.config.outputPath?.trim()) issues.push('未设置输出路径')
-      break
-    case 'performance':
-      break
-    default:
-      break
-  }
-
-  return { ready: issues.length === 0, issues }
-}
-
-const getNodeSummary = (node: WorkflowNode) => {
-  switch (node.type) {
-    case 'checkpoint':
-      return shortText(node.config.modelPath || node.config.diffusionModel) || '未选择模型'
-    case 'lora':
-      return shortText(node.config.loraModelDir) || '未设置目录'
-    case 'prompt':
-      return shortText(node.config.prompt) || '空提示词'
-    case 'imageInput':
-      return shortText(node.config.initImage) || '未选择图像'
-    case 'generate':
-      return `${node.config.width ?? 512}×${node.config.height ?? 512} · ${node.config.steps ?? 20} steps · CFG ${node.config.cfgScale ?? 7}`
-    case 'videoGen':
-      return `${node.config.videoFrames ?? 25} 帧 · ${node.config.fps ?? 8} fps`
-    case 'upscale':
-      return `${shortText(node.config.upscaleModel) || '未选模型'} · ×${node.config.upscaleRepeats ?? 1}`
-    case 'controlNet':
-      return `${shortText(node.config.controlNetPath) || '未选模型'} · 强度 ${node.config.controlStrength ?? 0.9}`
-    case 'output':
-      return shortText(node.config.outputPath) || './output.png'
-    case 'performance': {
-      const flags: string[] = []
-      if (node.config.vaeTiling) flags.push('VAE Tiling')
-      if (node.config.offloadToCpu) flags.push('CPU 卸载')
-      if (node.config.flashAttention) flags.push('FA')
-      return flags.length > 0 ? flags.join(' · ') : `线程 ${node.config.threads ?? 'auto'}`
-    }
-    default:
-      return node.description || '等待配置'
-  }
-}
-
-const suggestNodePosition = (nodes: WorkflowNode[], anchor: WorkflowNode | null) => {
-  if (!anchor) {
-    const index = nodes.length
-    return {
-      x: 48 + (index % 3) * 272,
-      y: 72 + Math.floor(index / 3) * 176,
-    }
-  }
-
-  const candidateRight = { x: anchor.x + 272, y: anchor.y }
-  if (candidateRight.x <= 928) return candidateRight
-
-  return {
-    x: anchor.x,
-    y: anchor.y + 176,
-  }
-}
-
-const autoArrangeNodes = (nodes: WorkflowNode[], edges: WorkflowEdge[]): WorkflowNode[] => {
-  if (nodes.length === 0) return nodes
-
-  const adjacency = new Map<string, string[]>()
-  const reverseAdj = new Map<string, string[]>()
-  const indegree = new Map<string, number>()
-  nodes.forEach((n) => { adjacency.set(n.id, []); reverseAdj.set(n.id, []); indegree.set(n.id, 0) })
-  edges.forEach((e) => {
-    adjacency.get(e.from)?.push(e.to)
-    reverseAdj.get(e.to)?.push(e.from)
-    indegree.set(e.to, (indegree.get(e.to) ?? 0) + 1)
-  })
-
-  // Longest-path layering for better depth distribution
-  const layer = new Map<string, number>()
-  const visited = new Set<string>()
-  const dfs = (id: string): number => {
-    if (layer.has(id)) return layer.get(id)!
-    if (visited.has(id)) return 0
-    visited.add(id)
-    let maxChild = -1
-    for (const child of adjacency.get(id) ?? []) {
-      maxChild = Math.max(maxChild, dfs(child))
-    }
-    const l = maxChild + 1
-    layer.set(id, l)
-    return l
-  }
-  // Start from roots (indegree 0)
-  const roots = nodes.filter((n) => (indegree.get(n.id) ?? 0) === 0)
-  if (roots.length === 0) roots.push(nodes[0])
-  // Compute layers bottom-up then flip so roots are at layer 0
-  nodes.forEach((n) => dfs(n.id))
-  const maxLayer = Math.max(...Array.from(layer.values()), 0)
-  layer.forEach((v, k) => layer.set(k, maxLayer - v))
-
-  // Group nodes by layer
-  const columns = new Map<number, string[]>()
-  layer.forEach((l, id) => {
-    if (!columns.has(l)) columns.set(l, [])
-    columns.get(l)!.push(id)
-  })
-  const sortedLayers = Array.from(columns.keys()).sort((a, b) => a - b)
-
-  // Barycenter ordering: sort nodes within each layer by average position of neighbors in previous layer
-  const positionInLayer = new Map<string, number>()
-  // Initialize first layer ordering
-  const firstLayer = columns.get(sortedLayers[0]) ?? []
-  firstLayer.forEach((id, i) => positionInLayer.set(id, i))
-
-  for (let li = 1; li < sortedLayers.length; li++) {
-    const col = columns.get(sortedLayers[li]) ?? []
-    const bary = col.map((id) => {
-      const parents = (reverseAdj.get(id) ?? []).filter((p) => positionInLayer.has(p))
-      if (parents.length === 0) return { id, score: Infinity }
-      const avg = parents.reduce((s, p) => s + (positionInLayer.get(p) ?? 0), 0) / parents.length
-      return { id, score: avg }
-    })
-    bary.sort((a, b) => a.score - b.score)
-    const sorted = bary.map((b) => b.id)
-    columns.set(sortedLayers[li], sorted)
-    sorted.forEach((id, i) => positionInLayer.set(id, i))
-  }
-
-  const H_GAP = 280
-  const V_GAP = 48
-  const START_X = 60
-  const START_Y = 60
-
-  const posMap = new Map<string, { x: number; y: number }>()
-  sortedLayers.forEach((l) => {
-    const col = columns.get(l) ?? []
-    col.forEach((id, ri) => {
-      posMap.set(id, { x: START_X + l * H_GAP, y: START_Y + ri * (NODE_HEIGHT + V_GAP) })
-    })
-  })
-
-  // Vertical centering: shift each layer so its center aligns with the median of connected neighbors
-  for (let pass = 0; pass < 4; pass++) {
-    for (let li = 1; li < sortedLayers.length; li++) {
-      const col = columns.get(sortedLayers[li]) ?? []
-      for (const id of col) {
-        const parents = (reverseAdj.get(id) ?? []).filter((p) => posMap.has(p))
-        if (parents.length === 0) continue
-        const avgY = parents.reduce((s, p) => s + (posMap.get(p)!.y), 0) / parents.length
-        const current = posMap.get(id)!
-        posMap.set(id, { x: current.x, y: avgY })
-      }
-    }
-    // Resolve overlaps within each layer
-    for (const l of sortedLayers) {
-      const col = columns.get(l) ?? []
-      const sorted = col.slice().sort((a, b) => (posMap.get(a)!.y) - (posMap.get(b)!.y))
-      for (let i = 1; i < sorted.length; i++) {
-        const prev = posMap.get(sorted[i - 1])!
-        const curr = posMap.get(sorted[i])!
-        const minY = prev.y + NODE_HEIGHT + V_GAP
-        if (curr.y < minY) posMap.set(sorted[i], { x: curr.x, y: minY })
-      }
-    }
-  }
-
-  return nodes.map((n) => {
-    const pos = posMap.get(n.id)
-    return pos ? { ...n, x: pos.x, y: pos.y } : n
-  })
-}
-
-const getExecutionPlan = (nodes: WorkflowNode[], edges: WorkflowEdge[]) => {
-  const adjacency = new Map<string, string[]>()
-  const indegree = new Map<string, number>()
-
-  nodes.forEach((node) => {
-    adjacency.set(node.id, [])
-    indegree.set(node.id, 0)
-  })
-
-  edges.forEach((edge) => {
-    adjacency.get(edge.from)?.push(edge.to)
-    indegree.set(edge.to, (indegree.get(edge.to) ?? 0) + 1)
-  })
-
-  const queue = nodes.filter((node) => (indegree.get(node.id) ?? 0) === 0).map((node) => node.id)
-  const orderedIds: string[] = []
-
-  while (queue.length > 0) {
-    const currentId = queue.shift()
-    if (!currentId) continue
-
-    orderedIds.push(currentId)
-    ;(adjacency.get(currentId) ?? []).forEach((nextId) => {
-      const nextDegree = (indegree.get(nextId) ?? 0) - 1
-      indegree.set(nextId, nextDegree)
-      if (nextDegree === 0) queue.push(nextId)
-    })
-  }
-
-  const unresolvedIds = nodes.map((node) => node.id).filter((id) => !orderedIds.includes(id))
-
-  return {
-    orderedIds,
-    unresolvedIds,
-    hasCycle: unresolvedIds.length > 0,
-  }
-}
-
-const wouldCreateCycle = (edges: WorkflowEdge[], from: string, to: string) => {
-  if (from === to) return true
-
-  const adjacency = new Map<string, string[]>()
-  edges.forEach((edge) => {
-    const current = adjacency.get(edge.from) ?? []
-    current.push(edge.to)
-    adjacency.set(edge.from, current)
-  })
-
-  const visited = new Set<string>()
-  const stack = [to]
-
-  while (stack.length > 0) {
-    const current = stack.pop()
-    if (!current || visited.has(current)) continue
-    if (current === from) return true
-
-    visited.add(current)
-    ;(adjacency.get(current) ?? []).forEach((nextId) => stack.push(nextId))
-  }
-
-  return false
-}
-
-/** Check if the output types of `from` node are compatible with the input types of `to` node */
-const canConnect = (fromType: WorkflowNodeType, toType: WorkflowNodeType): boolean => {
-  const outputs = nodeIOMap[fromType].outputs
-  const inputs = nodeIOMap[toType].inputs
-  if (outputs.length === 0 || inputs.length === 0) return false
-  return outputs.some((f) => inputs.includes(f))
-}
-
-const getNodeStatus = (
-  node: WorkflowNode,
-  validationMap: Map<string, NodeValidation>,
-  runningNodeId: string | null,
-): WorkflowNodeStatus => {
-  if (node.id === runningNodeId) return 'running'
-  return validationMap.get(node.id)?.ready ? 'ready' : 'idle'
-}
 
 type DragState = {
   nodeId: string
@@ -983,7 +213,10 @@ export const WorkflowStudioPage = () => {
     const q = nodeSearchQuery.trim().toLowerCase()
     if (!q) return nodeTemplates
     return nodeTemplates.filter(
-      (t) => t.title.toLowerCase().includes(q) || t.description.toLowerCase().includes(q) || nodeTypeLabel[t.type].toLowerCase().includes(q),
+      (t) =>
+        t.title.toLowerCase().includes(q) ||
+        t.description.toLowerCase().includes(q) ||
+        nodeTypeLabel[t.type].toLowerCase().includes(q),
     )
   }, [nodeSearchQuery])
 
@@ -1009,7 +242,7 @@ export const WorkflowStudioPage = () => {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ nodes, edges }))
+    window.localStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify({ nodes, edges }))
   }, [nodes, edges])
 
   useEffect(() => {
@@ -1462,7 +695,7 @@ export const WorkflowStudioPage = () => {
       const droppedType = (event.dataTransfer.getData(TEMPLATE_DRAG_MIME) ||
         event.dataTransfer.getData('text/plain') ||
         draggingTemplateTypeRef.current) as WorkflowNodeType
-      if (!validNodeTypes.has(droppedType)) return
+      if (!isWorkflowNodeType(droppedType)) return
 
       event.preventDefault()
       setIsCanvasDragOver(false)
@@ -2326,7 +1559,13 @@ export const WorkflowStudioPage = () => {
             </Button>
           </Tooltip>
           <Tooltip title="重置缩放与视角">
-            <Button size="small" onClick={() => { setViewportScale(1); setViewportOffset({ x: 0, y: 0 }) }}>
+            <Button
+              size="small"
+              onClick={() => {
+                setViewportScale(1)
+                setViewportOffset({ x: 0, y: 0 })
+              }}
+            >
               {Math.round(viewportScale * 100)}%
             </Button>
           </Tooltip>
@@ -2408,11 +1647,23 @@ export const WorkflowStudioPage = () => {
                         <span>{template.description}</span>
                         <span className="workflow-node-template-io">
                           {io.inputs.map((f) => (
-                            <span key={`in-${f}`} className="workflow-io-tag is-input" style={{ borderColor: mediaFormatColor[f], color: mediaFormatColor[f] }}>{mediaFormatLabel[f]}</span>
+                            <span
+                              key={`in-${f}`}
+                              className="workflow-io-tag is-input"
+                              style={{ borderColor: mediaFormatColor[f], color: mediaFormatColor[f] }}
+                            >
+                              {mediaFormatLabel[f]}
+                            </span>
                           ))}
                           {io.outputs.length > 0 && <span className="workflow-io-arrow">→</span>}
                           {io.outputs.map((f) => (
-                            <span key={`out-${f}`} className="workflow-io-tag is-output" style={{ background: mediaFormatColor[f] }}>{mediaFormatLabel[f]}</span>
+                            <span
+                              key={`out-${f}`}
+                              className="workflow-io-tag is-output"
+                              style={{ background: mediaFormatColor[f] }}
+                            >
+                              {mediaFormatLabel[f]}
+                            </span>
                           ))}
                         </span>
                       </span>
@@ -2564,28 +1815,20 @@ export const WorkflowStudioPage = () => {
                       style={{ cursor: 'pointer', pointerEvents: 'stroke' }}
                       onClick={(e) => handleEdgeClick(e, edge.from, edge.to)}
                     />
-                    <path
-                      d={path}
-                      className="workflow-link-path"
-                      style={{ stroke: edgeColor }}
-                    />
+                    <path d={path} className="workflow-link-path" style={{ stroke: edgeColor }} />
                   </g>
                 )
               })}
-              {socketDrag && (() => {
-                const x1 = socketDrag.side === 'out' ? socketDrag.startWorldX : socketDrag.currentX
-                const y1 = socketDrag.side === 'out' ? socketDrag.startWorldY : socketDrag.currentY
-                const x2 = socketDrag.side === 'out' ? socketDrag.currentX : socketDrag.startWorldX
-                const y2 = socketDrag.side === 'out' ? socketDrag.currentY : socketDrag.startWorldY
-                const midX = (x1 + x2) / 2
-                const path = `M ${x1},${y1} C ${midX},${y1} ${midX},${y2} ${x2},${y2}`
-                return (
-                  <path
-                    d={path}
-                    className="workflow-link-path is-dragging"
-                  />
-                )
-              })()}
+              {socketDrag &&
+                (() => {
+                  const x1 = socketDrag.side === 'out' ? socketDrag.startWorldX : socketDrag.currentX
+                  const y1 = socketDrag.side === 'out' ? socketDrag.startWorldY : socketDrag.currentY
+                  const x2 = socketDrag.side === 'out' ? socketDrag.currentX : socketDrag.startWorldX
+                  const y2 = socketDrag.side === 'out' ? socketDrag.currentY : socketDrag.startWorldY
+                  const midX = (x1 + x2) / 2
+                  const path = `M ${x1},${y1} C ${midX},${y1} ${midX},${y2} ${x2},${y2}`
+                  return <path d={path} className="workflow-link-path is-dragging" />
+                })()}
             </svg>
 
             {nodes.map((node) => {
@@ -2605,7 +1848,10 @@ export const WorkflowStudioPage = () => {
                   data-node-id={node.id}
                   disabled={isRunning}
                 >
-                  <div className="workflow-node-header" style={{ '--node-color': nodeTypeColor[node.type] } as CSSProperties}>
+                  <div
+                    className="workflow-node-header"
+                    style={{ '--node-color': nodeTypeColor[node.type] } as CSSProperties}
+                  >
                     <span className="workflow-node-icon">{nodeTypeIcon[node.type]}</span>
                     <span className="workflow-node-title">{node.title}</span>
                     <span className={`workflow-node-badge is-${status}`}>{statusText[status]}</span>
@@ -2616,17 +1862,47 @@ export const WorkflowStudioPage = () => {
                   <div className="workflow-node-footer">
                     <span className="workflow-node-io-tags">
                       {nodeIOMap[node.type].inputs.map((f) => (
-                        <span key={`in-${f}`} className="workflow-io-tag is-input" style={{ borderColor: mediaFormatColor[f], color: mediaFormatColor[f] }}>{mediaFormatLabel[f]}</span>
+                        <span
+                          key={`in-${f}`}
+                          className="workflow-io-tag is-input"
+                          style={{ borderColor: mediaFormatColor[f], color: mediaFormatColor[f] }}
+                        >
+                          {mediaFormatLabel[f]}
+                        </span>
                       ))}
                     </span>
                     <span className="workflow-node-io-tags">
                       {nodeIOMap[node.type].outputs.map((f) => (
-                        <span key={`out-${f}`} className="workflow-io-tag is-output" style={{ background: mediaFormatColor[f] }}>{mediaFormatLabel[f]}</span>
+                        <span
+                          key={`out-${f}`}
+                          className="workflow-io-tag is-output"
+                          style={{ background: mediaFormatColor[f] }}
+                        >
+                          {mediaFormatLabel[f]}
+                        </span>
                       ))}
                     </span>
                   </div>
-                  {nodeIOMap[node.type].inputs.length > 0 && <span className="workflow-socket workflow-socket-in" style={{ background: mediaFormatColor[nodeIOMap[node.type].inputs[0]], boxShadow: `0 0 0 1px ${mediaFormatColor[nodeIOMap[node.type].inputs[0]]}` }} onMouseDown={(e) => handleSocketMouseDown(e, node.id, 'in')} />}
-                  {nodeIOMap[node.type].outputs.length > 0 && <span className="workflow-socket workflow-socket-out" style={{ background: mediaFormatColor[nodeIOMap[node.type].outputs[0]], boxShadow: `0 0 0 1px ${mediaFormatColor[nodeIOMap[node.type].outputs[0]]}` }} onMouseDown={(e) => handleSocketMouseDown(e, node.id, 'out')} />}
+                  {nodeIOMap[node.type].inputs.length > 0 && (
+                    <span
+                      className="workflow-socket workflow-socket-in"
+                      style={{
+                        background: mediaFormatColor[nodeIOMap[node.type].inputs[0]],
+                        boxShadow: `0 0 0 1px ${mediaFormatColor[nodeIOMap[node.type].inputs[0]]}`,
+                      }}
+                      onMouseDown={(e) => handleSocketMouseDown(e, node.id, 'in')}
+                    />
+                  )}
+                  {nodeIOMap[node.type].outputs.length > 0 && (
+                    <span
+                      className="workflow-socket workflow-socket-out"
+                      style={{
+                        background: mediaFormatColor[nodeIOMap[node.type].outputs[0]],
+                        boxShadow: `0 0 0 1px ${mediaFormatColor[nodeIOMap[node.type].outputs[0]]}`,
+                      }}
+                      onMouseDown={(e) => handleSocketMouseDown(e, node.id, 'out')}
+                    />
+                  )}
                 </button>
               )
             })}
@@ -2685,7 +1961,11 @@ export const WorkflowStudioPage = () => {
                   </div>
                   <div className="workflow-inspector-group">
                     <label>状态</label>
-                    <Tag color={selectedStatus === 'ready' ? 'success' : selectedStatus === 'running' ? 'warning' : 'default'}>
+                    <Tag
+                      color={
+                        selectedStatus === 'ready' ? 'success' : selectedStatus === 'running' ? 'warning' : 'default'
+                      }
+                    >
                       {statusText[selectedStatus]}
                     </Tag>
                   </div>
@@ -2716,11 +1996,7 @@ export const WorkflowStudioPage = () => {
                       options={connectOptions.map((node) => ({ value: node.id, label: node.title }))}
                       style={{ flex: 1 }}
                     />
-                    <Button
-                      size="small"
-                      onClick={handleConnectSelectedNode}
-                      disabled={isRunning || !connectTargetId}
-                    >
+                    <Button size="small" onClick={handleConnectSelectedNode} disabled={isRunning || !connectTargetId}>
                       添加连线
                     </Button>
                   </div>
@@ -2730,11 +2006,7 @@ export const WorkflowStudioPage = () => {
                       <span className="workflow-empty-text">暂无输出连线</span>
                     ) : (
                       selectedOutgoingTargets.map((targetNode) => (
-                        <Tag
-                          key={targetNode.id}
-                          closable={!isRunning}
-                          onClose={() => handleRemoveEdge(targetNode.id)}
-                        >
+                        <Tag key={targetNode.id} closable={!isRunning} onClose={() => handleRemoveEdge(targetNode.id)}>
                           → {targetNode.title}
                         </Tag>
                       ))
@@ -2752,7 +2024,13 @@ export const WorkflowStudioPage = () => {
                   <Button type="primary" size="small" onClick={handleApplyChanges} disabled={isRunning}>
                     应用更改
                   </Button>
-                  <Button size="small" danger onClick={handleDeleteSelectedNode} disabled={isRunning} icon={<DeleteRegular />}>
+                  <Button
+                    size="small"
+                    danger
+                    onClick={handleDeleteSelectedNode}
+                    disabled={isRunning}
+                    icon={<DeleteRegular />}
+                  >
                     删除节点
                   </Button>
                 </div>
@@ -2770,11 +2048,21 @@ export const WorkflowStudioPage = () => {
           <span>{footerState.text}</span>
         </div>
         <div className="workflow-shortcut-hints">
-          <span className="workflow-shortcut-key"><kbd>Ctrl</kbd>+<kbd>LMB</kbd> 平移</span>
-          <span className="workflow-shortcut-key"><kbd>Scroll</kbd> 缩放</span>
-          <span className="workflow-shortcut-key"><kbd>RMB</kbd> 菜单</span>
-          <span className="workflow-shortcut-key"><kbd>Space</kbd> 执行</span>
-          <span className="workflow-shortcut-key"><kbd>Del</kbd> 删除</span>
+          <span className="workflow-shortcut-key">
+            <kbd>Ctrl</kbd>+<kbd>LMB</kbd> 平移
+          </span>
+          <span className="workflow-shortcut-key">
+            <kbd>Scroll</kbd> 缩放
+          </span>
+          <span className="workflow-shortcut-key">
+            <kbd>RMB</kbd> 菜单
+          </span>
+          <span className="workflow-shortcut-key">
+            <kbd>Space</kbd> 执行
+          </span>
+          <span className="workflow-shortcut-key">
+            <kbd>Del</kbd> 删除
+          </span>
         </div>
         <span className="workflow-status-message">{statusMessage}</span>
       </footer>
