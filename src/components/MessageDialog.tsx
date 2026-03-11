@@ -1,14 +1,15 @@
+import { useCallback, useState } from 'react'
 import {
-  Dialog,
-  DialogSurface,
-  DialogTitle,
-  DialogBody,
-  DialogActions,
-  DialogContent,
   Body1,
   Button,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
+  type DialogOpenChangeData,
 } from '@/ui/components'
-import { useState, useCallback } from 'react'
 
 interface MessageDialogProps {
   open: boolean
@@ -20,19 +21,37 @@ interface MessageDialogProps {
   cancelLabel?: string
 }
 
-export function MessageDialog({ 
-  open, 
-  title = '提示', 
-  message, 
+interface MessageDialogContent {
+  title: string
+  message: string
+}
+
+export interface UseMessageDialogResult {
+  close: () => void
+  confirmAction?: () => void
+  message: string
+  open: boolean
+  showMessage: (title: string, message: string, onConfirm?: () => void) => void
+  title: string
+}
+
+export function MessageDialog({
+  open,
+  title = '提示',
+  message,
   onClose,
   onConfirm,
   confirmLabel = '确定',
-  cancelLabel = '取消'
+  cancelLabel = '取消',
 }: MessageDialogProps) {
   const hasConfirm = !!onConfirm
 
+  const handleOpenChange = (_event: unknown, data: DialogOpenChangeData) => {
+    if (!data.open) onClose()
+  }
+
   return (
-    <Dialog open={open} onOpenChange={(_: any, data: any) => !data.open && onClose()}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogSurface>
         <DialogTitle>{title}</DialogTitle>
         <DialogBody>
@@ -41,15 +60,15 @@ export function MessageDialog({
           </DialogContent>
         </DialogBody>
         <DialogActions>
-          {hasConfirm && (
+          {hasConfirm ? (
             <Button appearance="secondary" onClick={onClose}>
               {cancelLabel}
             </Button>
-          )}
-          <Button 
-            appearance="primary" 
-            onClick={hasConfirm ? () => { onClose(); onConfirm(); } : onClose}
-          >
+          ) : null}
+          <Button appearance="primary" onClick={hasConfirm ? () => {
+            onClose()
+            onConfirm?.()
+          } : onClose}>
             {confirmLabel}
           </Button>
         </DialogActions>
@@ -58,9 +77,9 @@ export function MessageDialog({
   )
 }
 
-export function useMessageDialog() {
+export function useMessageDialog(): UseMessageDialogResult {
   const [open, setOpen] = useState(false)
-  const [content, setContent] = useState<{ title: string; message: string }>({ title: '提示', message: '' })
+  const [content, setContent] = useState<MessageDialogContent>({ title: '提示', message: '' })
   const [confirmAction, setConfirmAction] = useState<(() => void) | undefined>(undefined)
 
   const showMessage = useCallback((title: string, message: string, onConfirm?: () => void) => {
@@ -80,4 +99,3 @@ export function useMessageDialog() {
     confirmAction,
   }
 }
-
