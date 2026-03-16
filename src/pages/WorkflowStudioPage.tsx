@@ -53,6 +53,7 @@ const TEMPLATE_DRAG_MIME = 'application/x-hello-ui-node-template'
 const ZOOM_MIN = 0.25
 const ZOOM_MAX = 2.0
 const ZOOM_STEP = 0.1
+const GRID_BASE_SIZE = 20
 
 const clamp = (value: number, min: number, max: number) => {
   return Math.min(max, Math.max(min, value))
@@ -141,6 +142,7 @@ export const WorkflowStudioPage = () => {
   edgesRef.current = edges
   const [isPanning, setIsPanning] = useState(false)
   const [isCanvasDragOver, setIsCanvasDragOver] = useState(false)
+  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null)
   const [nodeMenu, setNodeMenu] = useState<NodeMenuState | null>(null)
   const [socketDrag, setSocketDrag] = useState<SocketDragState | null>(null)
   const [nodeSearchQuery, setNodeSearchQuery] = useState('')
@@ -665,6 +667,7 @@ export const WorkflowStudioPage = () => {
         originY: node.y,
         moved: false,
       }
+      setDraggingNodeId(nodeId)
     },
     [isRunning, nodes],
   )
@@ -819,6 +822,7 @@ export const WorkflowStudioPage = () => {
         setStatusMessage('已更新节点布局。')
       }
       dragStateRef.current = null
+      setDraggingNodeId(null)
     }
 
     window.addEventListener('mousemove', handleMouseMove)
@@ -965,6 +969,14 @@ export const WorkflowStudioPage = () => {
     }
   }, [edges.length, executionPlan.hasCycle, isRunning, nodes.length, readyCount, runProgress])
 
+  const canvasGridStyle = useMemo<CSSProperties>(() => {
+    const gridSize = GRID_BASE_SIZE * viewportScale
+    return {
+      backgroundPosition: `${viewportOffset.x}px ${viewportOffset.y}px`,
+      backgroundSize: `${gridSize}px ${gridSize}px`,
+    }
+  }, [viewportOffset.x, viewportOffset.y, viewportScale])
+
   return (
     <div className="workflow-page">
       <div className="workflow-toolbar">
@@ -1023,6 +1035,7 @@ export const WorkflowStudioPage = () => {
         <div
           className={`workflow-canvas ${isPanning ? 'is-panning' : ''} ${isCanvasDragOver ? 'is-drag-over' : ''} ${isCtrlPressed && !isRunning ? 'is-pan-ready' : ''}`}
           ref={canvasRef}
+          style={canvasGridStyle}
           onContextMenu={handleCanvasContextMenu}
           onMouseDown={handleCanvasMouseDown}
           onDragEnter={handleCanvasDragEnter}
@@ -1182,7 +1195,7 @@ export const WorkflowStudioPage = () => {
                 <button
                   key={node.id}
                   type="button"
-                  className={`workflow-node ${node.id === selectedNodeId ? 'is-selected' : ''}`}
+                  className={`workflow-node ${node.id === selectedNodeId ? 'is-selected' : ''} ${node.id === draggingNodeId ? 'is-dragging' : ''}`}
                   style={{ left: node.x, top: node.y, '--node-color': nodeTypeColor[node.type] } as CSSProperties}
                   onClick={(event) => {
                     if (event.ctrlKey || suppressClickRef.current) return

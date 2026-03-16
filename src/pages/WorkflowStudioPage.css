@@ -422,8 +422,13 @@
   cursor: default;
 }
 
-.workflow-node:hover:not(:disabled) {
-  box-shadow: 0 4px 16px rgba(var(--shadow-rgb), 0.18);
+.workflow-node.is-dragging {
+  border-color: var(--node-color, var(--primary));
+  box-shadow:
+    0 0 0 1px var(--node-color, var(--primary)),
+    0 12px 32px rgba(var(--shadow-rgb), 0.28);
+  transform: scale(1.015);
+  z-index: 3;
 }
 
 .workflow-canvas.is-panning .workflow-node {
